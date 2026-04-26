@@ -6,6 +6,7 @@ Every other subsystem should be able to exchange data through these models
 from dataclasses import dataclass, field
 from email import message
 from enum import Enum
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 from unittest import result
@@ -132,3 +133,11 @@ class TestRunResult:
             int: Number of test cases with FAILED status.
         """
         return sum(result.status == TestStatus.FAILED for result in self.results)
+
+
+@dataclass
+class LocalizationResult:
+    bug: BugIdentifier
+    ranked_locations: list[str]
+    metadata: dict[str, Any] = field(default_factory=dict)
+
