@@ -20,6 +20,7 @@ class FaultLocalizer(ABC):
     def name(self) -> str:
         raise NotImplementedError
 
+    @abstractmethod
     def localize(
         self, bug: BugIdentifier, checkout: CheckoutResult, test_result: TestRunResult
     ) -> LocalizationResult:

@@ -135,6 +135,8 @@ class TestRunResult:
 
 @dataclass
 class LocalizationResult:
+    """Structured result of fault localization, containing the ranked suspicious code locations for a specific bug and optional metadata"""
+
     bug: BugIdentifier
     ranked_locations: list[str]
     metadata: dict[str, Any] = field(default_factory=dict)
