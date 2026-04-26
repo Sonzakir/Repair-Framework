@@ -4,12 +4,10 @@ Every other subsystem should be able to exchange data through these models
 """
 
 from dataclasses import dataclass, field
-from email import message
+from datetime import datetime
 from enum import Enum
-from importlib import metadata
 from pathlib import Path
 from typing import Any
-from unittest import result
 
 
 ################## Statuses ####################
@@ -141,3 +139,39 @@ class LocalizationResult:
     ranked_locations: list[str]
     metadata: dict[str, Any] = field(default_factory=dict)
 
+
+@dataclass
+class PatchCandidate:
+    """
+    One proposed fix produced by a repair algorithm
+    """
+
+    bug: BugIdentifier
+    patch_id: str
+    summary: str
+    diff_text: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RepairAttemptResult:
+    """
+    Outcome of validating or applying one PatchCandidate
+    """
+
+    bug: BugIdentifier
+    patch: PatchCandidate | None
+    status: RepairStatus
+    validation_summary: str = ""
+
+
+@dataclass
+class EvaluationResult:
+    """
+    Result of one evaluation run for a specific bug, including its execution status and start/end timestamps
+    """
+
+    bug: BugIdentifier
+    status: str
+    started_at: datetime
+    finished_at: datetime
