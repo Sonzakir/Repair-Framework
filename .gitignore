@@ -209,3 +209,4 @@ __marimo__/
 
 # ignore assignment pdfs
 *.pdf
+*.md
