@@ -41,7 +41,7 @@ class BenchmarkAdapter(ABC):
         """
         Returns all known bugs for a given project.
         Args:
-            project (str): _description_
+            project (str): Name of the project (for example black)
 
         Returns:
             list[BugInfo]: _description_
@@ -54,11 +54,11 @@ class BenchmarkAdapter(ABC):
         Checkout a selected buggy program version into the destination directory
         Download and setup this specific buggy version of the code
         Args:
-            bug (BugIdentifier): _description_
-            destination (Path): _description_
+            bug (BugIdentifier): A BugIdentifier model that contains benchmark name, project name , id of this specific bug
+            destination (Path): Working directory of the checked out project
 
         Returns:
-            CheckoutResult: _description_
+            CheckoutResult:  Outcome of a benchmark checkout operation
         """
         raise NotImplementedError
 
