@@ -1,6 +1,39 @@
-"""
-Common interface for the whole repair framework.
-To define and hold  shared domain objects in order to prevent each module invent its own data shapes and the system become inconsistent.
-To centrailize framework-wide contracts and utilities
-To reduce the coupling between feature modules (benchmarks, repair, ...)
-"""
+"""Shared framework models and exceptions."""
+
+from .exceptions import (
+    APRFrameworkError,
+    BenchmarkError,
+    ConfigurationError,
+    EvaluationError,
+)
+from .models import (
+    BugIdentifier,
+    BugInfo,
+    CheckoutResult,
+    EvaluationResult,
+    LocalizationResult,
+    PatchCandidate,
+    RepairAttemptResult,
+    RepairStatus,
+    TestCaseResult,
+    TestRunResult,
+    TestStatus,
+)
+
+__all__ = [
+    "APRFrameworkError",
+    "BenchmarkError",
+    "ConfigurationError",
+    "EvaluationError",
+    "BugIdentifier",
+    "BugInfo",
+    "CheckoutResult",
+    "EvaluationResult",
+    "LocalizationResult",
+    "PatchCandidate",
+    "RepairAttemptResult",
+    "RepairStatus",
+    "TestCaseResult",
+    "TestRunResult",
+    "TestStatus",
+]

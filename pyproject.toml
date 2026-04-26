@@ -9,7 +9,7 @@ authors = [
     {name = "Fazli Soner Kiraz" , email="fazli.kiraz@ruhr-uni-bochum.de"}
 ]
 readme="README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 classifiers = [
     "Development Status :: 3 - Alpha" ,
