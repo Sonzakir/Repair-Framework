@@ -9,9 +9,11 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from os import environ
 from pathlib import Path
 
 from apr_framework.benchmarks.base import BenchmarkAdapter
+from apr_framework.core.exceptions import BenchmarkError, ConfigurationError
 from apr_framework.core.models import (
     BugIdentifier,
     BugInfo,
@@ -92,13 +94,54 @@ class BugsInPyToolchain:
         # git configurations
         git_executable = shutil.which("git")
         if git_executable is None:
-            raise RuntimeError("Git is required to bootstrap BugsInPy")
+            raise ConfigurationError("Git is required to bootstrap BugsInPy")
 
         # clone the repository
         subprocess.run(
             [git_executable, "clone", BUGSINPY_REPOSITORY_URL, str(self.repo_dir)],
             check=True,
             text=True,
+        )
+
+    def ensure_installed(self) -> None:
+        if not self.is_installed():
+            raise BenchmarkError(
+                "BugsInPy is not installed. Run `python -m apr_framework bugsinpy setup` first."
+            )
+
+    def resolve_bash(self) -> str:
+        configured = environ.get("BUGSINPY_BASH")
+        if configured:
+            return configured
+
+        candidate = shutil.which("bash")
+        if candidate:
+            return candidate
+
+        raise ConfigurationError(
+            "A working `bash` executable is required to run BugsInPy commands. "
+            "Run the framework in the provided Docker environment or from a shell where `bash` is on PATH."
+        )
+
+    def run_bugsinpy(
+        self,
+        command_name: str,
+        *args: str,
+        cwd: Path | None = None,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        self.ensure_installed()
+        command = [
+            self.resolve_bash(),
+            str(self.command_path(command_name)),
+            *args,
+        ]
+        return subprocess.run(
+            command,
+            cwd=cwd,
+            check=check,
+            text=True,
+            # capture_output=True,
         )
 
 
@@ -118,6 +161,7 @@ class BugsInPyAdapter(BenchmarkAdapter):
         return self._toolchain
 
     def list_projects(self) -> list[str]:
+        self._toolchain.ensure_installed()
         projects_dir = self._toolchain.repo_dir / "projects"
         return sorted(
             entry.name
@@ -134,7 +178,10 @@ class BugsInPyAdapter(BenchmarkAdapter):
         Returns:
             list[BugInfo]: List of bugs for that projects
         """
+        self._toolchain.ensure_installed()
         bugs_dir = self._toolchain.repo_dir / "projects" / project / "bugs"
+        if not bugs_dir.exists():
+            raise BenchmarkError(f"Unknown BugsInPy project: {project}")
         bug_infos: list[BugInfo] = []
 
         for entry in sorted(bugs_dir.iterdir(), key=lambda path: path.name):
@@ -163,24 +210,16 @@ class BugsInPyAdapter(BenchmarkAdapter):
         """
         destination.mkdir(parents=True, exist_ok=True)
 
-        command = [
-            "bash",
-            str(self._toolchain.command_path("bugsinpy-checkout")),
-            "-p",  # The name of the project
+        completed = self._toolchain.run_bugsinpy(
+            "bugsinpy-checkout",
+            "-p",
             bug.project,
-            "-i",  # ID of the Bug from this project
+            "-i",
             str(bug.bug_id),
             "-v",
-            "0",  # TODO: Currently always checked-out buggy version
-            "-w",  # Working directory
+            "0",
+            "-w",
             str(destination),
-        ]
-
-        completed = subprocess.run(
-            command,
-            check=True,
-            text=True,
-            # BUG: capture_output=True,
         )
 
         project_dir = destination / bug.project
@@ -189,7 +228,7 @@ class BugsInPyAdapter(BenchmarkAdapter):
             bug=bug,
             worktree=project_dir,
             success=True,
-            message=completed.stdout.strip(),
+            message=(completed.stdout or "").strip(),
         )
 
     def prepare_environment(self, checkout: CheckoutResult) -> None:
@@ -200,10 +239,9 @@ class BugsInPyAdapter(BenchmarkAdapter):
             checkout (CheckoutResult): _description_
         """
 
-        command = ["bash", str(self._toolchain.command_path("bugsinpy-compile"))]
-
-        subprocess.run(
-            command, cwd=checkout.worktree, check=True, text=True, capture_output=True
+        self._toolchain.run_bugsinpy(
+            "bugsinpy-compile",
+            cwd=checkout.worktree,
         )
 
         checkout.prepared = True
@@ -215,22 +253,18 @@ class BugsInPyAdapter(BenchmarkAdapter):
             r"(?:(?P<errors>\d+)\s+error[s]?)?"
         )
 
-        command = [
-            "bash",
-            str(self._toolchain.command_path("bugsinpy-test")),
-        ]
-
-        completed = subprocess.run(
-            command,
+        completed = self._toolchain.run_bugsinpy(
+            "bugsinpy-test",
             cwd=checkout.worktree,
             check=False,
-            text=True,
-            capture_output=True,
         )
 
         raw_output = "\n".join(
             part
-            for part in [completed.stdout.strip(), completed.stderr.strip()]
+            for part in [
+                (completed.stdout or "").strip(),
+                (completed.stderr or "").strip(),
+            ]
             if part
         )
 

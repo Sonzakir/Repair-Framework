@@ -212,3 +212,5 @@ __marimo__/
 docs/
 docs/personal/TODO.md
 .tools/bugsinpy
+.workspace/*
+.tools/*

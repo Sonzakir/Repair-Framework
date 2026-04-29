@@ -5,10 +5,19 @@ from apr_framework.benchmarks.registry import (
     list_benchmark_names,
 )
 from apr_framework.cli.parser import build_parser
+from apr_framework.core.exceptions import APRFrameworkError
 from apr_framework.core.models import BugIdentifier
 
 
 def main() -> int:
+    try:
+        return _run()
+    except APRFrameworkError as error:
+        print(f"Error: {error}")
+        return 1
+
+
+def _run() -> int:
     parser = build_parser()
     args = parser.parse_args()
     project_root = Path.cwd()
