@@ -209,4 +209,6 @@ __marimo__/
 
 # ignore assignment pdfs
 *.pdf
-*.md
+docs/
+docs/personal/TODO.md
+.tools/bugsinpy

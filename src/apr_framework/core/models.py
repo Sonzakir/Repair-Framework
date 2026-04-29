@@ -80,15 +80,15 @@ class CheckoutResult:
 
     bug: BugIdentifier
     worktree: Path
-    success: bool
+    success: bool  # Checkout success
     message: str = ""
+    prepared: bool = False  # whether the checked-out version is compiled
 
 
 @dataclass
 class TestCaseResult:
     """
     Structured result of a single executed test case
-
     """
 
     name: str
@@ -107,6 +107,10 @@ class TestRunResult:
     bug: BugIdentifier
     results: list[TestCaseResult]
     raw_output: str = ""
+    total_count: int = 0
+    passed_count: int = 0
+    failed_count: int = 0
+    error_count: int = 0
 
     @property
     def total(self) -> int:

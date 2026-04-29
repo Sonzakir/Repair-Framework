@@ -5,13 +5,19 @@ I have decided to use 2 local paths for the BugsinPy
 /.workspace/bugsinpy -> for the checked out buggy project, meaning local copy of the project so that we can work with it
 """
 
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from apr_framework.benchmarks.base import BenchmarkAdapter
-from apr_framework.core.models import BugIdentifier, BugInfo, CheckoutResult
+from apr_framework.core.models import (
+    BugIdentifier,
+    BugInfo,
+    CheckoutResult,
+    TestRunResult,
+)
 
 BUGSINPY_REPOSITORY_URL = "https://github.com/soarsmu/BugsInPy.git"
 
@@ -36,8 +42,8 @@ class BugsInPyConfig:
             BugsInPyConfig:  A BugsInPyConfig instance with repo_dir and workspace_dir initialized
         """
         return cls(
-            repo_dir=project_root / ".tools" / ".bugsinpy",
-            workspace_dir=project_root / ".workspace" / ".bugsinpy",
+            repo_dir=project_root / ".tools" / "bugsinpy",
+            workspace_dir=project_root / ".workspace" / "bugsinpy",
         )
 
 
@@ -104,6 +110,13 @@ class BugsInPyAdapter(BenchmarkAdapter):
     def name(self) -> str:
         return "bugsinpy"
 
+    @property
+    def toolchain(self) -> BugsInPyToolchain:
+        """
+        Getter on BugsinPy Toolchain
+        """
+        return self._toolchain
+
     def list_projects(self) -> list[str]:
         projects_dir = self._toolchain.repo_dir / "projects"
         return sorted(
@@ -138,7 +151,8 @@ class BugsInPyAdapter(BenchmarkAdapter):
 
     def checkout(self, bug: BugIdentifier, destination: Path) -> CheckoutResult:
         """
-        Wrapper around the BugsInPy's bugsinpy-checkout command
+        Wrapper around the BugsInPy's bugsinpy-checkout command.
+        Gets the buggy source code onto disk
         See: .tools\bugsinpy\framework\bin\bugsinpy-checkout
         Args:
             bug (BugIdentifier): A BugIdentifier model that contains benchmark name, project name , id of this specific bug
@@ -158,7 +172,7 @@ class BugsInPyAdapter(BenchmarkAdapter):
             str(bug.bug_id),
             "-v",
             "0",  # TODO: Currently always checked-out buggy version
-            "w",  # Working directory
+            "-w",  # Working directory
             str(destination),
         ]
 
@@ -166,7 +180,7 @@ class BugsInPyAdapter(BenchmarkAdapter):
             command,
             check=True,
             text=True,
-            capture_output=True,
+            # BUG: capture_output=True,
         )
 
         project_dir = destination / bug.project
@@ -176,4 +190,63 @@ class BugsInPyAdapter(BenchmarkAdapter):
             worktree=project_dir,
             success=True,
             message=completed.stdout.strip(),
+        )
+
+    def prepare_environment(self, checkout: CheckoutResult) -> None:
+        """
+        Makes checked-out buggy project runnable and testable before the framework executes tests or repair steps.
+        See: .tools\bugsinpy\framework\bin\bugsinpy-compile
+        Args:
+            checkout (CheckoutResult): _description_
+        """
+
+        command = ["bash", str(self._toolchain.command_path("bugsinpy-compile"))]
+
+        subprocess.run(
+            command, cwd=checkout.worktree, check=True, text=True, capture_output=True
+        )
+
+        checkout.prepared = True
+
+    def run_tests(self, checkout: CheckoutResult) -> TestRunResult:
+        SUMMARY_PATTERN = re.compile(
+            r"(?:(?P<failed>\d+)\s+failed)?[, ]*"
+            r"(?:(?P<passed>\d+)\s+passed)?[, ]*"
+            r"(?:(?P<errors>\d+)\s+error[s]?)?"
+        )
+
+        command = [
+            "bash",
+            str(self._toolchain.command_path("bugsinpy-test")),
+        ]
+
+        completed = subprocess.run(
+            command,
+            cwd=checkout.worktree,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+
+        raw_output = "\n".join(
+            part
+            for part in [completed.stdout.strip(), completed.stderr.strip()]
+            if part
+        )
+
+        failed = passed = errors = 0
+        match = SUMMARY_PATTERN.search(raw_output)
+        if match:
+            failed = int(match.group("failed") or 0)
+            passed = int(match.group("passed") or 0)
+            errors = int(match.group("errors") or 0)
+
+        return TestRunResult(
+            bug=checkout.bug,
+            results=[],
+            raw_output=raw_output,
+            total_count=failed + passed + errors,
+            passed_count=passed,
+            failed_count=failed,
+            error_count=errors,
         )

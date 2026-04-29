@@ -2,3 +2,18 @@
 # Repair Framework
 
 This is an empty repository serving as workspace for your repair framework implementation.
+
+
+## To run in a container
+docker compose up
+docker compose run apr-framework
+
+
+## Currently supported commands
+python -m apr_framework list-benchmarks
+python -m apr_framework bugsinpy list-projects
+python -m apr_framework bugsinpy list-bugs pandas
+python -m apr_framework bugsinpy setup
+python -m apr_framework bugsinpy checkout pandas 1
+python -m apr_framework bugsinpy test pandas 1
+

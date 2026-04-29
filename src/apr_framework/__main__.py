@@ -1,6 +1,9 @@
-def app() -> int:
-    print("The application is currently running...")
-    return 0
+"""Package entrypoint for the APR framework CLI."""
+
+from apr_framework.cli.app import main
+
+app = main
+
 
 if __name__ == "__main__":
-    raise SystemExit(app())
+    raise SystemExit(main())

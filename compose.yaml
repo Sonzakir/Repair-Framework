@@ -1,0 +1,28 @@
+services:
+  apr-framework:
+    image: python:3.12-slim
+    working_dir: /workspace
+    environment:
+      BUGSINPY_HOME: /workspace/.tools/bugsinpy
+      PYTHONPATH: /workspace/src
+    volumes:
+      - .:/workspace
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - >-
+        apt-get update &&
+        apt-get install -y --no-install-recommends bash build-essential ca-certificates dos2unix git &&
+        rm -rf /var/lib/apt/lists/* &&
+        mkdir -p /workspace/.workspace/bugsinpy &&
+        if [ -d "$$BUGSINPY_HOME/framework/bin" ]; then
+          find "$$BUGSINPY_HOME/framework/bin" -type f -name 'bugsinpy-*' -exec sed -i 's/\r$$//' {} +;
+          chmod +x "$$BUGSINPY_HOME"/framework/bin/bugsinpy-* || true;
+        fi &&
+        echo 'APR framework container ready.' &&
+        echo 'Run commands such as: python -m apr_framework list-benchmarks' &&
+        exec bash
+    stdin_open: true
+    tty: true
+
+#PROBLEM -> It takes too mich time to start the container
