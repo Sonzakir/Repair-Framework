@@ -13,11 +13,15 @@ docker compose run apr-framework
 
 ## Currently supported commands
 
-```bash
+````bash
 python -m apr_framework list-benchmarks
 python -m apr_framework bugsinpy list-projects
 python -m apr_framework bugsinpy list-bugs pandas
 python -m apr_framework bugsinpy setup
 python -m apr_framework bugsinpy checkout pandas 1
 python -m apr_framework bugsinpy test pandas 1
-```
+
+```bash
+source .venv/bin/activate
+pip install -e .
+````

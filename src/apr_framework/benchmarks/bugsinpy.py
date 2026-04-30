@@ -129,6 +129,7 @@ class BugsInPyToolchain:
         *args: str,
         cwd: Path | None = None,
         check: bool = True,
+        capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         self.ensure_installed()
         command = [
@@ -136,12 +137,13 @@ class BugsInPyToolchain:
             str(self.command_path(command_name)),
             *args,
         ]
+
         return subprocess.run(
             command,
             cwd=cwd,
             check=check,
             text=True,
-            # capture_output=True,
+            capture_output=capture_output,
         )
 
 
@@ -160,14 +162,39 @@ class BugsInPyAdapter(BenchmarkAdapter):
         """
         return self._toolchain
 
+    def _project_aliases(self) -> dict[str, str]:
+        projects_dir = self._toolchain.repo_dir / "projects"
+        aliases: dict[str, str] = {}
+
+        for entry in projects_dir.iterdir():
+            if not entry.is_dir() or entry.name.startswith("."):
+                continue
+
+            canonical = entry.name
+            for alias in {
+                canonical,
+                canonical.lower(),
+                canonical.replace("-", "."),
+                canonical.lower().replace("-", "."),
+            }:
+                aliases.setdefault(alias, canonical)
+
+        return aliases
+
+    def resolve_project(self, project: str) -> str:
+        self._toolchain.ensure_installed()
+        aliases = self._project_aliases()
+
+        for candidate in (project, project.lower(), project.replace(".", "-")):
+            resolved = aliases.get(candidate)
+            if resolved:
+                return resolved
+
+        raise BenchmarkError(f"Unknown BugsInPy project: {project}")
+
     def list_projects(self) -> list[str]:
         self._toolchain.ensure_installed()
-        projects_dir = self._toolchain.repo_dir / "projects"
-        return sorted(
-            entry.name
-            for entry in projects_dir.iterdir()
-            if entry.is_dir() and not entry.name.startswith(".")
-        )
+        return sorted(set(self._project_aliases().values()))
 
     def list_bugs(self, project: str) -> list[BugInfo]:
         """
@@ -178,10 +205,8 @@ class BugsInPyAdapter(BenchmarkAdapter):
         Returns:
             list[BugInfo]: List of bugs for that projects
         """
-        self._toolchain.ensure_installed()
-        bugs_dir = self._toolchain.repo_dir / "projects" / project / "bugs"
-        if not bugs_dir.exists():
-            raise BenchmarkError(f"Unknown BugsInPy project: {project}")
+        canonical_project = self.resolve_project(project)
+        bugs_dir = self._toolchain.repo_dir / "projects" / canonical_project / "bugs"
         bug_infos: list[BugInfo] = []
 
         for entry in sorted(bugs_dir.iterdir(), key=lambda path: path.name):
@@ -189,7 +214,7 @@ class BugsInPyAdapter(BenchmarkAdapter):
                 bug_id = int(entry.name)
 
                 identifier = BugIdentifier(
-                    benchmark="bugsinpy", project=project, bug_id=bug_id
+                    benchmark="bugsinpy", project=canonical_project, bug_id=bug_id
                 )
 
                 bug_infos.append(BugInfo(identifier=identifier, description=""))
@@ -208,27 +233,49 @@ class BugsInPyAdapter(BenchmarkAdapter):
         Returns:
             CheckoutResult:  Outcome of a benchmark checkout operation
         """
+        canonical_project = self.resolve_project(bug.project)
+        canonical_bug = BugIdentifier(
+            benchmark=bug.benchmark,
+            project=canonical_project,
+            bug_id=bug.bug_id,
+        )
+
         destination.mkdir(parents=True, exist_ok=True)
 
         completed = self._toolchain.run_bugsinpy(
             "bugsinpy-checkout",
             "-p",
-            bug.project,
+            canonical_bug.project,
             "-i",
-            str(bug.bug_id),
+            str(canonical_bug.bug_id),
             "-v",
             "0",
             "-w",
             str(destination),
         )
 
-        project_dir = destination / bug.project
+        project_dir = destination / canonical_bug.project
+        raw_message = "\n".join(
+            part
+            for part in [
+                (completed.stdout or "").strip(),
+                (completed.stderr or "").strip(),
+            ]
+            if part
+        )
+
+        if not project_dir.exists():
+            raise BenchmarkError(
+                f"BugsInPy checkout failed for project '{canonical_bug.project}' "
+                f"(requested as '{bug.project}'). Expected worktree at {project_dir}. "
+                f"{raw_message}".strip()
+            )
 
         return CheckoutResult(
-            bug=bug,
+            bug=canonical_bug,
             worktree=project_dir,
             success=True,
-            message=(completed.stdout or "").strip(),
+            message=raw_message,
         )
 
     def prepare_environment(self, checkout: CheckoutResult) -> None:
@@ -238,25 +285,33 @@ class BugsInPyAdapter(BenchmarkAdapter):
         Args:
             checkout (CheckoutResult): _description_
         """
-
         self._toolchain.run_bugsinpy(
             "bugsinpy-compile",
+            "-w",
+            str(checkout.worktree),
             cwd=checkout.worktree,
+            check=False,
         )
 
         checkout.prepared = True
 
     def run_tests(self, checkout: CheckoutResult) -> TestRunResult:
-        SUMMARY_PATTERN = re.compile(
+        PYTEST_SUMMARY_PATTERN = re.compile(
             r"(?:(?P<failed>\d+)\s+failed)?[, ]*"
             r"(?:(?P<passed>\d+)\s+passed)?[, ]*"
             r"(?:(?P<errors>\d+)\s+error[s]?)?"
         )
+        UNITTEST_TOTAL_PATTERN = re.compile(r"Ran\s+(?P<total>\d+)\s+test[s]?\s+in")
+        UNITTEST_FAILURE_PATTERN = re.compile(r"failures=(?P<failed>\d+)")
+        UNITTEST_ERROR_PATTERN = re.compile(r"errors=(?P<errors>\d+)")
 
         completed = self._toolchain.run_bugsinpy(
             "bugsinpy-test",
+            "-w",
+            str(checkout.worktree),
             cwd=checkout.worktree,
             check=False,
+            capture_output=True,
         )
 
         raw_output = "\n".join(
@@ -269,17 +324,29 @@ class BugsInPyAdapter(BenchmarkAdapter):
         )
 
         failed = passed = errors = 0
-        match = SUMMARY_PATTERN.search(raw_output)
+        total = 0
+
+        match = PYTEST_SUMMARY_PATTERN.search(raw_output)
         if match:
             failed = int(match.group("failed") or 0)
             passed = int(match.group("passed") or 0)
             errors = int(match.group("errors") or 0)
+            total = failed + passed + errors
+
+        total_match = UNITTEST_TOTAL_PATTERN.search(raw_output)
+        if total_match:
+            total = int(total_match.group("total"))
+            failed_match = UNITTEST_FAILURE_PATTERN.search(raw_output)
+            error_match = UNITTEST_ERROR_PATTERN.search(raw_output)
+            failed = int(failed_match.group("failed")) if failed_match else 0
+            errors = int(error_match.group("errors")) if error_match else 0
+            passed = max(total - failed - errors, 0)
 
         return TestRunResult(
             bug=checkout.bug,
             results=[],
             raw_output=raw_output,
-            total_count=failed + passed + errors,
+            total_count=total,
             passed_count=passed,
             failed_count=failed,
             error_count=errors,

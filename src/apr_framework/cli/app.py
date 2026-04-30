@@ -80,8 +80,8 @@ def _run() -> int:
             adapter.prepare_environment(checkout)
             test_result = adapter.run_tests(checkout)
 
-            print(f"Project: {bug.project}")
-            print(f"Bug ID: {bug.bug_id}")
+            print(f"Project: {checkout.bug.project}")
+            print(f"Bug ID: {checkout.bug.bug_id}")
             print(f"Checkout success: {checkout.success}")
             print(f"Prepared: {checkout.prepared}")
             print(f"Tests run: {test_result.total_count}")
