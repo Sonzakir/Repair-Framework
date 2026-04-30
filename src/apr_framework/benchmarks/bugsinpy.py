@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+import hashlib
 from os import environ
 from pathlib import Path
 
@@ -21,7 +22,19 @@ from apr_framework.core.models import (
     TestRunResult,
 )
 
-BUGSINPY_REPOSITORY_URL = "https://github.com/soarsmu/BugsInPy.git"
+BUGSINPY_REPOSITORY_URL = "https://github.com/reproducing-research-projects/BugsInPy"
+
+
+def _read_bugsinpy_text(path: Path) -> str:
+    raw = path.read_bytes()
+
+    for encoding in ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
+    raise BenchmarkError(f"Could not decode text file: {path}")
 
 
 @dataclass(frozen=True)
@@ -130,6 +143,7 @@ class BugsInPyToolchain:
         cwd: Path | None = None,
         check: bool = True,
         capture_output: bool = False,
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         self.ensure_installed()
         command = [
@@ -138,12 +152,20 @@ class BugsInPyToolchain:
             *args,
         ]
 
+        # copy the current process environment and remove the shell related variables and use only BugsInPy flag
+        clean_env = dict(environ)
+        for key in ("SHELLOPTS", "BASH_ENV", "ENV"):
+            clean_env.pop(key, None)
+        if env:
+            clean_env.update(env)
+
         return subprocess.run(
             command,
             cwd=cwd,
             check=check,
             text=True,
             capture_output=capture_output,
+            env=clean_env,
         )
 
 
@@ -285,12 +307,13 @@ class BugsInPyAdapter(BenchmarkAdapter):
         Args:
             checkout (CheckoutResult): _description_
         """
+        self._ensure_conda_env(checkout.worktree)
         self._toolchain.run_bugsinpy(
             "bugsinpy-compile",
             "-w",
             str(checkout.worktree),
             cwd=checkout.worktree,
-            check=False,
+            check=True,
         )
 
         checkout.prepared = True
@@ -351,3 +374,86 @@ class BugsInPyAdapter(BenchmarkAdapter):
             failed_count=failed,
             error_count=errors,
         )
+
+    def _bug_python_version(self, worktree: Path) -> str:
+        """
+        Helper function to extract python version of the project at the SnapShot time
+        Original BugsInPy implementation has compile problem with the old snapshots (black 1)
+        """
+        # In original BugsInpy each bug has a bug info file that contains the python version and so on (See: .tools/bugsinpy/projects/fastapi/bugs/1/bug.info)
+        bug_info = (worktree / "bugsinpy_bug.info").read_text()
+        match = re.search(r'python_version\s*=\s*"([^"]+)"', bug_info)
+
+        if not match:
+            raise BenchmarkError(
+                f"No python_version found in {worktree / 'bugsinpy_bug.info'}"
+            )
+        return match.group(1)
+
+    def _conda_env_name(self, worktree: Path, python_version: str) -> str:
+        """
+        Build the exact Conda environment name expected by the BugsInPy fork.
+
+        The fork removes blank/comment lines from bugsinpy_requirements.txt,
+        converts it to Unix line endings, and hashes the bug Python version plus
+        the resulting requirements file.
+        """
+        requirements = worktree / "bugsinpy_requirements.txt"
+        normalized = ""
+        if requirements.exists():
+            normalized_lines = [
+                line.rstrip("\r")
+                for line in _read_bugsinpy_text(requirements).splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            ]
+            normalized = "\n".join(normalized_lines)
+            if normalized:
+                normalized += "\n"
+            requirements.write_text(normalized, encoding="utf-8")
+
+        digest = hashlib.md5()
+        digest.update(f"{python_version}\n".encode())
+        digest.update(normalized.encode())
+        return digest.hexdigest()
+
+    def _ensure_conda_env(self, worktree: Path) -> str:
+        """
+        Ensure that the Conda environment required for a BugsInPy checkout exists.
+
+        The forked BugsInPy scripts compute this same environment name and
+        activate it during compile/test, so the wrapper only needs to create the
+        environment before calling bugsinpy-compile.
+        """
+        conda = shutil.which("conda")
+        if conda is None:
+            raise ConfigurationError(
+                "Conda is required for BugsInPy bug-specific Python environments. "
+                "Run the framework inside the Docker container or install Miniconda."
+            )
+
+        python_version = self._bug_python_version(worktree)
+        env_name = self._conda_env_name(worktree, python_version)
+
+        env_list = subprocess.run(
+            [conda, "env", "list"],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+
+        if env_name not in env_list.stdout:
+            subprocess.run(
+                [
+                    conda,
+                    "create",
+                    "-n",
+                    env_name,
+                    "-y",
+                    f"python={python_version}",
+                    "pytest",
+                ],
+                check=True,
+                text=True,
+            )
+
+        return env_name

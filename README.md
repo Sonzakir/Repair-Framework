@@ -24,4 +24,7 @@ python -m apr_framework bugsinpy test pandas 1
 ```bash
 source .venv/bin/activate
 pip install -e .
+
+
+docker compose run --rm apr-framework
 ````

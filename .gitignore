@@ -213,4 +213,5 @@ docs/
 docs/personal/TODO.md
 .tools/bugsinpy
 .workspace/*
-.tools/*
+/.tools/
+/.workspace/
