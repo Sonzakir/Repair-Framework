@@ -5,8 +5,10 @@ from apr_framework.benchmarks.registry import (
     list_benchmark_names,
 )
 from apr_framework.cli.parser import build_parser
-from apr_framework.core.exceptions import APRFrameworkError
-from apr_framework.core.models import BugIdentifier
+from apr_framework.core.exceptions import APRFrameworkError, BenchmarkError
+from apr_framework.core.models import BugIdentifier, CheckoutResult
+from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
+from apr_framework.repair import DummyRepairAlgorithm
 
 
 def main() -> int:
@@ -66,6 +68,32 @@ def _run() -> int:
 
             return 0
 
+        if args.bugsinpy_command == "compile":
+            canonical_project = adapter.resolve_project(args.project)
+            bug = BugIdentifier(
+                benchmark="bugsinpy", project=canonical_project, bug_id=args.bug_id
+            )
+            destination = (
+                project_root
+                / ".workspace"
+                / "bugsinpy"
+                / f"{args.project}_{args.bug_id}"
+            )
+            worktree = destination / canonical_project
+            if not worktree.exists():
+                raise BenchmarkError(
+                    f"No checkout found at {worktree}. "
+                    f"Run `python -m apr_framework bugsinpy checkout {args.project} {args.bug_id}` first."
+                )
+
+            checkout = CheckoutResult(bug=bug, worktree=worktree, success=True)
+            adapter.prepare_environment(checkout)
+            print(f"Project: {checkout.bug.project}")
+            print(f"Bug ID: {checkout.bug.bug_id}")
+            print(f"Prepared: {checkout.prepared}")
+            print(f"Worktree: {checkout.worktree}")
+            return 0
+
         if args.bugsinpy_command == "test":
             bug = BugIdentifier(
                 benchmark="bugsinpy", project=args.project, bug_id=args.bug_id
@@ -91,6 +119,30 @@ def _run() -> int:
             if test_result.raw_output:
                 print("\nRaw output:")
                 print(test_result.raw_output)
+
+            return 0
+
+        if args.bugsinpy_command == "evaluate-dummy":
+            repair = DummyRepairAlgorithm(project_root=project_root, seed=args.seed)
+            runner = DummyEvaluationRunner(
+                project_root=project_root,
+                runs_dir=args.runs_dir,
+                seed=args.seed,
+            )
+
+            results = runner.run(
+                bugs=list(DEFAULT_DUMMY_BUGS),
+                benchmark=adapter,
+                repair=repair,
+            )
+
+            if runner.last_run_dir is not None:
+                print(f"Run directory: {runner.last_run_dir}")
+
+            for result in results:
+                print(
+                    f"{result.bug.project} {result.bug.bug_id}: {result.status}"
+                )
 
             return 0
 

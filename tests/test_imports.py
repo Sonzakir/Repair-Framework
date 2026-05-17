@@ -12,10 +12,12 @@ MODULES = [
     "apr_framework.core.models",
     "apr_framework.evaluation",
     "apr_framework.evaluation.base",
+    "apr_framework.evaluation.dummy_runner",
     "apr_framework.localization",
     "apr_framework.localization.base",
     "apr_framework.repair",
     "apr_framework.repair.base",
+    "apr_framework.repair.dummy",
     "apr_framework.reporting",
     "apr_framework.reporting.base",
 ]

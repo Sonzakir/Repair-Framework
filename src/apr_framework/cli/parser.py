@@ -39,9 +39,19 @@ def build_parser() -> argparse.ArgumentParser:
     checkout_parser.add_argument("project")
     checkout_parser.add_argument("bug_id", type=int)
 
+    ## bugsinpy-compile
+    compile_parser = bugsinpy_subparsers.add_parser("compile")
+    compile_parser.add_argument("project")
+    compile_parser.add_argument("bug_id", type=int)
+
     ## bugsinpy-test
     test_parser = bugsinpy_subparsers.add_parser("test")
     test_parser.add_argument("project")
     test_parser.add_argument("bug_id", type=int)
+
+    ## bugsinpy-evaluate-dummy
+    evaluate_dummy_parser = bugsinpy_subparsers.add_parser("evaluate-dummy")
+    evaluate_dummy_parser.add_argument("--seed", type=int, default=None)
+    evaluate_dummy_parser.add_argument("--runs-dir", default="runs")
 
     return parser

@@ -210,7 +210,7 @@ __marimo__/
 # ignore assignment pdfs
 *.pdf
 docs/
-docs/personal/TODO.md
 .tools/bugsinpy
 .workspace/*
 .tools/*
+src/apr_framework/.DS_Store
