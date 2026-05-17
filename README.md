@@ -7,21 +7,37 @@ This is an empty repository serving as workspace for your repair framework imple
 ## To run in a container
 
 ```bash
-docker compose up
-docker compose run apr-framework
+docker compose build
+docker compose run --rm apr-framework
+```
+
+The framework container controls a sibling BugsInPy executor container through the
+host Docker socket. If Docker Compose cannot infer the host repository path,
+export it explicitly before starting the framework:
+
+```bash
+export APR_HOST_PROJECT_ROOT="$(pwd)"
 ```
 
 ## Currently supported commands
 
-````bash
+```bash
 python -m apr_framework list-benchmarks
 python -m apr_framework bugsinpy list-projects
 python -m apr_framework bugsinpy list-bugs pandas
 python -m apr_framework bugsinpy setup
 python -m apr_framework bugsinpy checkout pandas 1
 python -m apr_framework bugsinpy test pandas 1
+```
 
 ```bash
 source .venv/bin/activate
 pip install -e .
-````
+```
+
+```bash
+docker compose build apr-framework
+docker compose run --rm apr-framework
+# Inside the docker
+python -m apr_framework bugsinpy test black 1
+```

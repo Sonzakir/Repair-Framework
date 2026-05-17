@@ -5,12 +5,13 @@ I have decided to use 2 local paths for the BugsinPy
 /.workspace/bugsinpy -> for the checked out buggy project, meaning local copy of the project so that we can work with it
 """
 
+import json
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from os import environ
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from apr_framework.benchmarks.base import BenchmarkAdapter
 from apr_framework.core.exceptions import BenchmarkError, ConfigurationError
@@ -21,13 +22,46 @@ from apr_framework.core.models import (
     TestRunResult,
 )
 
-BUGSINPY_REPOSITORY_URL = "https://github.com/soarsmu/BugsInPy.git"
+BUGSINPY_REPOSITORY_URL = "https://github.com/Sonzakir/BugsInPy.git"
+DEFAULT_BUGSINPY_CONTAINER = "apr-bugsinpy-executor"
+DEFAULT_BUGSINPY_IMAGE = "apr-bugsinpy:local"
+BUGSINPY_CONTAINER_HOME = PurePosixPath("/home/bugsinpy")
+BUGSINPY_CONTAINER_WORKSPACE = PurePosixPath("/home/workspace")
+BUGSINPY_PYENV_CACHE_VOLUME = "apr-bugsinpy-pyenv-cache"
+BUGSINPY_PYENV_VERSIONS_VOLUME = "apr-bugsinpy-pyenv-versions"
+
+
+def _completed_output(completed: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(
+        part
+        for part in [
+            (completed.stdout or "").strip(),
+            (completed.stderr or "").strip(),
+        ]
+        if part
+    )
+
+
+def _completed_returncode(completed: subprocess.CompletedProcess[str]) -> int:
+    return getattr(completed, "returncode", 0)
 
 
 @dataclass(frozen=True)
 class BugsInPyConfig:
     repo_dir: Path  # Local copy of the BugsInPy project
     workspace_dir: Path  # Checked-out project
+    project_root: Path | None = None  # Repair framework root as seen by this process
+
+    def __post_init__(self) -> None:
+        if self.project_root is not None:
+            return
+
+        if self.repo_dir.name == "bugsinpy" and self.repo_dir.parent.name == ".tools":
+            project_root = self.repo_dir.parent.parent
+        else:
+            project_root = self.repo_dir.parent
+
+        object.__setattr__(self, "project_root", project_root)
 
     @classmethod
     def from_project_root(cls, project_root: Path) -> "BugsInPyConfig":
@@ -43,10 +77,321 @@ class BugsInPyConfig:
         Returns:
             BugsInPyConfig:  A BugsInPyConfig instance with repo_dir and workspace_dir initialized
         """
+        project_root = project_root.resolve()
         return cls(
             repo_dir=project_root / ".tools" / "bugsinpy",
             workspace_dir=project_root / ".workspace" / "bugsinpy",
+            project_root=project_root,
         )
+
+
+class BugsInPyDockerExecutor:
+    """
+    Runs BugsInPy commands inside a long-lived sibling Docker container.
+    """
+
+    def __init__(self, config: BugsInPyConfig) -> None:
+        self._config = config
+        self._docker = environ.get("DOCKER", "docker")
+        self._image = environ.get("BUGSINPY_IMAGE", DEFAULT_BUGSINPY_IMAGE)
+        self._container = environ.get(
+            "BUGSINPY_CONTAINER", DEFAULT_BUGSINPY_CONTAINER
+        )
+
+    @property
+    def image(self) -> str:
+        return self._image
+
+    @property
+    def container(self) -> str:
+        return self._container
+
+    @property
+    def _project_root(self) -> Path:
+        if self._config.project_root is None:
+            raise ConfigurationError("BugsInPy project root is not configured.")
+        return self._config.project_root
+
+    def ensure_ready(self) -> None:
+        self._ensure_docker_available()
+        self._ensure_image()
+        self._ensure_container()
+        self._smoke_check()
+
+    def run_bugsinpy(
+        self,
+        command_name: str,
+        *args: str,
+        cwd: Path | None = None,
+        check: bool = True,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        self._ensure_docker_available()
+        if not self._container_exists():
+            raise BenchmarkError(
+                "The BugsInPy executor container is not available. "
+                "Run `python -m apr_framework bugsinpy setup` first."
+            )
+
+        if not self._container_running():
+            self._run_docker(["start", self.container], check=True)
+
+        container_cwd = (
+            self._to_container_path(cwd)
+            if cwd is not None
+            else str(BUGSINPY_CONTAINER_WORKSPACE)
+        )
+        translated_args = [self._translate_argument(arg) for arg in args]
+        command_path = str(BUGSINPY_CONTAINER_HOME / "framework" / "bin" / command_name)
+
+        return self._run_docker(
+            [
+                "exec",
+                "-w",
+                container_cwd,
+                self.container,
+                "bash",
+                command_path,
+                *translated_args,
+            ],
+            check=check,
+            capture_output=capture_output,
+        )
+
+    def _ensure_docker_available(self) -> None:
+        if shutil.which(self._docker) is None:
+            raise ConfigurationError(
+                "Docker CLI is required to run BugsInPy in its executor container. "
+                "Use the provided repair-framework container or install Docker CLI."
+            )
+
+        completed = self._run_docker(
+            ["version", "--format", "{{.Server.Version}}"],
+            check=False,
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            raise ConfigurationError(
+                "Docker daemon is not reachable from the repair-framework container. "
+                "Mount /var/run/docker.sock and make sure Docker is running. "
+                f"{_completed_output(completed)}".strip()
+            )
+
+    def _ensure_image(self) -> None:
+        if self._image_exists():
+            return
+
+        dockerfile = self._config.repo_dir / "Dockerfile"
+        if not dockerfile.exists():
+            raise BenchmarkError(
+                f"Cannot build BugsInPy image: expected Dockerfile at {dockerfile}"
+            )
+
+        self._run_docker(
+            [
+                "build",
+                "-t",
+                self.image,
+                "-f",
+                str(dockerfile),
+                str(self._config.repo_dir),
+            ],
+            check=True,
+        )
+
+    def _ensure_container(self) -> None:
+        if self._container_exists() and not self._container_has_expected_mounts():
+            self._run_docker(["rm", "-f", self.container], check=True)
+
+        if not self._container_exists():
+            self._create_container()
+
+        if not self._container_running():
+            self._run_docker(["start", self.container], check=True)
+
+    def _create_container(self) -> None:
+        host_project_root = self._host_project_root()
+        host_bugsinpy_repo = host_project_root / ".tools" / "bugsinpy"
+        host_bugsinpy_workspace = host_project_root / ".workspace" / "bugsinpy"
+
+        self._run_docker(
+            [
+                "create",
+                "--name",
+                self.container,
+                "-w",
+                str(BUGSINPY_CONTAINER_WORKSPACE),
+                "-e",
+                "BUGSINPY_HOME=/home/bugsinpy",
+                "-e",
+                "PYENV_ROOT=/root/.pyenv",
+                "-v",
+                f"{host_bugsinpy_repo / 'framework'}:/home/bugsinpy/framework",
+                "-v",
+                f"{host_bugsinpy_repo / 'projects'}:/home/bugsinpy/projects",
+                "-v",
+                f"{host_bugsinpy_workspace}:/home/workspace",
+                "-v",
+                f"{BUGSINPY_PYENV_VERSIONS_VOLUME}:/root/.pyenv/versions",
+                "-v",
+                f"{BUGSINPY_PYENV_CACHE_VOLUME}:/root/.pyenv/cache",
+                self.image,
+                "sleep",
+                "infinity",
+            ],
+            check=True,
+        )
+
+    def _smoke_check(self) -> None:
+        completed = self._run_docker(
+            [
+                "exec",
+                self.container,
+                "test",
+                "-x",
+                "/home/bugsinpy/framework/bin/bugsinpy-checkout",
+            ],
+            check=False,
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            raise BenchmarkError(
+                "The BugsInPy executor container is running, but its mounted "
+                "BugsInPy checkout is not usable. Remove the stale container "
+                f"`{self.container}` and run setup again. {_completed_output(completed)}".strip()
+            )
+
+    def _image_exists(self) -> bool:
+        return (
+            self._run_docker(
+                ["image", "inspect", self.image],
+                check=False,
+                capture_output=True,
+            ).returncode
+            == 0
+        )
+
+    def _container_exists(self) -> bool:
+        return (
+            self._run_docker(
+                ["container", "inspect", self.container],
+                check=False,
+                capture_output=True,
+            ).returncode
+            == 0
+        )
+
+    def _container_running(self) -> bool:
+        completed = self._run_docker(
+            [
+                "container",
+                "inspect",
+                "-f",
+                "{{.State.Running}}",
+                self.container,
+            ],
+            check=False,
+            capture_output=True,
+        )
+        return completed.returncode == 0 and completed.stdout.strip() == "true"
+
+    def _container_has_expected_mounts(self) -> bool:
+        completed = self._run_docker(
+            [
+                "container",
+                "inspect",
+                "-f",
+                "{{json .Mounts}}",
+                self.container,
+            ],
+            check=False,
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            return False
+
+        try:
+            mounts = json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            return False
+
+        destinations = {
+            mount.get("Destination")
+            for mount in mounts
+            if isinstance(mount, dict)
+        }
+        return {
+            "/home/bugsinpy/framework",
+            "/home/bugsinpy/projects",
+            "/home/workspace",
+        }.issubset(destinations)
+
+    def _host_project_root(self) -> Path:
+        configured = environ.get("APR_HOST_PROJECT_ROOT")
+        if configured:
+            return Path(configured).expanduser().resolve()
+
+        if Path("/.dockerenv").exists():
+            raise ConfigurationError(
+                "APR_HOST_PROJECT_ROOT must be set when the repair framework runs "
+                "inside Docker. It must point to this repository on the host so "
+                "the sibling BugsInPy container can mount the same files."
+            )
+
+        return self._project_root.resolve()
+
+    def _translate_argument(self, arg: str) -> str:
+        path = Path(arg)
+        if not path.is_absolute():
+            return arg
+
+        try:
+            return self._to_container_path(path)
+        except ConfigurationError:
+            return arg
+
+    def _to_container_path(self, path: Path) -> str:
+        resolved = path.resolve()
+
+        try:
+            relative = resolved.relative_to(self._config.workspace_dir.resolve())
+            return str(BUGSINPY_CONTAINER_WORKSPACE / PurePosixPath(relative.as_posix()))
+        except ValueError:
+            pass
+
+        try:
+            relative = resolved.relative_to(self._config.repo_dir.resolve())
+            return str(BUGSINPY_CONTAINER_HOME / PurePosixPath(relative.as_posix()))
+        except ValueError:
+            pass
+
+        try:
+            relative = resolved.relative_to(self._project_root.resolve())
+        except ValueError as exc:
+            raise ConfigurationError(
+                f"Cannot pass path {path} into the BugsInPy container because it is "
+                f"outside the project root {self._project_root}."
+            ) from exc
+
+        return str(PurePosixPath("/workspace") / PurePosixPath(relative.as_posix()))
+
+    def _run_docker(
+        self,
+        args: list[str],
+        check: bool,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                [self._docker, *args],
+                check=check,
+                text=True,
+                capture_output=capture_output,
+            )
+        except FileNotFoundError as exc:
+            raise ConfigurationError(
+                "Docker CLI is required to run BugsInPy in its executor container."
+            ) from exc
 
 
 class BugsInPyToolchain:
@@ -56,6 +401,7 @@ class BugsInPyToolchain:
 
     def __init__(self, config: BugsInPyConfig) -> None:
         self._config = config
+        self._executor = BugsInPyDockerExecutor(config)
 
     @property
     def repo_dir(self) -> Path:
@@ -88,40 +434,51 @@ class BugsInPyToolchain:
     def bootstrap(self) -> None:
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
-        if self.is_installed():
-            return
+        if not self.is_installed():
+            self._clone_repository()
 
-        # git configurations
+        self._normalize_command_scripts()
+        self._executor.ensure_ready()
+
+    def _clone_repository(self) -> None:
+        if self.repo_dir.exists() and any(self.repo_dir.iterdir()):
+            raise ConfigurationError(
+                f"{self.repo_dir} exists but does not look like a BugsInPy clone. "
+                "Move it away or remove it before running setup again."
+            )
+
         git_executable = shutil.which("git")
         if git_executable is None:
             raise ConfigurationError("Git is required to bootstrap BugsInPy")
 
-        # clone the repository
+        self.repo_dir.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
             [git_executable, "clone", BUGSINPY_REPOSITORY_URL, str(self.repo_dir)],
             check=True,
             text=True,
         )
 
+    def _normalize_command_scripts(self) -> None:
+        bin_dir = self.repo_dir / "framework" / "bin"
+        if not bin_dir.exists():
+            return
+
+        for script in bin_dir.glob("bugsinpy-*"):
+            if not script.is_file():
+                continue
+
+            content = script.read_bytes()
+            normalized = content.replace(b"\r\n", b"\n")
+            if normalized != content:
+                script.write_bytes(normalized)
+
+            script.chmod(script.stat().st_mode | 0o111)
+
     def ensure_installed(self) -> None:
         if not self.is_installed():
             raise BenchmarkError(
                 "BugsInPy is not installed. Run `python -m apr_framework bugsinpy setup` first."
             )
-
-    def resolve_bash(self) -> str:
-        configured = environ.get("BUGSINPY_BASH")
-        if configured:
-            return configured
-
-        candidate = shutil.which("bash")
-        if candidate:
-            return candidate
-
-        raise ConfigurationError(
-            "A working `bash` executable is required to run BugsInPy commands. "
-            "Run the framework in the provided Docker environment or from a shell where `bash` is on PATH."
-        )
 
     def run_bugsinpy(
         self,
@@ -132,17 +489,11 @@ class BugsInPyToolchain:
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         self.ensure_installed()
-        command = [
-            self.resolve_bash(),
-            str(self.command_path(command_name)),
+        return self._executor.run_bugsinpy(
+            command_name,
             *args,
-        ]
-
-        return subprocess.run(
-            command,
             cwd=cwd,
             check=check,
-            text=True,
             capture_output=capture_output,
         )
 
@@ -252,17 +603,18 @@ class BugsInPyAdapter(BenchmarkAdapter):
             "0",
             "-w",
             str(destination),
+            check=False,
+            capture_output=True,
         )
 
         project_dir = destination / canonical_bug.project
-        raw_message = "\n".join(
-            part
-            for part in [
-                (completed.stdout or "").strip(),
-                (completed.stderr or "").strip(),
-            ]
-            if part
-        )
+        raw_message = _completed_output(completed)
+
+        if _completed_returncode(completed) != 0:
+            raise BenchmarkError(
+                f"BugsInPy checkout failed for project '{canonical_bug.project}' "
+                f"(requested as '{bug.project}'). {raw_message}".strip()
+            )
 
         if not project_dir.exists():
             raise BenchmarkError(
@@ -281,17 +633,21 @@ class BugsInPyAdapter(BenchmarkAdapter):
     def prepare_environment(self, checkout: CheckoutResult) -> None:
         """
         Makes checked-out buggy project runnable and testable before the framework executes tests or repair steps.
-        See: .tools\bugsinpy\framework\bin\bugsinpy-compile
+        See: .tools\bugsinpy\framework\bin\bugsinpy-safe-compile
         Args:
             checkout (CheckoutResult): _description_
         """
-        self._toolchain.run_bugsinpy(
-            "bugsinpy-compile",
-            "-w",
-            str(checkout.worktree),
+        completed = self._toolchain.run_bugsinpy(
+            "bugsinpy-safe-compile",
             cwd=checkout.worktree,
             check=False,
+            capture_output=True,
         )
+        if _completed_returncode(completed) != 0:
+            raise BenchmarkError(
+                f"BugsInPy compile failed for {checkout.worktree}. "
+                f"{_completed_output(completed)}".strip()
+            )
 
         checkout.prepared = True
 
@@ -307,21 +663,12 @@ class BugsInPyAdapter(BenchmarkAdapter):
 
         completed = self._toolchain.run_bugsinpy(
             "bugsinpy-test",
-            "-w",
-            str(checkout.worktree),
             cwd=checkout.worktree,
             check=False,
             capture_output=True,
         )
 
-        raw_output = "\n".join(
-            part
-            for part in [
-                (completed.stdout or "").strip(),
-                (completed.stderr or "").strip(),
-            ]
-            if part
-        )
+        raw_output = _completed_output(completed)
 
         failed = passed = errors = 0
         total = 0
