@@ -214,3 +214,4 @@ docs/
 .workspace/*
 .tools/*
 src/apr_framework/.DS_Store
+.tools/bugsinpy

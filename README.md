@@ -283,7 +283,7 @@ again:
 docker rm -f apr-bugsinpy-executor
 python -m apr_framework bugsinpy setup
 ```
-- For windows machines: CRLF -> LF 
+- For windows machines Change the end of the line sequence: CRLF -> LF 
 ## Summary
 
 | Content | Implementation |
