@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     checkout_parser.add_argument("project")
     checkout_parser.add_argument("bug_id", type=int)
 
-    ## bugsinpy-compile
+    ## bugsinpy-compile (safe compile)
     compile_parser = bugsinpy_subparsers.add_parser("compile")
     compile_parser.add_argument("project")
     compile_parser.add_argument("bug_id", type=int)
