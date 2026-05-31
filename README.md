@@ -303,3 +303,6 @@ python -m apr_framework bugsinpy setup
 | CLI entry point | `python -m apr_framework` and `apr-framework` script |
 | Dummy repair component | `DummyRepairAlgorithm` |
 | Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` |
+
+
+

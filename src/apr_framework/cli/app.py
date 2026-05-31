@@ -8,6 +8,8 @@ from apr_framework.cli.parser import build_parser
 from apr_framework.core.exceptions import APRFrameworkError, BenchmarkError
 from apr_framework.core.models import BugIdentifier, CheckoutResult
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
+from apr_framework.localization import FauxPyConfig, FauxPyLocalizer, FauxPyToolchain
+from apr_framework.localization.fauxpy import load_pytest_targets
 from apr_framework.repair import DummyRepairAlgorithm
 
 
@@ -27,6 +29,70 @@ def _run() -> int:
     if args.command == "list-benchmarks":
         for name in list_benchmark_names():
             print(name)
+        return 0
+
+    if args.command == "localize":
+        adapter = create_bugsinpy_adapter(project_root)
+        adapter.toolchain.ensure_installed()
+
+        projects_dir = adapter.toolchain.repo_dir / "projects"
+        project_dir = projects_dir / args.project
+        if not project_dir.is_dir():
+            raise BenchmarkError(f"No such BugsInPy project: {args.project}")
+
+        bug_dir = project_dir / "bugs" / str(args.bug)
+        if not bug_dir.is_dir():
+            raise BenchmarkError(
+                f"No such bug {args.bug} for BugsInPy project {args.project}"
+            )
+
+        destination = (
+            project_root
+            / ".workspace"
+            / "bugsinpy"
+            / f"{args.project}_{args.bug}"
+        )
+        worktree = destination / args.project
+        if not worktree.exists():
+            raise BenchmarkError(
+                f"No checkout found at {worktree}. "
+                f"Run `python -m apr_framework bugsinpy checkout {args.project} {args.bug}` first."
+            )
+
+        src = args.src or _infer_fauxpy_src(worktree, args.project)
+        test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        checkout = CheckoutResult(
+            bug=BugIdentifier(
+                benchmark="bugsinpy",
+                project=args.project,
+                bug_id=args.bug,
+            ),
+            worktree=worktree,
+            success=True,
+            prepared=True,
+        )
+        config = FauxPyConfig(
+            src=src,
+            test_targets=test_targets,
+            top_n=args.top_n,
+        )
+        localizer = FauxPyLocalizer(config, FauxPyToolchain(adapter.toolchain))
+        result = localizer.localize(checkout.bug, checkout)
+
+        print(f"Project: {result.bug.project}")
+        print(f"Bug ID: {result.bug.bug_id}")
+        print(f"Backend: {result.backend}")
+        if result.metadata.get("score_formula"):
+            print(f"Score formula: {result.metadata['score_formula']}")
+        print("Ranked locations:")
+        for location in result.ranked_locations:
+            score = "" if location.score is None else f"{location.score:.4f}"
+            print(f"{location.rank}. {location.file_path}:{location.line} {score}".rstrip())
+
+        if result.metadata.get("raw_output"):
+            print("\nRaw FauxPy output:")
+            print(result.metadata["raw_output"])
+
         return 0
 
     if args.command == "bugsinpy":
@@ -147,3 +213,12 @@ def _run() -> int:
             return 0
 
     return 1
+
+
+def _infer_fauxpy_src(worktree: Path, project: str) -> str:
+    package_name = project.replace("-", "_")
+    if (worktree / package_name).is_dir():
+        return package_name
+    if (worktree / project).is_dir():
+        return project
+    return "."

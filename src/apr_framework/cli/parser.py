@@ -20,6 +20,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("list-benchmarks")
 
+    localize_parser = subparsers.add_parser("localize")
+    localize_parser.add_argument("--backend", choices=["fauxpy"], default="fauxpy")
+    localize_parser.add_argument("--project", required=True)
+    localize_parser.add_argument("--bug", type=int, required=True)
+    localize_parser.add_argument("--src", default=None)
+    localize_parser.add_argument("--top-n", type=int, default=None)
+
     ### BugsInPy CLI commands
     bugsinpy_parser = subparsers.add_parser("bugsinpy")
     bugsinpy_subparsers = bugsinpy_parser.add_subparsers(

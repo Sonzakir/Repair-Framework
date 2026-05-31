@@ -137,12 +137,31 @@ class TestRunResult:
         return sum(result.status == TestStatus.FAILED for result in self.results)
 
 
+@dataclass(frozen=True)
+class RankedLocation:
+    """
+    Represents one suspicious code location identified by a fault localization tool, including its rank, score and optional metadata
+    """
+
+    rank: int
+    file_path: str 
+    location: str
+    score: float | None = None 
+    line: int | None = None
+    # for function-level granularity 
+    end_line: int | None = None
+    function: str | None = None
+    raw_location: str = "" 
+    metadata: dict[str, Any] = field(default_factory=dict)
+    
+
 @dataclass
 class LocalizationResult:
     """Structured result of fault localization, containing the ranked suspicious code locations for a specific bug and optional metadata"""
 
     bug: BugIdentifier
-    ranked_locations: list[str]
+    backend: str 
+    ranked_locations: list[RankedLocation]
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -181,3 +200,15 @@ class EvaluationResult:
     status: str
     started_at: datetime
     finished_at: datetime
+
+
+
+@dataclass(frozen=True)
+class LocalizationConfig:
+    backend: str ="fauxpy"
+    family: str = "sbfl"
+    granularity: str ="statement"
+    top_n: int | None = None 
+    src: str = "."
+    exclude: list[str] = field(default_factory=list)
+    mutation: str | None = None 
