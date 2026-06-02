@@ -3,7 +3,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, overload
 
 from apr_framework.core.exceptions import ConfigurationError
 from apr_framework.core.models import (
@@ -35,6 +35,13 @@ def _validate_string_list(name: str, values: list[str]) -> None:
 
 
 def load_pytest_targets(run_test_script: Path) -> list[str]:
+    """Return pytest targets declared by a BugsInPy ``run_test.sh`` script.
+
+    The parser accepts direct ``pytest`` commands and ``python -m pytest``
+    commands, skips comments and blank lines, and raises ``ConfigurationError``
+    when the script is missing, contains unsupported commands, or has no
+    runnable pytest targets.
+    """
     if not run_test_script.exists():
         raise ConfigurationError(f"No BugsInPy test script found at {run_test_script}")
 
@@ -43,15 +50,17 @@ def load_pytest_targets(run_test_script: Path) -> list[str]:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-
+        
+        # split each command like shell
         parts = shlex.split(line)
+
         if not parts:
             continue
-
+        # direct pytest calls (pytest tests/test.py tests/test_test.py)
         if parts[0] == "pytest":
             targets.extend(parts[1:])
             continue
-
+        # python -m pytest style calls
         if len(parts) >= 3 and parts[1:3] == ["-m", "pytest"]:
             targets.extend(parts[3:])
             continue
@@ -69,15 +78,33 @@ def load_pytest_targets(run_test_script: Path) -> list[str]:
 
 @dataclass(frozen=True)
 class FauxPyConfig:
-    family: str = "sbfl"
+    """Configuration for one FauxPy localization run.
+
+    The config describes the fault-localization family, source root, granularity,
+    test selection, and metric to expose as the primary ranking. Validation keeps
+    unsupported combinations out of the toolchain before any subprocess runs.
+    """
+    family: str = "sbfl" # sbfl | mbfl 
+    granularity: str = "statement" # statement | function
     src: str = "."
+    exclude : list[str] = field(default_factory=list)
     test_targets: list[str] = field(default_factory=list)
     failing_tests: list[str] = field(default_factory=list)
     top_n: int | None = None
+    # MBFL-only knobs 
+    mutation_strategy: str | None = None 
+    mutation_budget: int | None = None 
+    # Metric selection
+    metric: str = "ochiai" 
 
     def __post_init__(self) -> None:
-        if self.family != "sbfl":
-            raise ConfigurationError("Currently the FauxPy integration supports only SBFL.")
+        """Validate FauxPy options and reject unsupported combinations early."""
+        if self.family not in {"sbfl" , "mbfl"}:
+            raise ConfigurationError("Currently the FauxPy integration supports only SBFL and MBFL.")
+        if self.granularity not in {"statement" , "function"}:
+            raise ConfigurationError("Currently the FauxPy integration only supports statement level and function level granularity")
+        if self.mutation_strategy is not None and self.family != "mbfl":
+            raise ConfigurationError("Mutation Strategy is MBFL only.")
         if not isinstance(self.src, str) or not self.src.strip():
             raise ConfigurationError("FauxPy src must be a non-empty string.")
         if self.top_n is not None:
@@ -89,6 +116,8 @@ class FauxPyConfig:
 
 
 class DockerCommandRunner(Protocol):
+    """Protocol for benchmark toolchains that execute commands in a checkout."""
+
     def run_command(
         self,
         args: list[str],
@@ -97,18 +126,31 @@ class DockerCommandRunner(Protocol):
         check: bool = True,
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        """Run ``args`` in the benchmark environment and return the completed process."""
         ...
 
 
 class FauxPyToolchain:
-    """
-    Wraps command execution for FauxPy inside a prepared benchmark environment.
+    """Run FauxPy inside a prepared benchmark checkout.
+
+    The toolchain installs FauxPy into the checkout virtual environment when
+    needed, executes pytest with FauxPy options, parses all emitted metric
+    tables, and returns a structured ``LocalizationResult`` for the configured
+    primary metric.
     """
 
     def __init__(self, runner: DockerCommandRunner) -> None:
+        """Create a toolchain using ``runner`` for all subprocess execution."""
         self._runner = runner
 
     def localize(self, config: FauxPyConfig, checkout: CheckoutResult) -> LocalizationResult:
+        """Run FauxPy for ``checkout`` and return ranked locations for ``config.metric``.
+
+        The result metadata includes the raw command output, the selected score
+        formula, the FauxPy run options, and ``all_metrics`` containing every
+        parsed metric table for later consumers.
+        """
+        # extract python version from the checked out projects venv
         python = checkout.worktree / "env" / "bin" / "python"
         if not python.exists():
             raise ConfigurationError(
@@ -119,15 +161,10 @@ class FauxPyToolchain:
 
         self._ensure_fauxpy_installed(python, checkout.worktree)
 
+        fauxpy_command = self._build_fauxpy_command(python , config)
+
         completed = self._runner.run_command(
-            [
-                str(python),
-                "-m",
-                "pytest",
-                *config.test_targets,
-                "--src",
-                config.src,
-            ],
+            fauxpy_command,
             cwd=checkout.worktree,
             check=False,
             capture_output=True,
@@ -140,10 +177,13 @@ class FauxPyToolchain:
                 f"{raw_output}".strip()
             )
 
-        ranked_locations, formula = parse_fauxpy_sbfl_output(
+        all_metrics = parse_fauxpy_output(raw_output, metric_filter=None)
+        ranked_locations = parse_fauxpy_output(
             raw_output,
+            metric_filter=config.metric,
             top_n=config.top_n,
         )
+        formula = _resolve_metric_name(all_metrics, config.metric)
 
         return LocalizationResult(
             bug=checkout.bug,
@@ -154,6 +194,7 @@ class FauxPyToolchain:
                 "src": config.src,
                 "test_targets": list(config.test_targets),
                 "score_formula": formula,
+                "all_metrics": all_metrics,
                 "raw_output": raw_output,
                 "returncode": completed.returncode,
             },
@@ -180,15 +221,33 @@ class FauxPyToolchain:
                 "FauxPy is not installed in the project environment and installation "
                 f"failed. {_completed_output(install)}".strip()
             )
+        
+    def _build_fauxpy_command(self, python:Path , config:FauxPyConfig):
+        """
+        Helper function to build FauxPy commands from FauxPy-Config object
+        """
+        cmd = [str(python), "-m" , "pytest" , *config.test_targets ,
+               "--src", config.src , 
+                "--family" , config.family , 
+                "--granularity" , config.granularity ]
+        if config.failing_tests:
+            cmd += ["--failing-list", "[" + ",".join(config.failing_tests) + "]"]
+        for ex in config.exclude:
+            cmd += ["--exclude", ex]
+        return cmd
 
 
 class FauxPyLocalizer(FaultLocalizer):
+    """Fault-localizer adapter that delegates FauxPy execution to a toolchain."""
+
     def __init__(self, config: FauxPyConfig, toolchain: FauxPyToolchain) -> None:
+        """Create a localizer with a fixed FauxPy config and execution toolchain."""
         self._config = config
         self._toolchain = toolchain
 
     @property
     def name(self) -> str:
+        """Return the stable backend name used in localization results."""
         return "fauxpy"
 
     def localize(
@@ -197,21 +256,58 @@ class FauxPyLocalizer(FaultLocalizer):
         checkout: CheckoutResult,
         test_result: TestRunResult | None = None,
     ) -> LocalizationResult:
+        """Localize ``bug`` in ``checkout`` using the configured FauxPy metric.
+
+        ``test_result`` is accepted to match the framework interface; FauxPy
+        derives its test selection from ``FauxPyConfig`` and the prepared
+        checkout instead.
+        """
         return self._toolchain.localize(self._config, checkout)
 
 
-def parse_fauxpy_sbfl_output(
+@overload
+def parse_fauxpy_output(
     raw_output: str,
     *,
+    metric_filter: None = None,
     top_n: int | None = None,
-) -> tuple[list[RankedLocation], str | None]:
-    formula: str | None = None
-    rows: list[RankedLocation] = []
-    in_selected_table = False
+) -> dict[str, list[RankedLocation]]:
+    ...
 
+
+@overload
+def parse_fauxpy_output(
+    raw_output: str,
+    *,
+    metric_filter: str,
+    top_n: int | None = None,
+) -> list[RankedLocation]:
+    ...
+
+
+def parse_fauxpy_output(
+    raw_output: str,
+    *,
+    metric_filter: str | None = None,
+    top_n: int | None = None,
+) -> dict[str, list[RankedLocation]] | list[RankedLocation]:
+    """Parse FauxPy metric tables from pytest output.
+
+    FauxPy emits one ASCII table per scoring metric. When ``metric_filter`` is
+    ``None``, this function returns every table as ``{metric_name: rows}``.
+    When ``metric_filter`` is set, it returns only that metric's ranked rows.
+    Statement rows use ``File | Line | Score`` and function rows use
+    ``File | Function | Line | Score``.
+    """
+    metric_tables: dict[str, list[RankedLocation]] = {}
+    current_metric: str | None = None
+    current_rows: list[RankedLocation] | None = None
     formula_pattern = re.compile(r"Scores for (?P<formula>.+?)\s+\|")
     row_pattern = re.compile(
-        r"^(?P<file>.+?)\s+\|\s+(?P<line>\d+)\s+\|\s+(?P<score>-?\d+(?:\.\d+)?)\s*$"
+        r"^(?P<file>.+?)\s+\|"
+        r"(?:\s+(?P<function>.+?)\s+\|)?"
+        r"\s+(?P<line>\d+)\s+\|"
+        r"\s+(?P<score>-?\d+(?:\.\d+)?)\s*$"
     )
 
     for raw_line in raw_output.splitlines():
@@ -219,42 +315,67 @@ def parse_fauxpy_sbfl_output(
 
         formula_match = formula_pattern.search(line)
         if formula_match:
-            if formula is not None and rows:
-                break
-            formula = formula_match.group("formula").strip()
-            in_selected_table = True
+            current_metric = formula_match.group("formula").strip()
+            current_rows = metric_tables.setdefault(current_metric, [])
             continue
 
-        if not in_selected_table:
+        if current_metric is None or current_rows is None:
             continue
 
         if not line.strip() or line.lstrip().startswith("-") or line.strip().startswith("|"):
             continue
+    
         if line.strip().startswith("File"):
             continue
 
         row_match = row_pattern.match(line)
         if row_match is None:
-            if rows:
-                break
             continue
 
         file_path = row_match.group("file").strip()
+        function = row_match.group("function")
+        function = function.strip() if function is not None else None
         line_number = int(row_match.group("line"))
         score = float(row_match.group("score"))
-        rows.append(
+        current_rows.append(
             RankedLocation(
-                rank=len(rows) + 1,
+                rank=len(current_rows) + 1,
                 file_path=file_path,
-                location=f"{file_path}:{line_number}",
+                location=(
+                    f"{file_path}:{function}:{line_number}"
+                    if function
+                    else f"{file_path}:{line_number}"
+                ),
                 score=score,
                 line=line_number,
+                function=function,
                 raw_location=line.strip(),
-                metadata={"score_formula": formula},
+                metadata={"score_formula": current_metric},
             )
         )
 
-        if top_n is not None and len(rows) >= top_n:
-            break
+    if metric_filter is None:
+        if top_n is None:
+            return metric_tables
+        return {
+            metric: rows[:top_n]
+            for metric, rows in metric_tables.items()
+        }
 
-    return rows, formula
+    selected_metric = _resolve_metric_name(metric_tables, metric_filter)
+    if selected_metric is None:
+        return []
+    rows = metric_tables[selected_metric]
+    if top_n is not None:
+        return rows[:top_n]
+    return rows
+
+
+def _resolve_metric_name(
+    metric_tables: dict[str, list[RankedLocation]], metric_filter: str
+) -> str | None:
+    normalized_filter = metric_filter.strip().casefold()
+    for metric in metric_tables:
+        if metric.casefold() == normalized_filter:
+            return metric
+    return None

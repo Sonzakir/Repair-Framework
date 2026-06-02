@@ -22,6 +22,15 @@
   - returning structured test counts and raw output
 - Command-line interface via `python -m apr_framework`
 - Docker-based BugsInPy executor container
+- FauxPy fault-localization integration with CLI support for:
+  - SBFL and MBFL mode selection
+  - statement-level and function-level granularity
+  - metric selection with `--metric`
+  - limiting ranked locations with `--top-n`
+  - optional failing-test selection with `--failing_tests`
+  - parsing all FauxPy metric tables for later reuse
+- Generalized FauxPy output parser that supports both `File | Line | Score`
+and `File | Function | Line | Score` table formats
 - Dummy repair algorithm for three BugsInPy `black` bugs (1/3/23)
 - Dummy evaluation runner that creates structured run artifacts:
   - `config.json`
@@ -51,6 +60,7 @@ src/apr_framework/
     dummy_runner.py  # task 3 evaluation pipeline
   localization/
     base.py          # FaultLocalizer interface
+    fauxpy.py        # FauxPy localizer, config, toolchain, and output parser
   repair/
     base.py          # RepairAlgorithm interface
     dummy.py         # random ground-truth/no-op repair component
@@ -90,6 +100,17 @@ runs/                 # structured experiment outputs
 
 - **Repair is replaceable.** The dummy repair algorithm implements the same
 `RepairAlgorithm` interface that a later different repair components can implement.
+
+- **FauxPy is isolated behind the localization interface.** `FauxPyLocalizer`
+implements `FaultLocalizer`, while `FauxPyToolchain` handles command execution,
+FauxPy installation checks, pytest invocation, and output parsing. The rest of
+the framework consumes structured `LocalizationResult` and `RankedLocation`
+objects instead of parsing FauxPy output directly.
+
+- **FauxPy metrics are reusable.** The configured metric is used as the primary
+ranking shown by the CLI, and every metric table parsed from FauxPy output is
+stored in `metadata["all_metrics"]`. This keeps Tarantula, Ochiai, DStar, and
+other emitted tables available for later repair or reporting components.
 
 ## Requirements
 
@@ -194,6 +215,94 @@ Tests run: 1
 Passing: 0
 Failing: 1
 ```
+
+### FauxPy fault localization
+
+- The sprint added a `localize` command backed by FauxPy. It runs FauxPy inside
+the prepared BugsInPy checkout, parses the suspicious-location tables, and prints
+ranked locations for the selected metric.
+
+- FauxPy localization currently expects BugsInPy `run_test.sh` files that invoke
+pytest directly. The examples below use `PySnooper 1`, whose BugsInPy test script
+is pytest-based.
+
+- Prepare the bug first:
+
+```bash
+python -m apr_framework bugsinpy setup
+python -m apr_framework bugsinpy checkout PySnooper 1
+python -m apr_framework bugsinpy compile PySnooper 1
+```
+
+- Run localization with the default FauxPy backend:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1
+```
+
+- The backend flag is available too. At the moment, `fauxpy` is the only
+implemented localization backend:
+
+```bash
+python -m apr_framework localize --backend fauxpy --project PySnooper --bug 1
+```
+
+- Choose the source root when automatic inference is not enough:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --src pysnooper
+```
+
+- Select the metric used for the primary ranking:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai
+```
+
+- Limit the number of ranked locations printed:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai --top-n 10
+```
+
+- Run function-level localization:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --granularity function --metric ochiai --top-n 10
+```
+
+- Pass a failing test list to FauxPy:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --failing_tests "tests/test_chinese.py::test_chinese"
+```
+
+- Run MBFL mode:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --family mbfl --granularity statement --metric ochiai --top-n 10
+```
+
+- The CLI also accepts mutation strategy and budget values for MBFL:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --family mbfl --mutation_strategy first_order --mutation_budget 50 --metric ochiai
+```
+
+- What changed internally:
+  - `FauxPyConfig` now carries the localization family, granularity, metric,
+  failing tests, excludes, and MBFL options.
+  - `FauxPyToolchain` builds the pytest/FauxPy command from that config.
+  - `parse_fauxpy_output` parses all metric tables when `metric_filter=None`.
+  - `parse_fauxpy_output` returns only one metric's ranked rows when
+  `metric_filter` is set.
+  - The parser supports statement rows (`File | Line | Score`) and function rows
+  (`File | Function | Line | Score`).
+  - `LocalizationResult.metadata["all_metrics"]` stores the full metric map for
+  later reuse.
+
+- See `USAGE.md` for a compact command reference with the same runnable command
+examples.
 
 ## Dummy repair evaluation
 
@@ -300,9 +409,13 @@ python -m apr_framework bugsinpy setup
 | BugsInPy prepare environment | Safe compilation via `bugsinpy-safe-compile` and internal evaluation setup |
 | BugsInPy run tests | `bugsinpy test` |
 | Structured test results | `TestRunResult` with counts and raw output |
+| FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
+| FauxPy metric selection | `localize --metric ochiai` |
+| FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
+| FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
+| FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
 | CLI entry point | `python -m apr_framework` and `apr-framework` script |
 | Dummy repair component | `DummyRepairAlgorithm` |
 | Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` |
-
 
 

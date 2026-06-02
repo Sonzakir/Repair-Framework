@@ -20,12 +20,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("list-benchmarks")
 
+    # FauxPy CLI commands 
     localize_parser = subparsers.add_parser("localize")
     localize_parser.add_argument("--backend", choices=["fauxpy"], default="fauxpy")
     localize_parser.add_argument("--project", required=True)
     localize_parser.add_argument("--bug", type=int, required=True)
     localize_parser.add_argument("--src", default=None)
+    localize_parser.add_argument("--family" , type=str , choices=["sbfl", "mbfl"] ,default="sbfl")
+    localize_parser.add_argument("--granularity" , type=str, default="statement" , choices=["statement" , "function"])
+    localize_parser.add_argument("--failing_tests" , type=str , default=None)
     localize_parser.add_argument("--top-n", type=int, default=None)
+    localize_parser.add_argument("--mutation_strategy", type=str, default=None)
+    localize_parser.add_argument("--mutation_budget", type=int, default=None)
+    localize_parser.add_argument("--metric", type=str, default="ochiai")
+
+
+    
 
     ### BugsInPy CLI commands
     bugsinpy_parser = subparsers.add_parser("bugsinpy")

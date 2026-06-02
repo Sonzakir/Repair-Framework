@@ -26,11 +26,13 @@ def _run() -> int:
     args = parser.parse_args()
     project_root = Path.cwd()
 
+    # BugsInPy
     if args.command == "list-benchmarks":
         for name in list_benchmark_names():
             print(name)
         return 0
 
+    # FauxPy 
     if args.command == "localize":
         adapter = create_bugsinpy_adapter(project_root)
         adapter.toolchain.ensure_installed()
@@ -60,6 +62,7 @@ def _run() -> int:
             )
 
         src = args.src or _infer_fauxpy_src(worktree, args.project)
+        # WARN: Current tests list always comes from BugsInPy run_test.sh
         test_targets = load_pytest_targets(bug_dir / "run_test.sh")
         checkout = CheckoutResult(
             bug=BugIdentifier(
@@ -71,11 +74,21 @@ def _run() -> int:
             success=True,
             prepared=True,
         )
+
+        # create FauxPy-Config Object 
         config = FauxPyConfig(
             src=src,
             test_targets=test_targets,
+            family=args.family,
+            granularity=args.granularity, 
+            failing_tests=_parse_fauxpy_failing_tests_command(args.failing_tests),
             top_n=args.top_n,
+            mutation_strategy = args.mutation_strategy, 
+            mutation_budget = args.mutation_budget , 
+            metric = args.metric
         )
+        
+        # Localize the Faulty Locations 
         localizer = FauxPyLocalizer(config, FauxPyToolchain(adapter.toolchain))
         result = localizer.localize(checkout.bug, checkout)
 
@@ -94,7 +107,9 @@ def _run() -> int:
             print(result.metadata["raw_output"])
 
         return 0
+    
 
+    # BugsInPy
     if args.command == "bugsinpy":
         adapter = create_bugsinpy_adapter(project_root)
 
@@ -222,3 +237,20 @@ def _infer_fauxpy_src(worktree: Path, project: str) -> str:
     if (worktree / project).is_dir():
         return project
     return "."
+
+
+def _parse_fauxpy_failing_tests_command(value:str | None) -> list[str]:
+    if value is None:
+        return []
+    
+    stripped = value.strip()
+    if not stripped:
+        return []
+    if stripped.startswith("[") and stripped.endswith("]"):
+        stripped = stripped[1:-1]
+
+    return [
+        item.strip()
+        for item in stripped.split(",")
+        if item.strip()
+    ]
