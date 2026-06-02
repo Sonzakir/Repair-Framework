@@ -12,6 +12,12 @@ from apr_framework.repair import DummyRepairAlgorithm
 
 
 def main() -> int:
+    """
+    Execute the APR framework command-line application.
+
+    Returns:
+        Process exit code: `0` for success and `1` for handled framework errors.
+    """
     try:
         return _run()
     except APRFrameworkError as error:

@@ -6,23 +6,27 @@ from apr_framework.core.models import EvaluationResult
 
 class ReportGenerator(ABC):
     """
-    Abstract interface for generating run reports
-    #TODO: Currently DRAFT
+    Interface for components that turn evaluation results into report files.
     """
 
     @property
     @abstractmethod
     def name(self) -> str:
+        """
+        Stable report generator name used in logs and report metadata.
+        """
         raise NotImplementedError
 
     @abstractmethod
     def write_summary(self, results: list[EvaluationResult], output_dir: Path) -> Path:
         """
-        Writes a summary report for the given evaluation results to the specified output directory
+        Write a summary report for evaluation results.
+
         Args:
-            results (list[EvaluationResult]): Evaluation results to include in the summary report
-            output_dir (Path): Directory where the summary report should be written
+            results: Evaluation results to include in the summary.
+            output_dir: Directory where the report file should be written.
+
         Returns:
-            Path: Path to the generated summary report file
+            Path to the generated summary report file.
         """
         raise NotImplementedError

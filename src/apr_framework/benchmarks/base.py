@@ -1,6 +1,5 @@
 """
-Abstract Base Class for Benchmarks
-TODO: Documentations must be fixed __description__
+Abstract interfaces for benchmark integrations.
 """
 
 from abc import ABC, abstractmethod
@@ -16,7 +15,7 @@ from apr_framework.core.models import (
 
 class BenchmarkAdapter(ABC):
     """
-    Abstract Base class for benchmark integrations
+    Common interface that benchmark integrations implement for APR experiments.
     """
 
     @property
@@ -27,10 +26,11 @@ class BenchmarkAdapter(ABC):
 
     @abstractmethod
     def list_projects(self) -> list[str]:
-        """lists available projects in the benchmark
+        """
+        List project names available in the benchmark.
 
         Returns:
-            list[str]: _description_
+            Project names that can be passed to `list_bugs` or `checkout`.
         """
         raise NotImplementedError
 
@@ -39,45 +39,49 @@ class BenchmarkAdapter(ABC):
     @abstractmethod
     def list_bugs(self, project: str) -> list[BugInfo]:
         """
-        Returns all known bugs for a given project.
+        Return all known bugs for a project.
+
         Args:
-            project (str): Name of the project (for example black)
+            project: Name of the benchmark project, such as `black`.
 
         Returns:
-            list[BugInfo]: _description_
+            Bug metadata records for the requested project.
         """
         raise NotImplementedError
 
     @abstractmethod
     def checkout(self, bug: BugIdentifier, destination: Path) -> CheckoutResult:
         """
-        Checkout a selected buggy program version into the destination directory
-        Download and setup this specific buggy version of the code
+        Check out a selected buggy program version into a destination directory.
+
         Args:
-            bug (BugIdentifier): A BugIdentifier model that contains benchmark name, project name , id of this specific bug
-            destination (Path): Working directory of the checked out project
+            bug: Identifier for the benchmark, project, and bug id to check out.
+            destination: Parent directory where the buggy project should be created.
 
         Returns:
-            CheckoutResult:  Outcome of a benchmark checkout operation
+            Checkout result describing the created worktree.
         """
         raise NotImplementedError
 
     @abstractmethod
     def prepare_environment(self, checkout: CheckoutResult) -> None:
         """
-        Prepare dependencies or environment for the checked out bug.
+        Prepare dependencies or build artifacts for a checked-out bug.
+
         Args:
-            checkout (CheckoutResult): _description_
+            checkout: Checkout result whose worktree should be made testable.
         """
         raise NotImplementedError
 
     @abstractmethod
     def run_tests(self, checkout: CheckoutResult) -> TestRunResult:
         """
-        Run tests for the checkout bug and return structured results
+        Run tests for a checked-out bug and return structured results.
+
         Args:
-            checkout (CheckoutResult): _description_
+            checkout: Prepared checkout to test.
+
         Returns:
-            TestRunResult: _description_
+            Test results and raw command output for the checkout.
         """
         raise NotImplementedError

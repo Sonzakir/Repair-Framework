@@ -46,15 +46,35 @@ class DummyRepairAlgorithm(RepairAlgorithm):
 
     @property
     def name(self) -> str:
+        """
+        Stable repair algorithm name used by dummy evaluation runs.
+        """
         return "dummy-repair"
 
     @property
     def supported_bugs(self) -> tuple[BugIdentifier, ...]:
+        """
+        Bugs for which the dummy repair algorithm can return a patch candidate.
+        """
         return SUPPORTED_DUMMY_BUGS
 
     def generate_patches(
         self, bug: BugIdentifier, checkout: CheckoutResult
     ) -> list[PatchCandidate]:
+        """
+        Generate one dummy patch candidate for supported BugsInPy bugs.
+
+        Depending on the configured or random outcome, the candidate is either
+        the BugsInPy ground-truth diff or a no-op patch with empty diff text.
+
+        Args:
+            bug: Bug for which a candidate patch is requested.
+            checkout: Checkout result for the buggy project. Accepted for the
+                repair interface; the dummy implementation only needs the bug id.
+
+        Returns:
+            A single dummy patch candidate for supported bugs, otherwise an empty list.
+        """
         if bug not in SUPPORTED_DUMMY_BUGS:
             return []
 
@@ -80,6 +100,18 @@ class DummyRepairAlgorithm(RepairAlgorithm):
     def validate_patch(
         self, bug: BugIdentifier, checkout: CheckoutResult, patch: PatchCandidate
     ) -> RepairAttemptResult:
+        """
+        Classify a dummy patch as no-patch or correct from its metadata.
+
+        Args:
+            bug: Bug being repaired.
+            checkout: Checkout result for the target worktree. Accepted for the
+                repair interface; this implementation does not inspect it.
+            patch: Dummy patch candidate to validate.
+
+        Returns:
+            Repair attempt result matching the dummy patch outcome.
+        """
         if patch.metadata.get("is_noop"):
             return RepairAttemptResult(
                 bug=bug,

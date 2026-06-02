@@ -42,10 +42,16 @@ class DummyEvaluationRunner(EvaluationRunner):
 
     @property
     def name(self) -> str:
+        """
+        Stable name written to dummy evaluation logs and config files.
+        """
         return "dummy-evaluation-runner"
 
     @property
     def last_run_dir(self) -> Path | None:
+        """
+        Directory created for the most recent run, or `None` before `run` is called.
+        """
         return self._last_run_dir
 
     def run(
@@ -55,6 +61,22 @@ class DummyEvaluationRunner(EvaluationRunner):
         repair: RepairAlgorithm,
         localizer: FaultLocalizer | None = None,
     ) -> list[EvaluationResult]:
+        """
+        Run the dummy APR pipeline and write run artifacts to disk.
+
+        For each bug, the runner checks out the project, prepares it, runs
+        baseline tests, asks the repair algorithm for patches, optionally applies
+        the first patch, and records final test results.
+
+        Args:
+            bugs: Bugs to evaluate.
+            benchmark: Benchmark adapter used for checkout, compile, and tests.
+            repair: Repair algorithm that supplies candidate patches.
+            localizer: Currently accepted for interface compatibility but unused.
+
+        Returns:
+            Evaluation results summarizing the status and timestamps for each bug.
+        """
         run_dir = self._create_run_dir()
         self._last_run_dir = run_dir
         started_at = self._now()

@@ -8,13 +8,15 @@ from apr_framework.repair.base import RepairAlgorithm
 
 class EvaluationRunner(ABC):
     """
-    Abstract base class for experiment execution
-    # TODO: Currently Draft
+    Interface for components that execute APR experiments over bugs.
     """
 
     @property
     @abstractmethod
     def name(self) -> str:
+        """
+        Stable runner name used in logs, reports, and serialized run metadata.
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -26,14 +28,15 @@ class EvaluationRunner(ABC):
         localizer: FaultLocalizer | None = None,
     ) -> list[EvaluationResult]:
         """
-        Executes the evaluation pipeline for the given bugs and returns one EvaluationResult per processed bug.
+        Execute the evaluation pipeline for a sequence of bugs.
+
         Args:
-            bugs (list[BugIdentifier]): List of bugs to be processed in the pipeline
-            benchmark (BenchmarkAdapter): Benchmark adapter used to access bug data, checkout buggy versions, and return tests
-            repair (RepairAlgorithm): Repair component for generating and validating candidate patches
-            localizer (FaultLocalizer | None, optional): Fault localization component used to identify suspicious code locations before repair. Defaults to None.
+            bugs: Bugs to process in this evaluation run.
+            benchmark: Adapter used to check out bugs and run benchmark tests.
+            repair: Repair algorithm used to generate and validate patches.
+            localizer: Optional fault localizer used before repair.
 
         Returns:
-            list[EvaluationResult]: _description_
+            One evaluation result per processed bug.
         """
         raise NotImplementedError

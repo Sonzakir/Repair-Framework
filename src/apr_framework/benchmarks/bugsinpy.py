@@ -48,6 +48,15 @@ def _completed_returncode(completed: subprocess.CompletedProcess[str]) -> int:
 
 @dataclass(frozen=True)
 class BugsInPyConfig:
+    """
+    Filesystem configuration used by the BugsInPy benchmark integration.
+
+    Attributes:
+        repo_dir: Local checkout of the BugsInPy repository and command scripts.
+        workspace_dir: Directory where buggy project worktrees are checked out.
+        project_root: Repair framework root used to map host paths into Docker.
+    """
+
     repo_dir: Path  # Local copy of the BugsInPy project
     workspace_dir: Path  # Checked-out project
     project_root: Path | None = None  # Repair framework root as seen by this process
@@ -100,10 +109,16 @@ class BugsInPyDockerExecutor:
 
     @property
     def image(self) -> str:
+        """
+        Docker image name used to create the BugsInPy executor container.
+        """
         return self._image
 
     @property
     def container(self) -> str:
+        """
+        Docker container name used for running BugsInPy commands.
+        """
         return self._container
 
     @property
@@ -113,6 +128,13 @@ class BugsInPyDockerExecutor:
         return self._config.project_root
 
     def ensure_ready(self) -> None:
+        """
+        Ensure Docker, the BugsInPy image, and the executor container are usable.
+
+        Builds the image and creates or starts the container when needed. Raises a
+        framework error if Docker is unavailable or the container cannot execute
+        BugsInPy commands.
+        """
         self._ensure_docker_available()
         self._ensure_image()
         self._ensure_container()
@@ -126,6 +148,22 @@ class BugsInPyDockerExecutor:
         check: bool = True,
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        """
+        Execute a BugsInPy command inside the prepared Docker container.
+
+        Args:
+            command_name: Name of the script in `framework/bin`, such as
+                `bugsinpy-checkout` or `bugsinpy-test`.
+            *args: Command-line arguments passed to the BugsInPy script. Absolute
+                project paths are translated to their container paths when possible.
+            cwd: Host-side working directory for the command. Defaults to the
+                BugsInPy workspace inside the container.
+            check: Whether Docker should raise on a non-zero command exit code.
+            capture_output: Whether stdout and stderr should be captured.
+
+        Returns:
+            The completed Docker process for the executed BugsInPy command.
+        """
         self._ensure_docker_available()
         if not self._container_exists():
             raise BenchmarkError(
@@ -405,10 +443,16 @@ class BugsInPyToolchain:
 
     @property
     def repo_dir(self) -> Path:
+        """
+        Local directory containing the BugsInPy repository checkout.
+        """
         return self._config.repo_dir
 
     @property
     def workspace_dir(self) -> Path:
+        """
+        Local directory used for BugsInPy worktrees and evaluation state.
+        """
         return self._config.workspace_dir
 
     def is_installed(self) -> bool:
@@ -432,6 +476,12 @@ class BugsInPyToolchain:
         return self.repo_dir / "framework" / "bin" / command_name
 
     def bootstrap(self) -> None:
+        """
+        Install and prepare the local BugsInPy toolchain.
+
+        Creates the workspace directory, clones BugsInPy if it is missing,
+        normalizes command scripts for execution, and prepares the Docker executor.
+        """
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
         if not self.is_installed():
@@ -475,6 +525,12 @@ class BugsInPyToolchain:
             script.chmod(script.stat().st_mode | 0o111)
 
     def ensure_installed(self) -> None:
+        """
+        Validate that the BugsInPy repository is installed locally.
+
+        Raises:
+            BenchmarkError: If setup has not created the expected command scripts.
+        """
         if not self.is_installed():
             raise BenchmarkError(
                 "BugsInPy is not installed. Run `python -m apr_framework bugsinpy setup` first."
@@ -488,6 +544,19 @@ class BugsInPyToolchain:
         check: bool = True,
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        """
+        Run a BugsInPy command after verifying the toolchain is installed.
+
+        Args:
+            command_name: Name of the BugsInPy command script to execute.
+            *args: Command-line arguments passed to the command script.
+            cwd: Optional host-side working directory for the command.
+            check: Whether to raise on a non-zero Docker process exit code.
+            capture_output: Whether stdout and stderr should be captured.
+
+        Returns:
+            The completed process returned by the Docker executor.
+        """
         self.ensure_installed()
         return self._executor.run_bugsinpy(
             command_name,
@@ -499,17 +568,27 @@ class BugsInPyToolchain:
 
 
 class BugsInPyAdapter(BenchmarkAdapter):
+    """
+    Benchmark adapter that exposes BugsInPy projects, bugs, checkout, and tests.
+
+    The adapter converts framework-level requests into BugsInPy command-line
+    calls through `BugsInPyToolchain` and returns framework domain models.
+    """
+
     def __init__(self, toolchain: BugsInPyToolchain) -> None:
         self._toolchain = toolchain
 
     @property
     def name(self) -> str:
+        """
+        Stable benchmark name used in bug identifiers and CLI output.
+        """
         return "bugsinpy"
 
     @property
     def toolchain(self) -> BugsInPyToolchain:
         """
-        Getter on BugsinPy Toolchain
+        BugsInPy toolchain used to run setup and benchmark commands.
         """
         return self._toolchain
 
@@ -533,6 +612,20 @@ class BugsInPyAdapter(BenchmarkAdapter):
         return aliases
 
     def resolve_project(self, project: str) -> str:
+        """
+        Resolve a user-provided BugsInPy project name to its canonical directory name.
+
+        Accepts common aliases such as lowercase names and dot-vs-dash variants.
+
+        Args:
+            project: Project name or alias supplied by the caller.
+
+        Returns:
+            Canonical BugsInPy project directory name.
+
+        Raises:
+            BenchmarkError: If no matching BugsInPy project exists.
+        """
         self._toolchain.ensure_installed()
         aliases = self._project_aliases()
 
@@ -544,17 +637,24 @@ class BugsInPyAdapter(BenchmarkAdapter):
         raise BenchmarkError(f"Unknown BugsInPy project: {project}")
 
     def list_projects(self) -> list[str]:
+        """
+        List all available BugsInPy projects by canonical project name.
+
+        Returns:
+            Sorted project names discovered under the BugsInPy `projects` directory.
+        """
         self._toolchain.ensure_installed()
         return sorted(set(self._project_aliases().values()))
 
     def list_bugs(self, project: str) -> list[BugInfo]:
         """
-        Given project name as a string, returns a list of all bugs in the project
+        Return all known BugsInPy bugs for a project.
+
         Args:
-            project (str): Project name
+            project: Project name or alias to inspect.
 
         Returns:
-            list[BugInfo]: List of bugs for that projects
+            Bug metadata for each numeric bug directory in the project.
         """
         canonical_project = self.resolve_project(project)
         bugs_dir = self._toolchain.repo_dir / "projects" / canonical_project / "bugs"
@@ -574,15 +674,17 @@ class BugsInPyAdapter(BenchmarkAdapter):
 
     def checkout(self, bug: BugIdentifier, destination: Path) -> CheckoutResult:
         """
-        Wrapper around the BugsInPy's bugsinpy-checkout command.
-        Gets the buggy source code onto disk
-        See: .tools\bugsinpy\framework\bin\bugsinpy-checkout
+        Check out the buggy version of a BugsInPy bug into a destination directory.
+
+        Wraps the BugsInPy `bugsinpy-checkout` command and returns the worktree
+        path where the project was created.
+
         Args:
-            bug (BugIdentifier): A BugIdentifier model that contains benchmark name, project name , id of this specific bug
-            destination (Path): Working directory of the checked out project
+            bug: Bug identifier containing benchmark, project, and bug id.
+            destination: Parent directory where the project worktree should be created.
 
         Returns:
-            CheckoutResult:  Outcome of a benchmark checkout operation
+            Successful checkout result pointing at the checked-out project worktree.
         """
         canonical_project = self.resolve_project(bug.project)
         canonical_bug = BugIdentifier(
@@ -632,10 +734,13 @@ class BugsInPyAdapter(BenchmarkAdapter):
 
     def prepare_environment(self, checkout: CheckoutResult) -> None:
         """
-        Makes checked-out buggy project runnable and testable before the framework executes tests or repair steps.
-        See: .tools\bugsinpy\framework\bin\bugsinpy-safe-compile
+        Compile or prepare a checked-out BugsInPy project for testing.
+
+        Runs `bugsinpy-safe-compile` in the checkout worktree and marks the
+        checkout as prepared when the command succeeds.
+
         Args:
-            checkout (CheckoutResult): _description_
+            checkout: Checkout result whose worktree should be prepared.
         """
         completed = self._toolchain.run_bugsinpy(
             "bugsinpy-safe-compile",
@@ -652,6 +757,18 @@ class BugsInPyAdapter(BenchmarkAdapter):
         checkout.prepared = True
 
     def run_tests(self, checkout: CheckoutResult) -> TestRunResult:
+        """
+        Execute the BugsInPy test command for a prepared checkout.
+
+        Parses common pytest and unittest summaries from the command output into
+        aggregate pass, fail, and error counts while preserving the raw output.
+
+        Args:
+            checkout: Checkout result whose worktree should be tested.
+
+        Returns:
+            Structured test run result for the checked-out bug.
+        """
         PYTEST_SUMMARY_PATTERN = re.compile(
             r"(?:(?P<failed>\d+)\s+failed)?[, ]*"
             r"(?:(?P<passed>\d+)\s+passed)?[, ]*"
