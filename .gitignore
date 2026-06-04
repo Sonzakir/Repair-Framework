@@ -207,9 +207,6 @@ marimo/_lsp/
 __marimo__/
 
 
-# ignore assignment pdfs
-*.pdf
-docs/
 .tools/bugsinpy
 .workspace/*
 .tools/*

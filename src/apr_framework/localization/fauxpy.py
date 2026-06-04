@@ -34,13 +34,60 @@ def _validate_string_list(name: str, values: list[str]) -> None:
         raise ConfigurationError(f"FauxPy {name} must contain only strings.")
 
 
+def _translate_unittest_target(target: str) -> str:
+    parts = target.split(".")
+    selector_start = None
+
+    for index, part in enumerate(parts):
+        if part[:1].isupper():
+            selector_start = index
+            break
+
+    if selector_start is None and len(parts) > 2 and parts[-1].startswith("test"):
+        selector_start = len(parts) - 1
+
+    module_parts = parts if selector_start is None else parts[:selector_start]
+    selector_parts = [] if selector_start is None else parts[selector_start:]
+
+    module = "/".join(module_parts) + ".py"
+    if not selector_parts:
+        return module
+
+    return module + "::" + "::".join(selector_parts)
+
+
+def _unittest_targets(parts: list[str]) -> list[str]:
+    targets: list[str] = []
+    skip_next = False
+    options_with_values = {"-k", "--pattern"}
+
+    for part in parts:
+        if skip_next:
+            skip_next = False
+            continue
+        if part in options_with_values:
+            skip_next = True
+            continue
+        if part.startswith("-"):
+            continue
+        if part == "discover":
+            raise ConfigurationError(
+                "FauxPy localization does not support unittest discover commands."
+            )
+
+        targets.append(_translate_unittest_target(part))
+
+    return targets
+
+
 def load_pytest_targets(run_test_script: Path) -> list[str]:
     """Return pytest targets declared by a BugsInPy ``run_test.sh`` script.
 
-    The parser accepts direct ``pytest`` commands and ``python -m pytest``
-    commands, skips comments and blank lines, and raises ``ConfigurationError``
-    when the script is missing, contains unsupported commands, or has no
-    runnable pytest targets.
+    The parser accepts direct ``pytest`` commands, ``python -m pytest`` commands,
+    and targeted ``python -m unittest`` commands that pytest can execute after
+    translation to node IDs. It skips comments and blank lines, and raises
+    ``ConfigurationError`` when the script is missing, contains unsupported
+    commands, or has no runnable pytest targets.
     """
     if not run_test_script.exists():
         raise ConfigurationError(f"No BugsInPy test script found at {run_test_script}")
@@ -64,10 +111,15 @@ def load_pytest_targets(run_test_script: Path) -> list[str]:
         if len(parts) >= 3 and parts[1:3] == ["-m", "pytest"]:
             targets.extend(parts[3:])
             continue
+        # python -m unittest style calls
+        if len(parts) >= 3 and parts[1:3] == ["-m", "unittest"]:
+            targets.extend(_unittest_targets(parts[3:]))
+            continue
 
         raise ConfigurationError(
             "FauxPy localization currently supports BugsInPy run_test.sh lines "
-            f"that invoke pytest directly. Unsupported line: {line}"
+            "that invoke pytest directly or targeted unittest commands. "
+            f"Unsupported line: {line}"
         )
 
     if not targets:
@@ -150,11 +202,13 @@ class FauxPyToolchain:
         formula, the FauxPy run options, and ``all_metrics`` containing every
         parsed metric table for later consumers.
         """
-        # extract python version from the checked out projects venv
-        python = checkout.worktree / "env" / "bin" / "python"
-        if not python.exists():
+        # Use a relative interpreter path because BugsInPy creates the venv in
+        # its executor container; absolute venv symlinks can look broken here.
+        python = Path("env") / "bin" / "python"
+        host_python = checkout.worktree / python
+        if not host_python.exists() and not host_python.is_symlink():
             raise ConfigurationError(
-                f"No prepared virtual environment found at {python}. "
+                f"No prepared virtual environment found at {host_python}. "
                 "Run `python -m apr_framework bugsinpy compile "
                 f"{checkout.bug.project} {checkout.bug.bug_id}` first."
             )
@@ -210,6 +264,8 @@ class FauxPyToolchain:
         if show.returncode == 0:
             return
 
+        self._upgrade_fauxpy_build_tools(python, cwd)
+
         install = self._runner.run_command(
             [str(python), "-m", "pip", "install", "fauxpy"],
             cwd=cwd,
@@ -220,6 +276,30 @@ class FauxPyToolchain:
             raise ConfigurationError(
                 "FauxPy is not installed in the project environment and installation "
                 f"failed. {_completed_output(install)}".strip()
+            )
+
+    def _upgrade_fauxpy_build_tools(self, python: Path, cwd: Path) -> None:
+        upgrade = self._runner.run_command(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "pip<25.1",
+                "setuptools",
+                "wheel",
+                "packaging",
+            ],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+        )
+        if upgrade.returncode != 0:
+            raise ConfigurationError(
+                "FauxPy is not installed in the project environment and the "
+                "framework could not upgrade the environment build tooling. "
+                f"{_completed_output(upgrade)}".strip()
             )
         
     def _build_fauxpy_command(self, python:Path , config:FauxPyConfig):

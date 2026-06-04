@@ -62,8 +62,11 @@ def _run() -> int:
             )
 
         src = args.src or _infer_fauxpy_src(worktree, args.project)
-        # WARN: Current tests list always comes from BugsInPy run_test.sh
-        test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        # Strip pytest flags (e.g. -q, -s) so only node IDs go into --failing-list.
+        bug_test_ids = [t for t in bug_test_targets if not t.startswith("-")]
+        test_targets = _parse_fauxpy_test_targets_command(args.test_target) or bug_test_targets
+        failing_tests = _parse_fauxpy_failing_tests_command(args.failing_tests) or bug_test_ids
         checkout = CheckoutResult(
             bug=BugIdentifier(
                 benchmark="bugsinpy",
@@ -81,7 +84,7 @@ def _run() -> int:
             test_targets=test_targets,
             family=args.family,
             granularity=args.granularity, 
-            failing_tests=_parse_fauxpy_failing_tests_command(args.failing_tests),
+            failing_tests=failing_tests,
             top_n=args.top_n,
             mutation_strategy = args.mutation_strategy, 
             mutation_budget = args.mutation_budget , 
@@ -102,7 +105,7 @@ def _run() -> int:
             score = "" if location.score is None else f"{location.score:.4f}"
             print(f"{location.rank}. {location.file_path}:{location.line} {score}".rstrip())
 
-        if result.metadata.get("raw_output"):
+        if args.show_raw_output and result.metadata.get("raw_output"):
             print("\nRaw FauxPy output:")
             print(result.metadata["raw_output"])
 
@@ -232,10 +235,27 @@ def _run() -> int:
 
 def _infer_fauxpy_src(worktree: Path, project: str) -> str:
     package_name = project.replace("-", "_")
-    if (worktree / package_name).is_dir():
-        return package_name
-    if (worktree / project).is_dir():
-        return project
+
+    # Enumerate real names to handle case-sensitive filesystems inside Docker.
+    try:
+        entries = {e.name: e for e in worktree.iterdir()}
+    except OSError:
+        return "."
+
+    for candidate in [package_name, project, package_name.lower(), project.lower()]:
+        entry = entries.get(candidate)
+        if entry is not None and entry.is_dir():
+            return candidate
+
+    for candidate in [
+        f"{package_name}.py",
+        f"{project}.py",
+        f"{package_name.lower()}.py",
+    ]:
+        entry = entries.get(candidate)
+        if entry is not None and entry.is_file():
+            return candidate
+
     return "."
 
 
@@ -254,3 +274,13 @@ def _parse_fauxpy_failing_tests_command(value:str | None) -> list[str]:
         for item in stripped.split(",")
         if item.strip()
     ]
+
+
+def _parse_fauxpy_test_targets_command(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+
+    targets: list[str] = []
+    for value in values:
+        targets.extend(item.strip() for item in value.split(",") if item.strip())
+    return targets
