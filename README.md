@@ -109,8 +109,9 @@ objects instead of parsing FauxPy output directly.
 
 - **FauxPy metrics are reusable.** The configured metric is used as the primary
 ranking shown by the CLI, and every metric table parsed from FauxPy output is
-stored in `metadata["all_metrics"]`. This keeps Tarantula, Ochiai, DStar, and
-other emitted tables available for later repair or reporting components.
+stored in `metadata["all_metrics"]`. This keeps Tarantula, Ochiai, DStar,
+Jaccard, and other emitted tables available for later repair or reporting
+components.
 
 ## Requirements
 
@@ -259,6 +260,20 @@ python -m apr_framework localize --project PySnooper --bug 1 --src pysnooper
 python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai
 ```
 
+Jaccard is available for SBFL runs through the framework's FauxPy 0.7.0 patch,
+which is applied inside the prepared checkout environment before localization:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --metric jaccard
+```
+
+Implementation note: FauxPy normally computes Tarantula, Ochiai, and DStar for
+SBFL. The framework adds Jaccard by patching the installed FauxPy copy in the
+bug checkout's virtual environment before running localization. The patch adds a
+`MetricJaccard` formula, registers it with FauxPy's SBFL metric list, extends
+FauxPy's local SQLite score table, and lets the existing output parser select
+the emitted `Scores for Jaccard` table with `--metric jaccard`.
+
 - Limit the number of ranked locations printed:
 
 ```bash
@@ -292,7 +307,8 @@ python -m apr_framework localize --project PySnooper --bug 1 --family mbfl --mut
 - What changed internally:
   - `FauxPyConfig` now carries the localization family, granularity, metric,
   failing tests, excludes, and MBFL options.
-  - `FauxPyToolchain` builds the pytest/FauxPy command from that config.
+  - `FauxPyToolchain` installs pinned FauxPy 0.7.0 when needed, applies the
+  Jaccard SBFL patch, and builds the pytest/FauxPy command from that config.
   - `parse_fauxpy_output` parses all metric tables when `metric_filter=None`.
   - `parse_fauxpy_output` returns only one metric's ranked rows when
   `metric_filter` is set.
@@ -410,7 +426,7 @@ python -m apr_framework bugsinpy setup
 | BugsInPy run tests | `bugsinpy test` |
 | Structured test results | `TestRunResult` with counts and raw output |
 | FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
-| FauxPy metric selection | `localize --metric ochiai` |
+| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard` |
 | FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
 | FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
 | FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
@@ -447,5 +463,3 @@ python -m apr_framework localize \
   --top-n 10 \
   --show-raw-output
 ```
-
-

@@ -46,7 +46,7 @@ python -m apr_framework bugsinpy list-bugs <project>
 python -m apr_framework bugsinpy checkout <project> <bug_id>
 python -m apr_framework bugsinpy compile <project> <bug_id>
 python -m apr_framework bugsinpy test <project> <bug_id>
-python -m apr_framework localize --project <project> --bug <bug_id> [--backend fauxpy] [--family sbfl|mbfl] [--granularity statement|function] [--metric ochiai|tarantula|dstar] [--top-n N] [--src <pkg>] [--failing_tests "test::id"]
+python -m apr_framework localize --project <project> --bug <bug_id> [--backend fauxpy] [--family sbfl|mbfl] [--granularity statement|function] [--metric ochiai|tarantula|dstar|jaccard] [--top-n N] [--src <pkg>] [--failing_tests "test::id"]
 python -m apr_framework bugsinpy evaluate-dummy --seed 123
 ```
 
@@ -89,7 +89,7 @@ src/apr_framework/
 
 **Shared domain models.** All components communicate through dataclasses from `core/models.py` — not raw strings or dicts. `LocalizationResult.metadata["all_metrics"]` stores every metric table parsed from FauxPy output so later stages (repair, reporting) can consume any metric without re-running FauxPy.
 
-**FauxPy isolation.** `FauxPyLocalizer` implements `FaultLocalizer`; `FauxPyToolchain` handles FauxPy installation, pytest invocation, and output parsing. `parse_fauxpy_output` handles both statement rows (`File | Line | Score`) and function rows (`File | Function | Line | Score`).
+**FauxPy isolation.** `FauxPyLocalizer` implements `FaultLocalizer`; `FauxPyToolchain` handles pinned FauxPy installation, the in-environment Jaccard SBFL patch, pytest invocation, and output parsing. `parse_fauxpy_output` handles both statement rows (`File | Line | Score`) and function rows (`File | Function | Line | Score`).
 
 **`load_pytest_targets`** in `localization/fauxpy.py` converts BugsInPy `run_test.sh` scripts (pytest or `python -m unittest`) into pytest-compatible target strings. It raises `ConfigurationError` for `unittest discover`.
 

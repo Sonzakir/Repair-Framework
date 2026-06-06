@@ -15,6 +15,186 @@ from apr_framework.core.models import (
 )
 from apr_framework.localization.base import FaultLocalizer
 
+FAUXPY_INSTALL_REQUIREMENT = "fauxpy==0.7.0"
+
+_FAUXPY_JACCARD_PATCH_SCRIPT = r"""
+from importlib.util import find_spec
+from pathlib import Path
+
+spec = find_spec("fauxpy")
+if spec is None or spec.origin is None:
+    raise SystemExit("Cannot patch FauxPy because the fauxpy package is not importable.")
+
+package_root = Path(spec.origin).parent
+sbfl_root = package_root / "fault_localization" / "sbfl"
+
+
+def read(path):
+    return path.read_text(encoding="utf-8")
+
+
+def write(path, text):
+    path.write_text(text, encoding="utf-8")
+
+
+def replace_once(text, old, new, label):
+    if new in text:
+        return text
+    if old not in text:
+        raise SystemExit(f"Cannot apply FauxPy Jaccard patch: expected {label} was not found.")
+    return text.replace(old, new, 1)
+
+
+metric_path = sbfl_root / "metric_jaccard.py"
+write(
+    metric_path,
+    '''class MetricJaccard:
+    def __init__(self, epsilon: float):
+        self._metric_name = \"Jaccard\"
+        self._epsilon = epsilon
+
+    def get_metric_name(self):
+        return self._metric_name
+
+    def compute(self, ef, ep, nf, np):
+        score = float(ef) / (ef + ep + nf + self._epsilon)
+        return score
+''',
+)
+
+ranking_path = sbfl_root / "ranking_metric_manager.py"
+ranking_text = read(ranking_path)
+ranking_text = replace_once(
+    ranking_text,
+    "from fauxpy.fault_localization.sbfl.metric_dstar import MetricDstar\n",
+    "from fauxpy.fault_localization.sbfl.metric_dstar import MetricDstar\n"
+    "from fauxpy.fault_localization.sbfl.metric_jaccard import MetricJaccard\n",
+    "ranking metric imports",
+)
+ranking_text = replace_once(
+    ranking_text,
+    "            MetricDstar(self.EPSILON),\n        ]",
+    "            MetricDstar(self.EPSILON),\n"
+    "            MetricJaccard(self.EPSILON),\n"
+    "        ]",
+    "ranking metric list",
+)
+write(ranking_path, ranking_text)
+
+db_path = sbfl_root / "db_manager.py"
+db_text = read(db_path)
+db_text = replace_once(
+    db_text,
+    '            f"Dstar REAL NOT NULL);"\n',
+    '            f"Dstar REAL NOT NULL, "\n'
+    '            f"Jaccard REAL NOT NULL);"\n',
+    "score table schema",
+)
+db_text = replace_once(
+    db_text,
+    '        score_dstar_table_index_command = (\n'
+    '            f"CREATE INDEX index_Dstar ON {self._Score_table} (Dstar);"\n'
+    '        )\n',
+    '        score_dstar_table_index_command = (\n'
+    '            f"CREATE INDEX index_Dstar ON {self._Score_table} (Dstar);"\n'
+    '        )\n'
+    '\n'
+    '        score_jaccard_table_index_command = (\n'
+    '            f"CREATE INDEX index_Jaccard ON {self._Score_table} (Jaccard);"\n'
+    '        )\n',
+    "score indexes",
+)
+db_text = replace_once(
+    db_text,
+    "            score_dstar_table_index_command,\n"
+    "            view_create_command,\n",
+    "            score_dstar_table_index_command,\n"
+    "            score_jaccard_table_index_command,\n"
+    "            view_create_command,\n",
+    "schema command list",
+)
+db_text = replace_once(
+    db_text,
+    '            f"VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?)",\n',
+    '            f"VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",\n',
+    "score insert placeholders",
+)
+db_text = replace_once(
+    db_text,
+    '                scores["Dstar"],\n'
+    "            ),\n",
+    '                scores["Dstar"],\n'
+    '                scores["Jaccard"],\n'
+    "            ),\n",
+    "score insert values",
+)
+db_text = replace_once(
+    db_text,
+    '        cur.execute(\n'
+    '            f"SELECT Entity, Dstar FROM {self._Score_table} ORDER BY Dstar DESC LIMIT ?",\n'
+    '            (top_n,),\n'
+    '        )\n'
+    '        score_dstar = cur.fetchall()\n'
+    '\n'
+    '        ranked_entities = {\n'
+    '            "Tarantula": score_tarantula,\n'
+    '            "Ochiai": score_ochiai,\n'
+    '            "Dstar": score_dstar,\n'
+    '        }\n',
+    '        cur.execute(\n'
+    '            f"SELECT Entity, Dstar FROM {self._Score_table} ORDER BY Dstar DESC LIMIT ?",\n'
+    '            (top_n,),\n'
+    '        )\n'
+    '        score_dstar = cur.fetchall()\n'
+    '\n'
+    '        cur.execute(\n'
+    '            f"SELECT Entity, Jaccard FROM {self._Score_table} ORDER BY Jaccard DESC LIMIT ?",\n'
+    '            (top_n,),\n'
+    '        )\n'
+    '        score_jaccard = cur.fetchall()\n'
+    '\n'
+    '        ranked_entities = {\n'
+    '            "Tarantula": score_tarantula,\n'
+    '            "Ochiai": score_ochiai,\n'
+    '            "Dstar": score_dstar,\n'
+    '            "Jaccard": score_jaccard,\n'
+    '        }\n',
+    "top-n Jaccard query",
+)
+db_text = replace_once(
+    db_text,
+    '        cur.execute(\n'
+    '            f"SELECT Entity, Dstar FROM {self._Score_table} ORDER BY Dstar DESC"\n'
+    '        )\n'
+    '        score_dstar = cur.fetchall()\n'
+    '\n'
+    '        ranked_entities = {\n'
+    '            "Tarantula": score_tarantula,\n'
+    '            "Ochiai": score_ochiai,\n'
+    '            "Dstar": score_dstar,\n'
+    '        }\n',
+    '        cur.execute(\n'
+    '            f"SELECT Entity, Dstar FROM {self._Score_table} ORDER BY Dstar DESC"\n'
+    '        )\n'
+    '        score_dstar = cur.fetchall()\n'
+    '\n'
+    '        cur.execute(\n'
+    '            f"SELECT Entity, Jaccard FROM {self._Score_table} ORDER BY Jaccard DESC"\n'
+    '        )\n'
+    '        score_jaccard = cur.fetchall()\n'
+    '\n'
+    '        ranked_entities = {\n'
+    '            "Tarantula": score_tarantula,\n'
+    '            "Ochiai": score_ochiai,\n'
+    '            "Dstar": score_dstar,\n'
+    '            "Jaccard": score_jaccard,\n'
+    '        }\n',
+    "all-ranks Jaccard query",
+)
+write(db_path, db_text)
+print("FauxPy Jaccard patch applied.")
+"""
+
 
 def _completed_output(completed: subprocess.CompletedProcess[str]) -> str:
     return "\n".join(
@@ -213,7 +393,7 @@ class FauxPyToolchain:
                 f"{checkout.bug.project} {checkout.bug.bug_id}` first."
             )
 
-        self._ensure_fauxpy_installed(python, checkout.worktree)
+        self._ensure_patched_fauxpy_installed(python, checkout.worktree)
 
         fauxpy_command = self._build_fauxpy_command(python , config)
 
@@ -232,12 +412,21 @@ class FauxPyToolchain:
             )
 
         all_metrics = parse_fauxpy_output(raw_output, metric_filter=None)
+        formula = _resolve_metric_name(all_metrics, config.metric)
+        if formula is None:
+            available_metrics = ", ".join(sorted(all_metrics)) or "none"
+            raise ConfigurationError(
+                f"Metric '{config.metric}' was not emitted by FauxPy. "
+                f"Available metrics: {available_metrics}. "
+                "If you requested Jaccard, make sure the prepared checkout uses "
+                "the framework's patched FauxPy installation."
+            )
+
         ranked_locations = parse_fauxpy_output(
             raw_output,
             metric_filter=config.metric,
             top_n=config.top_n,
         )
-        formula = _resolve_metric_name(all_metrics, config.metric)
 
         return LocalizationResult(
             bug=checkout.bug,
@@ -254,6 +443,10 @@ class FauxPyToolchain:
             },
         )
 
+    def _ensure_patched_fauxpy_installed(self, python: Path, cwd: Path) -> None:
+        self._ensure_fauxpy_installed(python, cwd)
+        self._apply_fauxpy_jaccard_patch(python, cwd)
+
     def _ensure_fauxpy_installed(self, python: Path, cwd: Path) -> None:
         show = self._runner.run_command(
             [str(python), "-m", "pip", "show", "fauxpy"],
@@ -267,7 +460,7 @@ class FauxPyToolchain:
         self._upgrade_fauxpy_build_tools(python, cwd)
 
         install = self._runner.run_command(
-            [str(python), "-m", "pip", "install", "fauxpy"],
+            [str(python), "-m", "pip", "install", FAUXPY_INSTALL_REQUIREMENT],
             cwd=cwd,
             check=False,
             capture_output=True,
@@ -276,6 +469,19 @@ class FauxPyToolchain:
             raise ConfigurationError(
                 "FauxPy is not installed in the project environment and installation "
                 f"failed. {_completed_output(install)}".strip()
+            )
+
+    def _apply_fauxpy_jaccard_patch(self, python: Path, cwd: Path) -> None:
+        patch = self._runner.run_command(
+            [str(python), "-c", _FAUXPY_JACCARD_PATCH_SCRIPT],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+        )
+        if patch.returncode != 0:
+            raise ConfigurationError(
+                "FauxPy is installed, but the framework could not apply the "
+                f"Jaccard metric patch. {_completed_output(patch)}".strip()
             )
 
     def _upgrade_fauxpy_build_tools(self, python: Path, cwd: Path) -> None:

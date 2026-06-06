@@ -164,6 +164,12 @@ python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai
 ```
 
 Common FauxPy metric names include `ochiai`, `tarantula`, and `dstar`.
+For SBFL runs, the framework also patches FauxPy 0.7.0 inside the prepared
+checkout environment so `jaccard` is available:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --metric jaccard
+```
 
 ### Limit Ranked Output
 
@@ -234,4 +240,67 @@ python -m apr_framework bugsinpy checkout PySnooper 1
 python -m apr_framework bugsinpy compile PySnooper 1
 python -m apr_framework bugsinpy test PySnooper 1
 python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai --top-n 10
+```
+
+
+
+
+
+```bash
+root@71fe3e2ad45d:/workspace# python -m apr_framework localize --project black --bug 1 --family sbfl --src black.py --test-target tests/test_black.py --metric ochiai --top-n 20
+Project: black
+Bug ID: 1
+Backend: fauxpy
+Score formula: Ochiai
+Ranked locations:
+1. black.py:6339 0.4762
+2. black.py:5769 0.4762
+3. black.py:535 0.4762
+4. black.py:534 0.4762
+5. black.py:533 0.4762
+6. black.py:621 0.3922
+7. black.py:618 0.3922
+8. black.py:617 0.3922
+9. black.py:616 0.3922
+10. black.py:558 0.3922
+11. black.py:557 0.3922
+12. black.py:5750 0.3642
+13. black.py:5749 0.3642
+14. black.py:5748 0.3642
+15. black.py:5747 0.3415
+16. black.py:5742 0.3415
+17. black.py:5738 0.3415
+18. black.py:5737 0.3415
+19. black.py:5734 0.3415
+20. black.py:5720 0.3226
+```
+
+- One can use the Jaccard metric too
+```bash 
+root@71fe3e2ad45d:/workspace# python -m apr_framework localize --project black --bug 1 --family sbfl --src black.py --test-target tests/test_black.py --metric jaccard --top-n 20
+Project: black
+Bug ID: 1
+Backend: fauxpy
+Score formula: Jaccard
+Ranked locations:
+1. black.py:6339 0.2439
+2. black.py:5769 0.2439
+3. black.py:535 0.2439
+4. black.py:534 0.2439
+5. black.py:533 0.2439
+6. black.py:621 0.1639
+7. black.py:618 0.1639
+8. black.py:617 0.1639
+9. black.py:616 0.1639
+10. black.py:558 0.1639
+11. black.py:557 0.1639
+12. black.py:5750 0.1408
+13. black.py:5749 0.1408
+14. black.py:5748 0.1408
+15. black.py:5747 0.1235
+16. black.py:5742 0.1235
+17. black.py:5738 0.1235
+18. black.py:5737 0.1235
+19. black.py:5734 0.1235
+20. black.py:5720 0.1099
 ```

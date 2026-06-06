@@ -34,6 +34,7 @@ def _run() -> int:
 
     # FauxPy 
     if args.command == "localize":
+        # Currently we are running FauxPy only inside the BugsInPy projects
         adapter = create_bugsinpy_adapter(project_root)
         adapter.toolchain.ensure_installed()
 
