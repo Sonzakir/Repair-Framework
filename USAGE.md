@@ -220,14 +220,17 @@ debugging.
 Run FauxPy in mutation-based fault localization mode.
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --family mbfl --granularity statement --metric ochiai --top-n 10
+python -m apr_framework localize --project PySnooper --bug 1 --mbfl --granularity statement --metric metallaxis --top-n 10
 ```
 
-The CLI also accepts mutation strategy and budget values:
+Limit expensive mutant validation with the random selector:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --family mbfl --mutation_strategy first_order --mutation_budget 50 --metric ochiai
+python -m apr_framework localize --project PySnooper --bug 1 --mbfl --mutation-strategy random --budget 50 --metric metallaxis
 ```
+
+`--budget` limits how many mutants are validated. Use `--seed` to reproduce the
+same random selection; the default seed is `0`.
 
 ## Typical End-To-End Flow
 
@@ -304,3 +307,142 @@ Ranked locations:
 19. black.py:5734 0.1235
 20. black.py:5720 0.1099
 ```
+
+
+- MBFL usage 
+```bash 
+root@92e99d5a1a10:/workspace# python -m apr_framework localize \
+  --backend fauxpy \
+  --project black \
+  --bug 1 \
+  --src black.py \
+  --test-target tests/test_black.py \
+  --mbfl \
+  --mutation-strategy random \
+  --budget 5 \
+  --seed 1 \
+  --metric metallaxis \
+  --top-n 5 \
+  --show-raw-output
+Project: black
+Bug ID: 1
+Backend: fauxpy
+Score formula: Metallaxis
+Ranked locations:
+
+Raw FauxPy output:
+============================= test session starts ==============================
+platform linux -- Python 3.8.3, pytest-8.3.5, pluggy-1.5.0
+rootdir: /home/workspace/black_1/black
+configfile: pyproject.toml
+plugins: timeout-2.1.0, fauxpy-0.7.0, anyio-4.5.2
+collected 129 items
+
+tests/test_black.py .................................................... [ 40%]
+.............................................................F.......... [ 96%]
+.....                                                                    [100%]
+
+=================================== FAILURES ===================================
+__________ BlackTestCase.test_works_in_mono_process_only_environment ___________
+
+self = <tests.test_black.BlackTestCase testMethod=test_works_in_mono_process_only_environment>
+mock_executor = <MagicMock name='ProcessPoolExecutor' spec='ProcessPoolExecutor' id='281473147078928'>
+
+    @patch("black.ProcessPoolExecutor", autospec=True)
+    def test_works_in_mono_process_only_environment(self, mock_executor) -> None:
+        mock_executor.side_effect = OSError()
+        mode = black.FileMode()
+        with cache_dir() as workspace:
+            one = (workspace / "one.py").resolve()
+            with one.open("w") as fobj:
+                fobj.write("print('hello')")
+            two = (workspace / "two.py").resolve()
+            with two.open("w") as fobj:
+                fobj.write("print('hello')")
+            black.write_cache({}, [one], mode)
+>           self.invokeBlack([str(workspace)])
+
+tests/test_black.py:1288: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_black.py:162: in invokeBlack
+    self.assertEqual(result.exit_code, exit_code, msg=runner.stderr_bytes.decode())
+E   AssertionError: 1 != 0 :
+=============================== warnings summary ===============================
+env/lib/python3.8/site-packages/aiohttp/helpers.py:107
+  /home/workspace/black_1/black/env/lib/python3.8/site-packages/aiohttp/helpers.py:107: DeprecationWarning: "@coroutine" decorator is deprecated since Python 3.8, use "async def" instead
+    def noop(*args, **kwargs):  # type: ignore
+
+tests/test_black.py: 12 warnings
+  /home/workspace/black_1/black/env/lib/python3.8/site-packages/aiohttp/connector.py:964: DeprecationWarning: The loop argument is deprecated since Python 3.8, and scheduled for removal in Python 3.10.
+    hosts = await asyncio.shield(self._resolve_host(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+
+
+***************************************************
+                FauxPy Started!                    
+***************************************************
+
+FauxPy: ---> Running MBFL session
+FauxPy: ---> Targeted failing tests:
+FauxPy: --->   1. tests/test_black.py::BlackTestCase::test_works_in_mono_process_only_environment
+
+
+==============================
+ Dynamic Analysis in Progress 
+==============================
+
+FauxPy: ---> Candidate mutation locations: 90
+FauxPy: ---> Selected mutation locations: 5
+FauxPy: ---> Generating mutants using the mutation strategy Traditional for the following module:
+FauxPy: --->   /home/workspace/black_1/black/black.py
+FauxPy: ---> Number of generated mutants: 8
+FauxPy: ---> Total generated mutants: 8
+FauxPy: ---> Mutants selected for validation: 5
+FauxPy: ---> Mutation generation time: 7.4620
+FauxPy: ---> Running 5 Mutants
+FauxPy: ---> Running Mutant M0 (1/5)
+FauxPy: ---> Timeout or bad mutant
+FauxPy: ---> Running Mutant M1 (2/5)
+FauxPy: ---> Timeout or bad mutant
+FauxPy: ---> Running Mutant M2 (3/5)
+FauxPy: ---> Timeout or bad mutant
+FauxPy: ---> Running Mutant M3 (4/5)
+FauxPy: ---> Timeout or bad mutant
+FauxPy: ---> Running Mutant M4 (5/5)
+FauxPy: ---> Timeout or bad mutant
+FauxPy: ---> Mutant validation time: 0.4838
+
+
+--- Dynamic Analysis Complete ---
+
+============================
+ Fault Localization Results 
+============================
+
+=== Performance ===
+Execution Time: 59.8703
+
+-----------------------
+|   Scores for Muse   |
+-----------------------
+File | Line | Score
+-------------------
+-------------------
+
+-----------------------------
+|   Scores for Metallaxis   |
+-----------------------------
+File | Line | Score
+-------------------
+-------------------
+
+**************************************************
+                FauxPy Ended!                     
+**************************************************
+
+=========================== short test summary info ============================
+FAILED tests/test_black.py::BlackTestCase::test_works_in_mono_process_only_environment
+================= 1 failed, 128 passed, 13 warnings in 59.85s ==================
+root@92e99d5a1a10:/workspace# 
+````

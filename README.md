@@ -295,18 +295,23 @@ python -m apr_framework localize --project PySnooper --bug 1 --failing_tests "te
 - Run MBFL mode:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --family mbfl --granularity statement --metric ochiai --top-n 10
+python -m apr_framework localize --project PySnooper --bug 1 --mbfl --granularity statement --metric metallaxis --top-n 10
 ```
 
-- The CLI also accepts mutation strategy and budget values for MBFL:
+- Limit expensive MBFL mutant validation runs with the random mutation selector:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --family mbfl --mutation_strategy first_order --mutation_budget 50 --metric ochiai
+python -m apr_framework localize --project PySnooper --bug 1 --mbfl --mutation-strategy random --budget 50 --metric metallaxis
 ```
+
+  - `--budget` limits how many generated mutants are validated, which is the
+    expensive part of MBFL.
+  - `--seed` can be supplied to make random selection reproducible; it defaults
+    to `0`.
 
 - What changed internally:
   - `FauxPyConfig` now carries the localization family, granularity, metric,
-  failing tests, excludes, and MBFL options.
+  failing tests, excludes, and MBFL selection options.
   - `FauxPyToolchain` installs pinned FauxPy 0.7.0 when needed, applies the
   Jaccard SBFL patch, and builds the pytest/FauxPy command from that config.
   - `parse_fauxpy_output` parses all metric tables when `metric_filter=None`.

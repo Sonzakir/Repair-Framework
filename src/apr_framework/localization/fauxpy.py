@@ -1,5 +1,6 @@
 import re
 import shlex
+import sqlite3
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -195,6 +196,432 @@ write(db_path, db_text)
 print("FauxPy Jaccard patch applied.")
 """
 
+_FAUXPY_MBFL_SELECTION_PATCH_SCRIPT = r"""
+from importlib.util import find_spec
+from pathlib import Path
+
+spec = find_spec("fauxpy")
+if spec is None or spec.origin is None:
+    raise SystemExit("Cannot patch FauxPy because the fauxpy package is not importable.")
+
+package_root = Path(spec.origin).parent
+
+
+def read(path):
+    return path.read_text(encoding="utf-8")
+
+
+def write(path, text):
+    path.write_text(text, encoding="utf-8")
+
+
+def replace_once(text, old, new, label):
+    if new in text:
+        return text
+    if old not in text:
+        raise SystemExit(f"Cannot apply FauxPy MBFL selection patch: expected {label} was not found.")
+    return text.replace(old, new, 1)
+
+
+pytest_manager_path = package_root / "command_line" / "pytest_mode" / "pytest_option_manager.py"
+pytest_text = read(pytest_manager_path)
+pytest_text = replace_once(
+    pytest_text,
+    '''        group.addoption(
+            "--fauxpy-verbose",
+            action="store_true",
+            default=False,
+            help="Show detailed output from FauxPy plugin.",
+        )
+''',
+    '''        group.addoption(
+            "--fauxpy-verbose",
+            action="store_true",
+            default=False,
+            help="Show detailed output from FauxPy plugin.",
+        )
+        group.addoption(
+            "--mutation-selection",
+            default=None,
+            help="Select a framework-level MBFL mutation selection strategy.",
+        )
+        group.addoption(
+            "--mutation-budget",
+            default=None,
+            help="Maximum number of mutants to validate for selected MBFL strategies.",
+        )
+        group.addoption(
+            "--mutation-seed",
+            default="0",
+            help="Random seed used by framework-level MBFL mutation selection.",
+        )
+''',
+    "pytest MBFL selection options",
+)
+pytest_text = replace_once(
+    pytest_text,
+    '''        fauxpy_verbose_opt = pytest_config.getoption("--fauxpy-verbose")
+        file_or_dir = pytest_config.getoption("file_or_dir")
+''',
+    '''        fauxpy_verbose_opt = pytest_config.getoption("--fauxpy-verbose")
+        mutation_selection_opt = pytest_config.getoption("--mutation-selection")
+        mutation_budget_opt = pytest_config.getoption("--mutation-budget")
+        mutation_seed_opt = pytest_config.getoption("--mutation-seed")
+        file_or_dir = pytest_config.getoption("file_or_dir")
+''',
+    "pytest MBFL selection option reads",
+)
+pytest_text = replace_once(
+    pytest_text,
+    '''            fauxpy_verbose_opt,
+            file_or_dir,
+        )
+''',
+    '''            fauxpy_verbose_opt,
+            file_or_dir,
+            mutation_selection_opt,
+            mutation_budget_opt,
+            mutation_seed_opt,
+        )
+''',
+    "pytest MBFL selection constructor args",
+)
+write(pytest_manager_path, pytest_text)
+
+fl_option_manager_path = package_root / "command_line" / "pytest_mode" / "fl_option_manager.py"
+fl_text = read(fl_option_manager_path)
+fl_text = replace_once(
+    fl_text,
+    '''        fauxpy_verbose_opt: bool,
+        file_or_dir,
+    ):
+''',
+    '''        fauxpy_verbose_opt: bool,
+        file_or_dir,
+        mutation_selection_opt: str,
+        mutation_budget_opt: str,
+        mutation_seed_opt: str,
+    ):
+''',
+    "FlOptionManager MBFL selection signature",
+)
+fl_text = replace_once(
+    fl_text,
+    '''        self._file_or_dir_opt = file_or_dir
+        self._path_manager = FlPathManager(
+''',
+    '''        self._file_or_dir_opt = file_or_dir
+        self._mutation_selection = mutation_selection_opt
+        self._mutation_budget = mutation_budget_opt
+        self._mutation_seed = mutation_seed_opt
+        self._path_manager = FlPathManager(
+''',
+    "FlOptionManager MBFL selection fields",
+)
+fl_text = replace_once(
+    fl_text,
+    '''                self._file_or_dir_opt,
+                report_directory_path,
+                Path(self._project_working_directory.get_absolute()),
+            )
+''',
+    '''                self._file_or_dir_opt,
+                report_directory_path,
+                Path(self._project_working_directory.get_absolute()),
+                self._mutation_selection,
+                self._mutation_budget,
+                self._mutation_seed,
+            )
+''',
+    "MbflSession MBFL selection args",
+)
+write(fl_option_manager_path, fl_text)
+
+mbfl_session_path = package_root / "fault_localization" / "mbfl" / "session_lib.py"
+mbfl_session_text = read(mbfl_session_path)
+mbfl_session_text = replace_once(
+    mbfl_session_text,
+    '''        file_or_dir,
+        report_directory_path: Path,
+        project_working_directory: Path,
+    ):
+''',
+    '''        file_or_dir,
+        report_directory_path: Path,
+        project_working_directory: Path,
+        mutation_selection: str = None,
+        mutation_budget: str = None,
+        mutation_seed: str = "0",
+    ):
+''',
+    "MbflSession MBFL selection signature",
+)
+mbfl_session_text = replace_once(
+    mbfl_session_text,
+    '''        self._mutation_manager = MutationManager(self._db_manager, self._mutation_strategy)
+''',
+    '''        self._mutation_manager = MutationManager(
+            self._db_manager,
+            self._mutation_strategy,
+            mutation_selection,
+            mutation_budget,
+            mutation_seed,
+        )
+''',
+    "MutationManager MBFL selection args",
+)
+write(mbfl_session_path, mbfl_session_text)
+
+mutation_manager_path = package_root / "fault_localization" / "mbfl" / "mutation_manager.py"
+mutation_text = read(mutation_manager_path)
+mutation_text = replace_once(
+    mutation_text,
+    '''import logging
+from pathlib import Path
+''',
+    '''import logging
+import random
+import time
+from pathlib import Path
+''',
+    "MutationManager imports",
+)
+mutation_text = replace_once(
+    mutation_text,
+    '''    def __init__(
+            self,
+            db_manager: MbflDbManager,
+            mutation_strategy: MutationStrategy
+    ):
+''',
+    '''    def __init__(
+            self,
+            db_manager: MbflDbManager,
+            mutation_strategy: MutationStrategy,
+            mutation_selection: str = None,
+            mutation_budget: str = None,
+            mutation_seed: str = "0",
+    ):
+''',
+    "MutationManager signature",
+)
+mutation_text = replace_once(
+    mutation_text,
+    '''        self._db_manager = db_manager
+        self._mutation_strategy = mutation_strategy
+''',
+    '''        self._db_manager = db_manager
+        self._mutation_strategy = mutation_strategy
+        self._mutation_selection = mutation_selection
+        self._mutation_budget = int(mutation_budget) if mutation_budget not in [None, ""] else None
+        self._mutation_seed = int(mutation_seed or 0)
+''',
+    "MutationManager fields",
+)
+cosmic_ray_path = package_root / "fault_localization" / "mbfl" / "mutation_lib" / "cosmic_ray.py"
+cosmic_ray_text = read(cosmic_ray_path)
+cosmic_ray_text = replace_once(
+    cosmic_ray_text,
+    '''    def _get_all_mutant_list(
+        self, module_path: str, operator_names: List[str]
+    ) -> List[Mutant]:
+''',
+    '''    def _get_all_mutant_list(
+        self,
+        module_path: str,
+        operator_names: List[str],
+        line_numbers: Optional[List[int]] = None,
+    ) -> List[Mutant]:
+''',
+    "Cosmic Ray line-limited mutant list signature",
+)
+cosmic_ray_text = replace_once(
+    cosmic_ray_text,
+    '''            for occurrence, (start_pos, end_pos) in enumerate(positions):
+                original_code, mutated_code = self.produce_mutation(
+                    module_path, operator, occurrence
+                )
+''',
+    '''            for occurrence, (start_pos, end_pos) in enumerate(positions):
+                if (
+                    line_numbers is not None
+                    and start_pos[0] not in line_numbers
+                    and end_pos[0] not in line_numbers
+                ):
+                    continue
+
+                original_code, mutated_code = self.produce_mutation(
+                    module_path, operator, occurrence
+                )
+''',
+    "Cosmic Ray line-limited mutation production",
+)
+cosmic_ray_text = replace_once(
+    cosmic_ray_text,
+    '''        mutant_list = self._get_all_mutant_list(module_path, operator_names)
+''',
+    '''        mutant_list = self._get_all_mutant_list(module_path, operator_names, line_numbers)
+''',
+    "Cosmic Ray line-limited call",
+)
+write(cosmic_ray_path, cosmic_ray_text)
+old_get_all = '''    def get_all_mutants_for_failing_line_number_list(
+        self, failing_line_number_list
+    ) -> List:
+        \"\"\"
+         Generates mutants for the given statements. Each statement contains
+          information about the module and the line number the statement belongs to.
+
+         Args:
+             failing_line_number_list (List[str]): A list of statements to generate mutants for.
+
+         Returns:
+             List[Mutant]: A list of mutants corresponding to the given statements.
+         \"\"\"
+        mutant_list = []
+
+        for statement_name in failing_line_number_list:
+            path, line_number = naming_lib.convert_statement_name_to_components(
+                statement_name
+            )
+            self._db_manager.insert_failing_line_number_components(path, line_number)
+
+        failing_module_path_list = (
+            self._db_manager.select_distinct_failing_module_paths()
+        )
+        for module_path in failing_module_path_list:
+            line_number_list = self._db_manager.select_failing_line_numbers_for_module_path(
+                module_path
+            )
+
+            current_module_mutant_list = self._get_module_mutant_list(module_path, line_number_list)
+
+            mutant_list += current_module_mutant_list
+
+        self._set_mutant_ids(mutant_list)
+
+        return mutant_list
+'''
+new_get_all = '''    def get_all_mutants_for_failing_line_number_list(
+        self, failing_line_number_list
+    ) -> List:
+        \"\"\"
+         Generates mutants for the given statements. Each statement contains
+          information about the module and the line number the statement belongs to.
+
+         Args:
+             failing_line_number_list (List[str]): A list of statements to generate mutants for.
+
+         Returns:
+             List[Mutant]: A list of mutants corresponding to the given statements.
+         \"\"\"
+        candidate_statement_name_list = list(failing_line_number_list)
+        selected_statement_name_list = list(candidate_statement_name_list)
+
+        if self._mutation_selection == "random":
+            rng = random.Random(self._mutation_seed)
+            if (
+                    self._mutation_budget is not None
+                    and len(selected_statement_name_list) > self._mutation_budget
+            ):
+                selected_statement_name_list = rng.sample(
+                    selected_statement_name_list,
+                    self._mutation_budget,
+                )
+            else:
+                rng.shuffle(selected_statement_name_list)
+
+            fl_print.normal(f"Candidate mutation locations: {len(candidate_statement_name_list)}")
+            fl_print.normal(f"Selected mutation locations: {len(selected_statement_name_list)}")
+
+        generation_start = time.perf_counter()
+        mutant_list = []
+
+        for statement_name in selected_statement_name_list:
+            path, line_number = naming_lib.convert_statement_name_to_components(
+                statement_name
+            )
+            self._db_manager.insert_failing_line_number_components(path, line_number)
+
+        failing_module_path_list = (
+            self._db_manager.select_distinct_failing_module_paths()
+        )
+        for module_path in failing_module_path_list:
+            line_number_list = self._db_manager.select_failing_line_numbers_for_module_path(
+                module_path
+            )
+
+            current_module_mutant_list = self._get_module_mutant_list(module_path, line_number_list)
+
+            mutant_list += current_module_mutant_list
+
+        generated_mutant_count = len(mutant_list)
+        if (
+                self._mutation_selection == "random"
+                and self._mutation_budget is not None
+                and generated_mutant_count > self._mutation_budget
+        ):
+            rng = random.Random(self._mutation_seed)
+            mutant_list = rng.sample(mutant_list, self._mutation_budget)
+
+        self._set_mutant_ids(mutant_list)
+        generation_time = time.perf_counter() - generation_start
+
+        fl_print.normal(f"Total generated mutants: {generated_mutant_count}")
+        fl_print.normal(f"Mutants selected for validation: {len(mutant_list)}")
+        fl_print.normal(f"Mutation generation time: {generation_time:.4f}")
+
+        return mutant_list
+'''
+mutation_text = replace_once(
+    mutation_text,
+    old_get_all,
+    new_get_all,
+    "MutationManager selection implementation",
+)
+write(mutation_manager_path, mutation_text)
+
+mbfl_run_manager_path = package_root / "fault_localization" / "mbfl" / "mbfl_run_manager.py"
+run_text = read(mbfl_run_manager_path)
+run_text = replace_once(
+    run_text,
+    '''import shutil
+from enum import Enum
+''',
+    '''import shutil
+import time
+from enum import Enum
+''',
+    "MbflRunManager imports",
+)
+run_text = replace_once(
+    run_text,
+    '''        number_of_all_mutants = len(mutants)
+
+        fl_print.normal(f"Running {number_of_all_mutants} Mutants")
+''',
+    '''        number_of_all_mutants = len(mutants)
+        validation_start = time.perf_counter()
+
+        fl_print.normal(f"Running {number_of_all_mutants} Mutants")
+''',
+    "MbflRunManager validation timer start",
+)
+run_text = replace_once(
+    run_text,
+    '''        self._remove_temp_project(temp_project_path)
+''',
+    '''        validation_time = time.perf_counter() - validation_start
+        fl_print.normal(f"Mutant validation time: {validation_time:.4f}")
+        self._remove_temp_project(temp_project_path)
+''',
+    "MbflRunManager validation timer end",
+)
+write(mbfl_run_manager_path, run_text)
+
+print("FauxPy MBFL selection patch applied.")
+"""
+
 
 def _completed_output(completed: subprocess.CompletedProcess[str]) -> str:
     return "\n".join(
@@ -212,6 +639,108 @@ def _validate_string_list(name: str, values: list[str]) -> None:
         raise ConfigurationError(f"FauxPy {name} must be a list of strings")
     if any(not isinstance(value, str) for value in values):
         raise ConfigurationError(f"FauxPy {name} must contain only strings.")
+
+
+def _parse_int_from_output(pattern: str, raw_output: str) -> int | None:
+    match = re.search(pattern, raw_output)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _parse_float_from_output(pattern: str, raw_output: str) -> float | None:
+    match = re.search(pattern, raw_output)
+    if match is None:
+        return None
+    return float(match.group(1))
+
+
+def _list_fauxpy_report_dirs(worktree: Path) -> dict[Path, Path]:
+    parent = worktree.parent
+    if not parent.exists():
+        return {}
+    return {
+        path.resolve(): path
+        for path in parent.glob("FauxPyReport_*")
+        if path.is_dir()
+    }
+
+
+def _find_new_fauxpy_report_dir(
+    before: dict[Path, Path], after: dict[Path, Path]
+) -> Path | None:
+    new_paths = [path for key, path in after.items() if key not in before]
+    candidates = new_paths or list(after.values())
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+def _query_mbfl_validation_metadata(report_dir: Path | None) -> dict[str, int | str]:
+    if report_dir is None:
+        return {}
+
+    db_path = report_dir / "fauxpy.db"
+    if not db_path.exists():
+        return {"fauxpy_report_dir": str(report_dir)}
+
+    metadata: dict[str, int | str] = {"fauxpy_report_dir": str(report_dir)}
+    try:
+        with sqlite3.connect(str(db_path)) as connection:
+            cursor = connection.cursor()
+            cursor.execute("SELECT COUNT(*) FROM MutantInfo")
+            metadata["mutants_validated"] = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM MutantInfo WHERE Timeout = 1")
+            metadata["mutants_timed_out"] = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM MutantInfo WHERE HasMissingTests = 1")
+            metadata["mutants_with_missing_tests"] = int(cursor.fetchone()[0])
+    except sqlite3.Error:
+        return metadata
+
+    return metadata
+
+
+def extract_mbfl_tracking_metadata(
+    raw_output: str, report_dir: Path | None = None
+) -> dict[str, int | float | str]:
+    """Extract MBFL cost-control metadata from FauxPy output and report DB."""
+    metadata: dict[str, int | float | str] = {}
+    output_patterns = {
+        "candidate_mutation_locations": r"Candidate mutation locations:\s+(\d+)",
+        "selected_mutation_locations": r"Selected mutation locations:\s+(\d+)",
+        "mutants_generated": r"Total generated mutants:\s+(\d+)",
+        "mutants_validated": r"Mutants selected for validation:\s+(\d+)",
+    }
+
+    for key, pattern in output_patterns.items():
+        value = _parse_int_from_output(pattern, raw_output)
+        if value is not None:
+            metadata[key] = value
+
+    if "mutants_validated" not in metadata:
+        running_count = _parse_int_from_output(r"Running\s+(\d+)\s+Mutants", raw_output)
+        if running_count is not None:
+            metadata["mutants_validated"] = running_count
+
+    generated_counts = [
+        int(match)
+        for match in re.findall(r"Number of generated mutants:\s+(\d+)", raw_output)
+    ]
+    if generated_counts and "mutants_generated" not in metadata:
+        metadata["mutants_generated"] = sum(generated_counts)
+
+    time_patterns = {
+        "mutation_generation_time_seconds": r"Mutation generation time:\s+([0-9]+(?:\.[0-9]+)?)",
+        "mutant_validation_time_seconds": r"Mutant validation time:\s+([0-9]+(?:\.[0-9]+)?)",
+    }
+    for key, pattern in time_patterns.items():
+        value = _parse_float_from_output(pattern, raw_output)
+        if value is not None:
+            metadata[key] = value
+
+    for key, value in _query_mbfl_validation_metadata(report_dir).items():
+        metadata.setdefault(key, value)
+    return metadata
 
 
 def _translate_unittest_target(target: str) -> str:
@@ -324,10 +853,11 @@ class FauxPyConfig:
     failing_tests: list[str] = field(default_factory=list)
     top_n: int | None = None
     # MBFL-only knobs 
-    mutation_strategy: str | None = None 
-    mutation_budget: int | None = None 
+    mutation_strategy: str | None = None
+    mutation_budget: int | None = None
+    mutation_seed: int = 0
     # Metric selection
-    metric: str = "ochiai" 
+    metric: str | None = None
 
     def __post_init__(self) -> None:
         """Validate FauxPy options and reject unsupported combinations early."""
@@ -335,8 +865,28 @@ class FauxPyConfig:
             raise ConfigurationError("Currently the FauxPy integration supports only SBFL and MBFL.")
         if self.granularity not in {"statement" , "function"}:
             raise ConfigurationError("Currently the FauxPy integration only supports statement level and function level granularity")
-        if self.mutation_strategy is not None and self.family != "mbfl":
-            raise ConfigurationError("Mutation Strategy is MBFL only.")
+        if (self.mutation_strategy is not None or self.mutation_budget is not None) and self.family != "mbfl":
+            raise ConfigurationError("Mutation selection options are MBFL only.")
+        if self.mutation_strategy is not None:
+            if self.mutation_strategy != "random":
+                raise ConfigurationError("Currently the FauxPy integration supports only the random mutation selection strategy.")
+            if self.mutation_budget is None:
+                raise ConfigurationError("FauxPy mutation selection requires a positive mutation budget.")
+        if self.mutation_budget is not None:
+            if not isinstance(self.mutation_budget, int) or self.mutation_budget <= 0:
+                raise ConfigurationError("FauxPy mutation budget must be a positive integer.")
+            if self.mutation_strategy is None:
+                raise ConfigurationError("FauxPy mutation budget requires a mutation strategy.")
+        if not isinstance(self.mutation_seed, int):
+            raise ConfigurationError("FauxPy mutation seed must be an integer.")
+        if self.metric is None:
+            object.__setattr__(
+                self,
+                "metric",
+                "metallaxis" if self.family == "mbfl" else "ochiai",
+            )
+        elif not isinstance(self.metric, str) or not self.metric.strip():
+            raise ConfigurationError("FauxPy metric must be a non-empty string.")
         if not isinstance(self.src, str) or not self.src.strip():
             raise ConfigurationError("FauxPy src must be a non-empty string.")
         if self.top_n is not None:
@@ -396,6 +946,7 @@ class FauxPyToolchain:
         self._ensure_patched_fauxpy_installed(python, checkout.worktree)
 
         fauxpy_command = self._build_fauxpy_command(python , config)
+        before_report_dirs = _list_fauxpy_report_dirs(checkout.worktree)
 
         completed = self._runner.run_command(
             fauxpy_command,
@@ -404,6 +955,10 @@ class FauxPyToolchain:
             capture_output=True,
         )
         raw_output = _completed_output(completed)
+        report_dir = _find_new_fauxpy_report_dir(
+            before_report_dirs,
+            _list_fauxpy_report_dirs(checkout.worktree),
+        )
 
         if completed.returncode not in {0, 1}:
             raise ConfigurationError(
@@ -428,24 +983,36 @@ class FauxPyToolchain:
             top_n=config.top_n,
         )
 
+        metadata = {
+            "family": config.family,
+            "src": config.src,
+            "test_targets": list(config.test_targets),
+            "score_formula": formula,
+            "all_metrics": all_metrics,
+            "raw_output": raw_output,
+            "returncode": completed.returncode,
+        }
+        if config.family == "mbfl":
+            metadata.update(
+                {
+                    "mutation_strategy": config.mutation_strategy,
+                    "mutation_budget": config.mutation_budget,
+                    "mutation_seed": config.mutation_seed,
+                }
+            )
+            metadata.update(extract_mbfl_tracking_metadata(raw_output, report_dir))
+
         return LocalizationResult(
             bug=checkout.bug,
             backend="fauxpy",
             ranked_locations=ranked_locations,
-            metadata={
-                "family": config.family,
-                "src": config.src,
-                "test_targets": list(config.test_targets),
-                "score_formula": formula,
-                "all_metrics": all_metrics,
-                "raw_output": raw_output,
-                "returncode": completed.returncode,
-            },
+            metadata=metadata,
         )
 
     def _ensure_patched_fauxpy_installed(self, python: Path, cwd: Path) -> None:
         self._ensure_fauxpy_installed(python, cwd)
         self._apply_fauxpy_jaccard_patch(python, cwd)
+        self._apply_fauxpy_mbfl_selection_patch(python, cwd)
 
     def _ensure_fauxpy_installed(self, python: Path, cwd: Path) -> None:
         show = self._runner.run_command(
@@ -484,6 +1051,19 @@ class FauxPyToolchain:
                 f"Jaccard metric patch. {_completed_output(patch)}".strip()
             )
 
+    def _apply_fauxpy_mbfl_selection_patch(self, python: Path, cwd: Path) -> None:
+        patch = self._runner.run_command(
+            [str(python), "-c", _FAUXPY_MBFL_SELECTION_PATCH_SCRIPT],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+        )
+        if patch.returncode != 0:
+            raise ConfigurationError(
+                "FauxPy is installed, but the framework could not apply the "
+                f"MBFL selection patch. {_completed_output(patch)}".strip()
+            )
+
     def _upgrade_fauxpy_build_tools(self, python: Path, cwd: Path) -> None:
         upgrade = self._runner.run_command(
             [
@@ -516,8 +1096,19 @@ class FauxPyToolchain:
                "--src", config.src , 
                 "--family" , config.family , 
                 "--granularity" , config.granularity ]
+        if config.top_n is not None:
+            cmd += ["--top-n", str(config.top_n)]
         if config.failing_tests:
             cmd += ["--failing-list", "[" + ",".join(config.failing_tests) + "]"]
+        if config.family == "mbfl" and config.mutation_strategy is not None:
+            cmd += [
+                "--mutation-selection",
+                config.mutation_strategy,
+                "--mutation-budget",
+                str(config.mutation_budget),
+                "--mutation-seed",
+                str(config.mutation_seed),
+            ]
         for ex in config.exclude:
             cmd += ["--exclude", ex]
         return cmd
@@ -593,7 +1184,7 @@ def parse_fauxpy_output(
         r"^(?P<file>.+?)\s+\|"
         r"(?:\s+(?P<function>.+?)\s+\|)?"
         r"\s+(?P<line>\d+)\s+\|"
-        r"\s+(?P<score>-?\d+(?:\.\d+)?)\s*$"
+        r"\s+(?P<score>[+-]?\d+(?:\.\d+)?)\s*$"
     )
 
     for raw_line in raw_output.splitlines():

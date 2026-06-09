@@ -79,17 +79,21 @@ def _run() -> int:
             prepared=True,
         )
 
+        family = "mbfl" if args.mbfl else args.family
+        metric = args.metric or ("metallaxis" if family == "mbfl" else "ochiai")
+
         # create FauxPy-Config Object 
         config = FauxPyConfig(
             src=src,
             test_targets=test_targets,
-            family=args.family,
+            family=family,
             granularity=args.granularity, 
             failing_tests=failing_tests,
             top_n=args.top_n,
             mutation_strategy = args.mutation_strategy, 
             mutation_budget = args.mutation_budget , 
-            metric = args.metric
+            mutation_seed=args.seed,
+            metric = metric
         )
         
         # Localize the Faulty Locations 
