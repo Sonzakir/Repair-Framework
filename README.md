@@ -110,7 +110,7 @@ objects instead of parsing FauxPy output directly.
 - **FauxPy metrics are reusable.** The configured metric is used as the primary
 ranking shown by the CLI, and every metric table parsed from FauxPy output is
 stored in `metadata["all_metrics"]`. This keeps Tarantula, Ochiai, DStar,
-Jaccard, and other emitted tables available for later repair or reporting
+Jaccard, SBI, and other emitted tables available for later repair or reporting
 components.
 
 ## Requirements
@@ -260,19 +260,21 @@ python -m apr_framework localize --project PySnooper --bug 1 --src pysnooper
 python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai
 ```
 
-Jaccard is available for SBFL runs through the framework's FauxPy 0.7.0 patch,
-which is applied inside the prepared checkout environment before localization:
+Jaccard and SBI are available for SBFL runs through the framework's FauxPy 0.7.0
+patch, which is applied inside the prepared checkout environment before localization:
 
 ```bash
 python -m apr_framework localize --project PySnooper --bug 1 --metric jaccard
+python -m apr_framework localize --project PySnooper --bug 1 --metric sbi
 ```
 
 Implementation note: FauxPy normally computes Tarantula, Ochiai, and DStar for
-SBFL. The framework adds Jaccard by patching the installed FauxPy copy in the
-bug checkout's virtual environment before running localization. The patch adds a
-`MetricJaccard` formula, registers it with FauxPy's SBFL metric list, extends
-FauxPy's local SQLite score table, and lets the existing output parser select
-the emitted `Scores for Jaccard` table with `--metric jaccard`.
+SBFL. The framework adds Jaccard and SBI by patching the installed FauxPy copy
+in the bug checkout's virtual environment before running localization. The patch
+adds `MetricJaccard` and `MetricSBI` formulas, registers them with FauxPy's
+SBFL metric list, extends FauxPy's local SQLite score table, and lets the
+existing output parser select the emitted `Scores for Jaccard` or
+`Scores for SBI` tables with `--metric`.
 
 - Limit the number of ranked locations printed:
 

@@ -165,10 +165,11 @@ python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai
 
 Common FauxPy metric names include `ochiai`, `tarantula`, and `dstar`.
 For SBFL runs, the framework also patches FauxPy 0.7.0 inside the prepared
-checkout environment so `jaccard` is available:
+checkout environment so `jaccard` and `sbi` are available:
 
 ```bash
 python -m apr_framework localize --project PySnooper --bug 1 --metric jaccard
+python -m apr_framework localize --project PySnooper --bug 1 --metric sbi
 ```
 
 ### Limit Ranked Output
@@ -278,7 +279,7 @@ Ranked locations:
 20. black.py:5720 0.3226
 ```
 
-- One can use the Jaccard metric too
+- One can use the Jaccard or SBI metric too
 ```bash 
 root@71fe3e2ad45d:/workspace# python -m apr_framework localize --project black --bug 1 --family sbfl --src black.py --test-target tests/test_black.py --metric jaccard --top-n 20
 Project: black
@@ -445,4 +446,42 @@ File | Line | Score
 FAILED tests/test_black.py::BlackTestCase::test_works_in_mono_process_only_environment
 ================= 1 failed, 128 passed, 13 warnings in 59.85s ==================
 root@92e99d5a1a10:/workspace# 
-````
+```
+
+- My metric on SBFL
+```bash
+root@a9334b533878:/workspace# python -m apr_framework localize \
+  --backend fauxpy \
+  --project black \
+  --bug 1 \
+  --family sbfl \
+  --src black.py \
+  --test-target tests/test_black.py \
+  --metric sbi \
+  --top-n 20
+Project: black
+Bug ID: 1
+Backend: fauxpy
+Score formula: SBI
+Ranked locations:
+1. black.py:6339 0.2500
+2. black.py:5769 0.2500
+3. black.py:535 0.2500
+4. black.py:534 0.2500
+5. black.py:533 0.2500
+6. black.py:621 0.1667
+7. black.py:618 0.1667
+8. black.py:617 0.1667
+9. black.py:616 0.1667
+10. black.py:558 0.1667
+11. black.py:557 0.1667
+12. black.py:5750 0.1429
+13. black.py:5749 0.1429
+14. black.py:5748 0.1429
+15. black.py:5747 0.1250
+16. black.py:5742 0.1250
+17. black.py:5738 0.1250
+18. black.py:5737 0.1250
+19. black.py:5734 0.1250
+20. black.py:5720 0.1111
+```
