@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     localize_parser.add_argument("--project", required=True)
     localize_parser.add_argument("--bug", type=int, required=True)
     localize_parser.add_argument("--src", default=None)
-    localize_parser.add_argument("--family" , type=str , choices=["sbfl", "mbfl"] ,default="sbfl")
+    localize_parser.add_argument("--family" , type=str , choices=["sbfl", "mbfl", "hybrid"] ,default="sbfl")
     localize_parser.add_argument("--mbfl", action="store_true")
     localize_parser.add_argument("--granularity" , type=str, default="statement" , choices=["statement" , "function"])
     localize_parser.add_argument("--failing_tests" , type=str , default=None)
@@ -50,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     localize_parser.add_argument("--seed", type=int, default=0)
     localize_parser.add_argument("--metric", type=str, default=None)
+    localize_parser.add_argument("--sbfl-metric", type=str, default="ochiai")
+    localize_parser.add_argument("--mbfl-metric", type=str, default="metallaxis")
+    localize_parser.add_argument("--sbfl-weight", type=float, default=0.5)
+    localize_parser.add_argument("--mbfl-weight", type=float, default=0.5)
 
 
     

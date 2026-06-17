@@ -5,10 +5,19 @@ from apr_framework.benchmarks.registry import (
     list_benchmark_names,
 )
 from apr_framework.cli.parser import build_parser
-from apr_framework.core.exceptions import APRFrameworkError, BenchmarkError
+from apr_framework.core.exceptions import (
+    APRFrameworkError,
+    BenchmarkError,
+    ConfigurationError,
+)
 from apr_framework.core.models import BugIdentifier, CheckoutResult
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
-from apr_framework.localization import FauxPyConfig, FauxPyLocalizer, FauxPyToolchain
+from apr_framework.localization import (
+    FauxPyConfig,
+    FauxPyLocalizer,
+    FauxPyToolchain,
+    HybridFaultLocalizer,
+)
 from apr_framework.localization.fauxpy import load_pytest_targets
 from apr_framework.repair import DummyRepairAlgorithm
 
@@ -34,6 +43,9 @@ def _run() -> int:
 
     # FauxPy 
     if args.command == "localize":
+        family = _resolve_localize_family(args)
+        _validate_localize_args(args, family)
+
         # Currently we are running FauxPy only inside the BugsInPy projects
         adapter = create_bugsinpy_adapter(project_root)
         adapter.toolchain.ensure_installed()
@@ -79,25 +91,54 @@ def _run() -> int:
             prepared=True,
         )
 
-        family = "mbfl" if args.mbfl else args.family
-        metric = args.metric or ("metallaxis" if family == "mbfl" else "ochiai")
+        fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
 
-        # create FauxPy-Config Object 
-        config = FauxPyConfig(
-            src=src,
-            test_targets=test_targets,
-            family=family,
-            granularity=args.granularity, 
-            failing_tests=failing_tests,
-            top_n=args.top_n,
-            mutation_strategy = args.mutation_strategy, 
-            mutation_budget = args.mutation_budget , 
-            mutation_seed=args.seed,
-            metric = metric
-        )
-        
+        if family == "hybrid":
+            sbfl_config = FauxPyConfig(
+                src=src,
+                test_targets=test_targets,
+                family="sbfl",
+                granularity=args.granularity,
+                failing_tests=failing_tests,
+                top_n=None,
+                metric=args.sbfl_metric,
+            )
+            mbfl_config = FauxPyConfig(
+                src=src,
+                test_targets=test_targets,
+                family="mbfl",
+                granularity=args.granularity,
+                failing_tests=failing_tests,
+                top_n=None,
+                mutation_strategy=args.mutation_strategy,
+                mutation_budget=args.mutation_budget,
+                mutation_seed=args.seed,
+                metric=args.mbfl_metric,
+            )
+            localizer = HybridFaultLocalizer(
+                FauxPyLocalizer(sbfl_config, fauxpy_toolchain),
+                FauxPyLocalizer(mbfl_config, fauxpy_toolchain),
+                sbfl_weight=args.sbfl_weight,
+                mbfl_weight=args.mbfl_weight,
+                top_n=args.top_n,
+            )
+        else:
+            metric = args.metric or ("metallaxis" if family == "mbfl" else "ochiai")
+            config = FauxPyConfig(
+                src=src,
+                test_targets=test_targets,
+                family=family,
+                granularity=args.granularity, 
+                failing_tests=failing_tests,
+                top_n=args.top_n,
+                mutation_strategy = args.mutation_strategy, 
+                mutation_budget = args.mutation_budget , 
+                mutation_seed=args.seed,
+                metric = metric
+            )
+            localizer = FauxPyLocalizer(config, fauxpy_toolchain)
+
         # Localize the Faulty Locations 
-        localizer = FauxPyLocalizer(config, FauxPyToolchain(adapter.toolchain))
         result = localizer.localize(checkout.bug, checkout)
 
         print(f"Project: {result.bug.project}")
@@ -113,6 +154,15 @@ def _run() -> int:
         if args.show_raw_output and result.metadata.get("raw_output"):
             print("\nRaw FauxPy output:")
             print(result.metadata["raw_output"])
+        elif args.show_raw_output and result.backend == "hybrid-fauxpy":
+            sbfl_raw_output = result.metadata.get("sbfl_metadata", {}).get("raw_output")
+            mbfl_raw_output = result.metadata.get("mbfl_metadata", {}).get("raw_output")
+            if sbfl_raw_output:
+                print("\nRaw FauxPy SBFL output:")
+                print(sbfl_raw_output)
+            if mbfl_raw_output:
+                print("\nRaw FauxPy MBFL output:")
+                print(mbfl_raw_output)
 
         return 0
     
@@ -236,6 +286,25 @@ def _run() -> int:
             return 0
 
     return 1
+
+
+def _resolve_localize_family(args) -> str:
+    return "mbfl" if args.mbfl else args.family
+
+
+def _validate_localize_args(args, family: str) -> None:
+    if family == "hybrid" and args.metric is not None:
+        raise ConfigurationError(
+            "Use --sbfl-metric and --mbfl-metric for hybrid localization; "
+            "--metric is only for single-family SBFL or MBFL runs."
+        )
+    if family == "hybrid":
+        if args.sbfl_weight < 0 or args.mbfl_weight < 0:
+            raise ConfigurationError(
+                "Hybrid localization weights must be non-negative."
+            )
+        if args.sbfl_weight == 0 and args.mbfl_weight == 0:
+            raise ConfigurationError("Hybrid localization weights cannot both be zero.")
 
 
 def _infer_fauxpy_src(worktree: Path, project: str) -> str:

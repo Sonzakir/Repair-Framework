@@ -2,5 +2,12 @@
 
 from .base import FaultLocalizer
 from .fauxpy import FauxPyConfig, FauxPyLocalizer, FauxPyToolchain
+from .hybrid import HybridFaultLocalizer
 
-__all__ = ["FaultLocalizer", "FauxPyConfig", "FauxPyLocalizer", "FauxPyToolchain"]
+__all__ = [
+    "FaultLocalizer",
+    "FauxPyConfig",
+    "FauxPyLocalizer",
+    "FauxPyToolchain",
+    "HybridFaultLocalizer",
+]

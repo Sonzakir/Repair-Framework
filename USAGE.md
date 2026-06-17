@@ -233,6 +233,19 @@ python -m apr_framework localize --project PySnooper --bug 1 --mbfl --mutation-s
 `--budget` limits how many mutants are validated. Use `--seed` to reproduce the
 same random selection; the default seed is `0`.
 
+### Use Hybrid SBFL + MBFL Mode
+
+Run the existing FauxPy SBFL and MBFL paths, normalize both selected metrics,
+and print a single weighted ranking.
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis --sbfl-weight 0.5 --mbfl-weight 0.5 --mutation-strategy random --budget 50 --top-n 10
+```
+
+Hybrid mode uses `--sbfl-metric` and `--mbfl-metric` instead of `--metric`.
+`--top-n` is applied after score fusion, and mutation controls apply only to the
+MBFL component.
+
 ## Typical End-To-End Flow
 
 This sequence prepares BugsInPy, checks out `PySnooper 1`, compiles it, runs tests,
@@ -484,4 +497,42 @@ Ranked locations:
 18. black.py:5737 0.1250
 19. black.py:5734 0.1250
 20. black.py:5720 0.1111
+```
+
+
+
+## Hybrid SBFL + MBFL 
+- The typical command and the output looks as follows
+```bash
+root@5c7c7e708541:/workspace# python -m apr_framework localize \
+  --project black \
+  --bug 1 \
+  --family hybrid \
+  --src black.py \
+  --test-target tests/test_black.py \
+  --sbfl-metric ochiai \
+  --mbfl-metric metallaxis \
+  --sbfl-weight 0.5 \
+  --mbfl-weight 0.5 \
+  --mutation-strategy random \
+  --budget 50 \
+  --seed 0 \
+  --top-n 10
+apr-bugsinpy-executor
+Project: black
+Bug ID: 1
+Backend: hybrid-fauxpy
+Score formula: 0.5000 * normalized(Ochiai) + 0.5000 * normalized(Metallaxis)
+Ranked locations:
+1. black.py:6339 0.5000
+2. black.py:5769 0.5000
+3. black.py:535 0.5000
+4. black.py:534 0.5000
+5. black.py:533 0.5000
+6. black.py:621 0.4118
+7. black.py:618 0.4118
+8. black.py:617 0.4118
+9. black.py:616 0.4118
+10. black.py:558 0.4118
+root@5c7c7e708541:/workspace# 
 ```

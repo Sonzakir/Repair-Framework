@@ -23,9 +23,10 @@
 - Command-line interface via `python -m apr_framework`
 - Docker-based BugsInPy executor container
 - FauxPy fault-localization integration with CLI support for:
-  - SBFL and MBFL mode selection
+  - SBFL, MBFL, and weighted hybrid mode selection
   - statement-level and function-level granularity
   - metric selection with `--metric`
+  - hybrid SBFL/MBFL metric and weight selection
   - limiting ranked locations with `--top-n`
   - optional failing-test selection with `--failing_tests`
   - parsing all FauxPy metric tables for later reuse
@@ -61,6 +62,7 @@ src/apr_framework/
   localization/
     base.py          # FaultLocalizer interface
     fauxpy.py        # FauxPy localizer, config, toolchain, and output parser
+    hybrid.py        # Weighted SBFL + MBFL result combiner
   repair/
     base.py          # RepairAlgorithm interface
     dummy.py         # random ground-truth/no-op repair component
@@ -311,6 +313,17 @@ python -m apr_framework localize --project PySnooper --bug 1 --mbfl --mutation-s
   - `--seed` can be supplied to make random selection reproducible; it defaults
     to `0`.
 
+- Run weighted hybrid SBFL + MBFL localization:
+
+```bash
+python -m apr_framework localize --project PySnooper --bug 1 --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis --sbfl-weight 0.5 --mbfl-weight 0.5 --mutation-strategy random --budget 50 --top-n 10
+```
+
+Hybrid mode runs SBFL and MBFL through the existing FauxPy adapter, normalizes
+each selected metric, combines them with the configured weights, and applies
+`--top-n` after the combined ranking is produced. MBFL mutation controls apply
+only to the MBFL half of the hybrid run.
+
 - What changed internally:
   - `FauxPyConfig` now carries the localization family, granularity, metric,
   failing tests, excludes, and MBFL selection options.
@@ -323,6 +336,9 @@ python -m apr_framework localize --project PySnooper --bug 1 --mbfl --mutation-s
   (`File | Function | Line | Score`).
   - `LocalizationResult.metadata["all_metrics"]` stores the full metric map for
   later reuse.
+  - `HybridFaultLocalizer` combines SBFL and MBFL `LocalizationResult` objects
+  into one `hybrid-fauxpy` result while preserving component scores and ranks in
+  each location's metadata.
 
 - See `USAGE.md` for a compact command reference with the same runnable command
 examples.
@@ -434,6 +450,7 @@ python -m apr_framework bugsinpy setup
 | Structured test results | `TestRunResult` with counts and raw output |
 | FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
 | FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard` |
+| Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
 | FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
 | FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
 | FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
