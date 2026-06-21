@@ -23,6 +23,7 @@ from apr_framework.core.models import (
 )
 
 BUGSINPY_REPOSITORY_URL = "https://github.com/Sonzakir/BugsInPy.git"
+BUGSINPY_REPOSITORY_BRANCH = "fix/env-construction"
 DEFAULT_BUGSINPY_CONTAINER = "apr-bugsinpy-executor"
 DEFAULT_BUGSINPY_IMAGE = "apr-bugsinpy:local"
 BUGSINPY_CONTAINER_HOME = PurePosixPath("/home/bugsinpy")
@@ -503,7 +504,14 @@ class BugsInPyToolchain:
 
         self.repo_dir.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
-            [git_executable, "clone", BUGSINPY_REPOSITORY_URL, str(self.repo_dir)],
+            [
+                git_executable,
+                "clone",
+                "--branch",
+                BUGSINPY_REPOSITORY_BRANCH,
+                BUGSINPY_REPOSITORY_URL,
+                str(self.repo_dir),
+            ],
             check=True,
             text=True,
         )
@@ -769,11 +777,24 @@ class BugsInPyAdapter(BenchmarkAdapter):
         Returns:
             Structured test run result for the checked-out bug.
         """
-        PYTEST_SUMMARY_PATTERN = re.compile(
-            r"(?:(?P<failed>\d+)\s+failed)?[, ]*"
-            r"(?:(?P<passed>\d+)\s+passed)?[, ]*"
-            r"(?:(?P<errors>\d+)\s+error[s]?)?"
+        # Match the final pytest summary line, which is delimited by '=' and
+        # contains one or more "<N> passed/failed/error/..." tokens (e.g.
+        # "==== 1 failed, 2 passed in 0.06s ====" or "=== 1 failed in 0.44
+        # seconds ==="). The trailing "in <time>" portion varies across pytest
+        # versions (e.g. "0.06s" vs "0.44 seconds"), so it is intentionally not
+        # part of the anchor. Counts are pulled individually below so any
+        # subset and ordering of result tokens is handled.
+        PYTEST_RESULT_KEYWORDS = (
+            r"passed|failed|error|skipped|xfailed|xpassed|deselected|warning"
         )
+        PYTEST_SUMMARY_PATTERN = re.compile(
+            r"^=+\s+(?P<summary>.*?\d+\s+(?:" + PYTEST_RESULT_KEYWORDS
+            + r")s?\b.*?)\s+=+\s*$",
+            re.MULTILINE,
+        )
+        PYTEST_FAILED_PATTERN = re.compile(r"(?P<failed>\d+)\s+failed")
+        PYTEST_PASSED_PATTERN = re.compile(r"(?P<passed>\d+)\s+passed")
+        PYTEST_ERROR_PATTERN = re.compile(r"(?P<errors>\d+)\s+error[s]?")
         UNITTEST_TOTAL_PATTERN = re.compile(r"Ran\s+(?P<total>\d+)\s+test[s]?\s+in")
         UNITTEST_FAILURE_PATTERN = re.compile(r"failures=(?P<failed>\d+)")
         UNITTEST_ERROR_PATTERN = re.compile(r"errors=(?P<errors>\d+)")
@@ -792,9 +813,13 @@ class BugsInPyAdapter(BenchmarkAdapter):
 
         match = PYTEST_SUMMARY_PATTERN.search(raw_output)
         if match:
-            failed = int(match.group("failed") or 0)
-            passed = int(match.group("passed") or 0)
-            errors = int(match.group("errors") or 0)
+            summary = match.group("summary")
+            failed_match = PYTEST_FAILED_PATTERN.search(summary)
+            passed_match = PYTEST_PASSED_PATTERN.search(summary)
+            error_match = PYTEST_ERROR_PATTERN.search(summary)
+            failed = int(failed_match.group("failed")) if failed_match else 0
+            passed = int(passed_match.group("passed")) if passed_match else 0
+            errors = int(error_match.group("errors")) if error_match else 0
             total = failed + passed + errors
 
         total_match = UNITTEST_TOTAL_PATTERN.search(raw_output)
