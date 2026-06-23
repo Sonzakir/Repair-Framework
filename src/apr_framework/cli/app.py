@@ -5,9 +5,20 @@ from apr_framework.benchmarks.registry import (
     list_benchmark_names,
 )
 from apr_framework.cli.parser import build_parser
-from apr_framework.core.exceptions import APRFrameworkError, BenchmarkError
+from apr_framework.core.exceptions import (
+    APRFrameworkError,
+    BenchmarkError,
+    ConfigurationError,
+)
 from apr_framework.core.models import BugIdentifier, CheckoutResult
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
+from apr_framework.localization import (
+    FauxPyConfig,
+    FauxPyLocalizer,
+    FauxPyToolchain,
+    HybridFaultLocalizer,
+)
+from apr_framework.localization.fauxpy import load_pytest_targets
 from apr_framework.repair import DummyRepairAlgorithm
 from apr_framework.reporting import ArchiveReportGenerator
 
@@ -31,11 +42,139 @@ def _run() -> int:
     args = parser.parse_args()
     project_root = Path.cwd()
 
+    # BugsInPy
     if args.command == "list-benchmarks":
         for name in list_benchmark_names():
             print(name)
         return 0
 
+    # FauxPy 
+    if args.command == "localize":
+        family = _resolve_localize_family(args)
+        _validate_localize_args(args, family)
+
+        # Currently we are running FauxPy only inside the BugsInPy projects
+        adapter = create_bugsinpy_adapter(project_root)
+        adapter.toolchain.ensure_installed()
+
+        projects_dir = adapter.toolchain.repo_dir / "projects"
+        project_dir = projects_dir / args.project
+        if not project_dir.is_dir():
+            raise BenchmarkError(f"No such BugsInPy project: {args.project}")
+
+        bug_dir = project_dir / "bugs" / str(args.bug)
+        if not bug_dir.is_dir():
+            raise BenchmarkError(
+                f"No such bug {args.bug} for BugsInPy project {args.project}"
+            )
+
+        destination = (
+            project_root
+            / ".workspace"
+            / "bugsinpy"
+            / f"{args.project}_{args.bug}"
+        )
+        worktree = destination / args.project
+        if not worktree.exists():
+            raise BenchmarkError(
+                f"No checkout found at {worktree}. "
+                f"Run `python -m apr_framework bugsinpy checkout {args.project} {args.bug}` first."
+            )
+
+        src = args.src or _infer_fauxpy_src(worktree, args.project)
+        bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        # Strip pytest flags (e.g. -q, -s) so only node IDs go into --failing-list.
+        bug_test_ids = [t for t in bug_test_targets if not t.startswith("-")]
+        test_targets = _parse_fauxpy_test_targets_command(args.test_target) or bug_test_targets
+        failing_tests = _parse_fauxpy_failing_tests_command(args.failing_tests) or bug_test_ids
+        checkout = CheckoutResult(
+            bug=BugIdentifier(
+                benchmark="bugsinpy",
+                project=args.project,
+                bug_id=args.bug,
+            ),
+            worktree=worktree,
+            success=True,
+            prepared=True,
+        )
+
+        fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
+
+        if family == "hybrid":
+            sbfl_config = FauxPyConfig(
+                src=src,
+                test_targets=test_targets,
+                family="sbfl",
+                granularity=args.granularity,
+                failing_tests=failing_tests,
+                top_n=None,
+                metric=args.sbfl_metric,
+            )
+            mbfl_config = FauxPyConfig(
+                src=src,
+                test_targets=test_targets,
+                family="mbfl",
+                granularity=args.granularity,
+                failing_tests=failing_tests,
+                top_n=None,
+                mutation_strategy=args.mutation_strategy,
+                mutation_budget=args.mutation_budget,
+                mutation_seed=args.seed,
+                metric=args.mbfl_metric,
+            )
+            localizer = HybridFaultLocalizer(
+                FauxPyLocalizer(sbfl_config, fauxpy_toolchain),
+                FauxPyLocalizer(mbfl_config, fauxpy_toolchain),
+                sbfl_weight=args.sbfl_weight,
+                mbfl_weight=args.mbfl_weight,
+                top_n=args.top_n,
+            )
+        else:
+            metric = args.metric or ("metallaxis" if family == "mbfl" else "ochiai")
+            config = FauxPyConfig(
+                src=src,
+                test_targets=test_targets,
+                family=family,
+                granularity=args.granularity, 
+                failing_tests=failing_tests,
+                top_n=args.top_n,
+                mutation_strategy = args.mutation_strategy, 
+                mutation_budget = args.mutation_budget , 
+                mutation_seed=args.seed,
+                metric = metric
+            )
+            localizer = FauxPyLocalizer(config, fauxpy_toolchain)
+
+        # Localize the Faulty Locations 
+        result = localizer.localize(checkout.bug, checkout)
+
+        print(f"Project: {result.bug.project}")
+        print(f"Bug ID: {result.bug.bug_id}")
+        print(f"Backend: {result.backend}")
+        if result.metadata.get("score_formula"):
+            print(f"Score formula: {result.metadata['score_formula']}")
+        print("Ranked locations:")
+        for location in result.ranked_locations:
+            score = "" if location.score is None else f"{location.score:.4f}"
+            print(f"{location.rank}. {location.file_path}:{location.line} {score}".rstrip())
+
+        if args.show_raw_output and result.metadata.get("raw_output"):
+            print("\nRaw FauxPy output:")
+            print(result.metadata["raw_output"])
+        elif args.show_raw_output and result.backend == "hybrid-fauxpy":
+            sbfl_raw_output = result.metadata.get("sbfl_metadata", {}).get("raw_output")
+            mbfl_raw_output = result.metadata.get("mbfl_metadata", {}).get("raw_output")
+            if sbfl_raw_output:
+                print("\nRaw FauxPy SBFL output:")
+                print(sbfl_raw_output)
+            if mbfl_raw_output:
+                print("\nRaw FauxPy MBFL output:")
+                print(mbfl_raw_output)
+
+        return 0
+    
+
+    # BugsInPy
     if args.command == "bugsinpy":
         adapter = create_bugsinpy_adapter(project_root)
 
@@ -157,3 +296,75 @@ def _run() -> int:
             return 0
 
     return 1
+
+
+def _resolve_localize_family(args) -> str:
+    return "mbfl" if args.mbfl else args.family
+
+
+def _validate_localize_args(args, family: str) -> None:
+    if family == "hybrid" and args.metric is not None:
+        raise ConfigurationError(
+            "Use --sbfl-metric and --mbfl-metric for hybrid localization; "
+            "--metric is only for single-family SBFL or MBFL runs."
+        )
+    if family == "hybrid":
+        if args.sbfl_weight < 0 or args.mbfl_weight < 0:
+            raise ConfigurationError(
+                "Hybrid localization weights must be non-negative."
+            )
+        if args.sbfl_weight == 0 and args.mbfl_weight == 0:
+            raise ConfigurationError("Hybrid localization weights cannot both be zero.")
+
+
+def _infer_fauxpy_src(worktree: Path, project: str) -> str:
+    package_name = project.replace("-", "_")
+
+    # Enumerate real names to handle case-sensitive filesystems inside Docker.
+    try:
+        entries = {e.name: e for e in worktree.iterdir()}
+    except OSError:
+        return "."
+
+    for candidate in [package_name, project, package_name.lower(), project.lower()]:
+        entry = entries.get(candidate)
+        if entry is not None and entry.is_dir():
+            return candidate
+
+    for candidate in [
+        f"{package_name}.py",
+        f"{project}.py",
+        f"{package_name.lower()}.py",
+    ]:
+        entry = entries.get(candidate)
+        if entry is not None and entry.is_file():
+            return candidate
+
+    return "."
+
+
+def _parse_fauxpy_failing_tests_command(value:str | None) -> list[str]:
+    if value is None:
+        return []
+    
+    stripped = value.strip()
+    if not stripped:
+        return []
+    if stripped.startswith("[") and stripped.endswith("]"):
+        stripped = stripped[1:-1]
+
+    return [
+        item.strip()
+        for item in stripped.split(",")
+        if item.strip()
+    ]
+
+
+def _parse_fauxpy_test_targets_command(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+
+    targets: list[str] = []
+    for value in values:
+        targets.extend(item.strip() for item in value.split(",") if item.strip())
+    return targets

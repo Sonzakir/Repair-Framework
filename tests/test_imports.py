@@ -15,6 +15,7 @@ MODULES = [
     "apr_framework.evaluation.dummy_runner",
     "apr_framework.localization",
     "apr_framework.localization.base",
+    "apr_framework.localization.hybrid",
     "apr_framework.repair",
     "apr_framework.repair.base",
     "apr_framework.repair.dummy",

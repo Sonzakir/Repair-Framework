@@ -197,6 +197,43 @@ class BugsInPyDockerExecutor:
             capture_output=capture_output,
         )
 
+    def run_command(
+        self,
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        check: bool = True,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        self._ensure_docker_available()
+        if not self._container_exists():
+            raise BenchmarkError(
+                "The BugsInPy executor container is not available. "
+                "Run `python -m apr_framework bugsinpy setup` first."
+            )
+
+        if not self._container_running():
+            self._run_docker(["start", self.container], check=True)
+
+        container_cwd = (
+            self._to_container_path(cwd)
+            if cwd is not None
+            else str(BUGSINPY_CONTAINER_WORKSPACE)
+        )
+        translated_args = [self._translate_argument(arg) for arg in args]
+
+        return self._run_docker(
+            [
+                "exec",
+                "-w",
+                container_cwd,
+                self.container,
+                *translated_args,
+            ],
+            check=check,
+            capture_output=capture_output,
+        )
+
     def _ensure_docker_available(self) -> None:
         if shutil.which(self._docker) is None:
             raise ConfigurationError(
@@ -569,6 +606,22 @@ class BugsInPyToolchain:
         return self._executor.run_bugsinpy(
             command_name,
             *args,
+            cwd=cwd,
+            check=check,
+            capture_output=capture_output,
+        )
+
+    def run_command(
+        self,
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        check: bool = True,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        self.ensure_installed()
+        return self._executor.run_command(
+            args,
             cwd=cwd,
             check=check,
             capture_output=capture_output,
