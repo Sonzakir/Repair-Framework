@@ -12,6 +12,7 @@ from apr_framework.core.exceptions import (
 )
 from apr_framework.core.models import BugIdentifier, CheckoutResult
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
+from apr_framework.evaluation.localization_runner import LocalizationComparisonRunner
 from apr_framework.localization import (
     FauxPyConfig,
     FauxPyLocalizer,
@@ -295,7 +296,203 @@ def _run() -> int:
 
             return 0
 
+        if args.bugsinpy_command == "evaluate-localization":
+            return _run_evaluate_localization(args, project_root, adapter)
+
     return 1
+
+
+def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
+    """Run the localization comparison evaluation and write results."""
+    from apr_framework.core.models import CheckoutResult
+    from apr_framework.localization import FauxPyConfig, FauxPyLocalizer, FauxPyToolchain, HybridFaultLocalizer
+
+    bugs = _parse_bug_list(args.bugs or "black:1,black:3,black:7")
+    top_ks = tuple(int(k.strip()) for k in args.top_ks.split(",") if k.strip())
+    output_dir = Path(args.output_dir)
+    if not output_dir.is_absolute():
+        output_dir = project_root / output_dir
+    granularity = args.granularity
+
+    fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
+    projects_dir = adapter.toolchain.repo_dir / "projects"
+
+    # Validate bugs and build checkouts
+    checkouts: dict = {}
+    for bug in bugs:
+        worktree = (
+            project_root
+            / ".workspace"
+            / "bugsinpy"
+            / f"{bug.project}_{bug.bug_id}"
+            / bug.project
+        )
+        if not worktree.exists():
+            raise BenchmarkError(
+                f"No checkout found for {bug.project} #{bug.bug_id} at {worktree}. "
+                f"Run `python -m apr_framework bugsinpy checkout {bug.project} {bug.bug_id}` "
+                "and then `compile` before evaluating."
+            )
+        checkouts[bug] = CheckoutResult(
+            bug=bug,
+            worktree=worktree,
+            success=True,
+            prepared=True,
+        )
+
+    def patch_dir(bug: BugIdentifier) -> Path:
+        return projects_dir / bug.project / "bugs" / str(bug.bug_id)
+
+    def _src(bug: BugIdentifier) -> str:
+        worktree = checkouts[bug].worktree
+        return _infer_fauxpy_src(worktree, bug.project)
+
+    def _make_sbfl(bug: BugIdentifier, metric: str) -> FauxPyLocalizer:
+        bug_dir = patch_dir(bug)
+        test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        test_ids = [t for t in test_targets if not t.startswith("-")]
+        return FauxPyLocalizer(
+            FauxPyConfig(
+                src=_src(bug),
+                test_targets=test_targets,
+                family="sbfl",
+                granularity=granularity,
+                failing_tests=test_ids,
+                metric=metric,
+            ),
+            fauxpy_toolchain,
+        )
+
+    def _make_mbfl(bug: BugIdentifier) -> FauxPyLocalizer:
+        bug_dir = patch_dir(bug)
+        test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        test_ids = [t for t in test_targets if not t.startswith("-")]
+        return FauxPyLocalizer(
+            FauxPyConfig(
+                src=_src(bug),
+                test_targets=test_targets,
+                family="mbfl",
+                granularity=granularity,
+                failing_tests=test_ids,
+                metric="metallaxis",
+                mutation_strategy="random",
+                mutation_budget=args.budget,
+                mutation_seed=args.seed,
+            ),
+            fauxpy_toolchain,
+        )
+
+    def _make_hybrid(bug: BugIdentifier) -> HybridFaultLocalizer:
+        bug_dir = patch_dir(bug)
+        test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        test_ids = [t for t in test_targets if not t.startswith("-")]
+        sbfl_cfg = FauxPyConfig(
+            src=_src(bug),
+            test_targets=test_targets,
+            family="sbfl",
+            granularity=granularity,
+            failing_tests=test_ids,
+            metric="ochiai",
+        )
+        mbfl_cfg = FauxPyConfig(
+            src=_src(bug),
+            test_targets=test_targets,
+            family="mbfl",
+            granularity=granularity,
+            failing_tests=test_ids,
+            metric="metallaxis",
+            mutation_strategy="random",
+            mutation_budget=args.budget,
+            mutation_seed=args.seed,
+        )
+        return HybridFaultLocalizer(
+            FauxPyLocalizer(sbfl_cfg, fauxpy_toolchain),
+            FauxPyLocalizer(mbfl_cfg, fauxpy_toolchain),
+        )
+
+    techniques = _build_techniques(_make_sbfl, _make_mbfl, _make_hybrid)
+
+    runner = LocalizationComparisonRunner(top_ks=top_ks)
+
+    print(f"Evaluating {len(bugs)} bug(s) with {len(techniques)} technique(s)...")
+    eval_results = runner.run(
+        bugs=bugs,
+        techniques=techniques,
+        checkouts=checkouts,
+        patch_dir_fn=patch_dir,
+    )
+
+    readme_path = runner.write_results(eval_results, output_dir)
+    print(f"\nResults written to: {output_dir}")
+    print(f"README: {readme_path}")
+
+    # Print a compact summary table to stdout
+    _print_summary(eval_results, top_ks)
+    return 0
+
+
+def _build_techniques(make_sbfl, make_mbfl, make_hybrid):
+    """Return (name, per-bug-localizer) pairs for all techniques."""
+
+    class _BugLocalizer:
+        def __init__(self, factory):
+            self._factory = factory
+
+        def localize(self, bug, checkout, test_result=None):
+            return self._factory(bug).localize(bug, checkout, test_result)
+
+    return [
+        ("SBFL-Ochiai (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "ochiai"))),
+        ("SBFL-Tarantula (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "tarantula"))),
+        ("SBFL-DStar (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "dstar"))),
+        ("SBFL-Jaccard (extension)", _BugLocalizer(lambda bug: make_sbfl(bug, "jaccard"))),
+        ("SBFL-SBI (extension)", _BugLocalizer(lambda bug: make_sbfl(bug, "sbi"))),
+        ("MBFL-Metallaxis (baseline)", _BugLocalizer(make_mbfl)),
+        ("Hybrid SBFL+MBFL (extension)", _BugLocalizer(make_hybrid)),
+    ]
+
+
+def _parse_bug_list(spec: str) -> list[BugIdentifier]:
+    bugs: list[BugIdentifier] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" not in part:
+            raise ConfigurationError(
+                f"Invalid bug specification {part!r} — expected project:bug_id"
+            )
+        project, bug_id_str = part.rsplit(":", 1)
+        try:
+            bug_id = int(bug_id_str)
+        except ValueError:
+            raise ConfigurationError(
+                f"Invalid bug ID {bug_id_str!r} in {part!r} — must be an integer"
+            )
+        bugs.append(BugIdentifier(benchmark="bugsinpy", project=project, bug_id=bug_id))
+    if not bugs:
+        raise ConfigurationError("No bugs specified for evaluate-localization.")
+    return bugs
+
+
+def _print_summary(
+    results,
+    top_ks: tuple[int, ...],
+) -> None:
+    print("\n=== Summary ===")
+    header = f"{'Bug':<20} {'Technique':<30} {'Rank':>6}  " + "  ".join(
+        f"Top-{k}" for k in sorted(top_ks)
+    )
+    print(header)
+    print("-" * len(header))
+    for r in results:
+        bug_label = f"{r.bug.project}#{r.bug.bug_id}"
+        rank_str = str(r.faulty_rank) if r.faulty_rank is not None else "—"
+        top_k_str = "  ".join(
+            ("✓" if r.top_k_hits.get(k) else "✗") for k in sorted(top_ks)
+        )
+        note = f"  ERROR: {r.error}" if r.error else ""
+        print(f"{bug_label:<20} {r.technique:<30} {rank_str:>6}  {top_k_str}{note}")
 
 
 def _resolve_localize_family(args) -> str:

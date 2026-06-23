@@ -92,4 +92,47 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_dummy_parser.add_argument("--seed", type=int, default=None)
     evaluate_dummy_parser.add_argument("--runs-dir", default="runs")
 
+    ## bugsinpy-evaluate-localization
+    eval_loc_parser = bugsinpy_subparsers.add_parser(
+        "evaluate-localization",
+        help="Run SBFL/MBFL/Hybrid on a set of bugs and compare rankings against ground truth.",
+    )
+    eval_loc_parser.add_argument(
+        "--output-dir",
+        default="experiment_results",
+        help="Directory to write results.json and README.md (default: experiment_results).",
+    )
+    eval_loc_parser.add_argument(
+        "--top-ks",
+        default="1,5,10",
+        help="Comma-separated Top-k values to report (default: 1,5,10).",
+    )
+    eval_loc_parser.add_argument(
+        "--budget",
+        type=int,
+        default=50,
+        help="MBFL mutation budget — max mutants per bug (default: 50).",
+    )
+    eval_loc_parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Random seed for MBFL mutation selection (default: 0).",
+    )
+    eval_loc_parser.add_argument(
+        "--granularity",
+        choices=["statement", "function"],
+        default="statement",
+        help="Localization granularity (default: statement).",
+    )
+    eval_loc_parser.add_argument(
+        "--bugs",
+        default=None,
+        help=(
+            "Comma-separated list of project:bug_id pairs to evaluate "
+            "(e.g. black:1,black:3,black:7). "
+            "Defaults to black:1,black:3,black:7."
+        ),
+    )
+
     return parser
