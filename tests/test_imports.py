@@ -20,6 +20,7 @@ MODULES = [
     "apr_framework.repair.dummy",
     "apr_framework.reporting",
     "apr_framework.reporting.base",
+    "apr_framework.reporting.archive",
 ]
 
 

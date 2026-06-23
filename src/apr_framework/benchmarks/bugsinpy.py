@@ -777,13 +777,7 @@ class BugsInPyAdapter(BenchmarkAdapter):
         Returns:
             Structured test run result for the checked-out bug.
         """
-        # Match the final pytest summary line, which is delimited by '=' and
-        # contains one or more "<N> passed/failed/error/..." tokens (e.g.
-        # "==== 1 failed, 2 passed in 0.06s ====" or "=== 1 failed in 0.44
-        # seconds ==="). The trailing "in <time>" portion varies across pytest
-        # versions (e.g. "0.06s" vs "0.44 seconds"), so it is intentionally not
-        # part of the anchor. Counts are pulled individually below so any
-        # subset and ordering of result tokens is handled.
+        
         PYTEST_RESULT_KEYWORDS = (
             r"passed|failed|error|skipped|xfailed|xpassed|deselected|warning"
         )

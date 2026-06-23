@@ -236,6 +236,11 @@ baseline tests, final tests, selected patch metadata, patch-apply output, and
 status. 
 - `execution.log` records the step-by-step execution timeline.
 
+- After the run, the `ReportGenerator` implementation `ArchiveReportGenerator`
+(`src/apr_framework/reporting/archive.py`) renders a human-readable `report.md`
+summary into the run directory and bundles all run artifacts into a single
+`runs/run_xxx.zip` archive. The archive path is printed at the end of the run.
+
 ## Included evaluation artifact
 
 - This repository includes an example completed evaluation run at
@@ -288,8 +293,6 @@ python -m apr_framework bugsinpy setup
 
 | Content | Implementation |
 | --- | --- |
-| Clean Python project structure | `src/apr_framework` package with reusable modules |
-| Type hints and documented public classes/functions | Dataclasses, interfaces, and component docstrings |
 | Benchmark interface | `BenchmarkAdapter` |
 | Fault localization interface | `FaultLocalizer` |
 | Repair interface | `RepairAlgorithm` |
@@ -298,8 +301,6 @@ python -m apr_framework bugsinpy setup
 | BugsInPy list projects/bugs | `bugsinpy list-projects`, `bugsinpy list-bugs` |
 | BugsInPy checkout | `bugsinpy checkout` |
 | BugsInPy prepare environment | Safe compilation via `bugsinpy-safe-compile` and internal evaluation setup |
-| BugsInPy run tests | `bugsinpy test` |
-| Structured test results | `TestRunResult` with counts and raw output |
 | CLI entry point | `python -m apr_framework` and `apr-framework` script |
 | Dummy repair component | `DummyRepairAlgorithm` |
-| Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` |
+| Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` , `*.zip`|

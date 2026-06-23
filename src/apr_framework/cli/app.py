@@ -9,6 +9,7 @@ from apr_framework.core.exceptions import APRFrameworkError, BenchmarkError
 from apr_framework.core.models import BugIdentifier, CheckoutResult
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
 from apr_framework.repair import DummyRepairAlgorithm
+from apr_framework.reporting import ArchiveReportGenerator
 
 
 def main() -> int:
@@ -144,6 +145,9 @@ def _run() -> int:
 
             if runner.last_run_dir is not None:
                 print(f"Run directory: {runner.last_run_dir}")
+                report = ArchiveReportGenerator()
+                archive_path = report.write_summary(results, runner.last_run_dir)
+                print(f"Report archive: {archive_path}")
 
             for result in results:
                 print(
