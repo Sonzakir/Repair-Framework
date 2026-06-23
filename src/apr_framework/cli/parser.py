@@ -54,6 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     localize_parser.add_argument("--mbfl-metric", type=str, default="metallaxis")
     localize_parser.add_argument("--sbfl-weight", type=float, default=0.5)
     localize_parser.add_argument("--mbfl-weight", type=float, default=0.5)
+    localize_parser.add_argument("--runs-dir", default="runs")
 
 
     

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 from apr_framework.benchmarks.registry import (
@@ -12,6 +13,7 @@ from apr_framework.core.exceptions import (
 )
 from apr_framework.core.models import BugIdentifier, CheckoutResult
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
+from apr_framework.evaluation.run_writer import RunWriter, serialize_localization_result
 from apr_framework.evaluation.localization_runner import LocalizationComparisonRunner
 from apr_framework.localization import (
     FauxPyConfig,
@@ -20,6 +22,7 @@ from apr_framework.localization import (
     HybridFaultLocalizer,
 )
 from apr_framework.localization.fauxpy import load_pytest_targets
+from apr_framework.core.models import EvaluationResult
 from apr_framework.repair import DummyRepairAlgorithm
 from apr_framework.reporting import ArchiveReportGenerator
 
@@ -101,6 +104,36 @@ def _run() -> int:
 
         fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
 
+        runs_dir = Path(args.runs_dir)
+        if not runs_dir.is_absolute():
+            runs_dir = project_root / runs_dir
+        writer = RunWriter.create(runs_dir)
+        started_at = datetime.now(timezone.utc)
+
+        writer.log(f"Started fauxpy localization for {args.project}#{args.bug}")
+        effective_metric = args.metric or ("metallaxis" if family == "mbfl" else "ochiai")
+        config_data: dict = {
+            "runner": "fauxpy-localizer",
+            "backend": args.backend,
+            "project": args.project,
+            "bug_id": args.bug,
+            "family": family,
+            "granularity": args.granularity,
+            "top_n": args.top_n,
+            "mutation_strategy": args.mutation_strategy,
+            "mutation_budget": args.mutation_budget,
+            "mutation_seed": args.seed,
+            "started_at": started_at.isoformat(),
+        }
+        if family == "hybrid":
+            config_data["sbfl_metric"] = args.sbfl_metric
+            config_data["mbfl_metric"] = args.mbfl_metric
+            config_data["sbfl_weight"] = args.sbfl_weight
+            config_data["mbfl_weight"] = args.mbfl_weight
+        else:
+            config_data["metric"] = effective_metric
+        writer.write_json("config.json", config_data)
+
         if family == "hybrid":
             sbfl_config = FauxPyConfig(
                 src=src,
@@ -146,9 +179,48 @@ def _run() -> int:
             )
             localizer = FauxPyLocalizer(config, fauxpy_toolchain)
 
-        # Localize the Faulty Locations 
-        result = localizer.localize(checkout.bug, checkout)
+        writer.log("Running localization")
+        run_status = "completed"
+        result = None
+        try:
+            result = localizer.localize(checkout.bug, checkout)
+            writer.log(f"Localization completed: {len(result.ranked_locations)} ranked locations")
+        except Exception as exc:
+            run_status = "error"
+            writer.log(f"ERROR: {exc}")
+            writer.write_json(
+                "results.json",
+                {
+                    "run_id": writer.run_dir.name,
+                    "status": run_status,
+                    "started_at": started_at.isoformat(),
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+            writer.log(f"Finished run with status {run_status}")
+            print(f"Run directory: {writer.run_dir}")
+            raise
 
+        finished_at = datetime.now(timezone.utc)
+        writer.write_json(
+            "results.json",
+            {
+                "run_id": writer.run_dir.name,
+                "status": run_status,
+                "started_at": started_at.isoformat(),
+                "finished_at": finished_at.isoformat(),
+                **serialize_localization_result(result),
+            },
+        )
+        writer.log(f"Finished run with status {run_status}")
+
+        archive_path = ArchiveReportGenerator().write_summary(
+            [EvaluationResult(bug=result.bug, status=run_status, started_at=started_at, finished_at=finished_at)],
+            writer.run_dir,
+        )
+        print(f"Run directory: {writer.run_dir}")
+        print(f"Report archive: {archive_path}")
         print(f"Project: {result.bug.project}")
         print(f"Bug ID: {result.bug.bug_id}")
         print(f"Backend: {result.backend}")
@@ -565,3 +637,5 @@ def _parse_fauxpy_test_targets_command(values: list[str] | None) -> list[str]:
     for value in values:
         targets.extend(item.strip() for item in value.split(",") if item.strip())
     return targets
+
+

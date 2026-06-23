@@ -1,4 +1,3 @@
-import json
 import subprocess
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -13,6 +12,7 @@ from apr_framework.core.models import (
     TestRunResult,
 )
 from apr_framework.evaluation.base import EvaluationRunner
+from apr_framework.evaluation.run_writer import RunWriter
 from apr_framework.localization.base import FaultLocalizer
 from apr_framework.repair.base import RepairAlgorithm
 
@@ -77,12 +77,12 @@ class DummyEvaluationRunner(EvaluationRunner):
         Returns:
             Evaluation results summarizing the status and timestamps for each bug.
         """
-        run_dir = self._create_run_dir()
-        self._last_run_dir = run_dir
+        writer = RunWriter.create(self._runs_dir)
+        self._last_run_dir = writer.run_dir
         started_at = self._now()
 
-        self._write_json(
-            run_dir / "config.json",
+        writer.write_json(
+            "config.json",
             {
                 "runner": self.name,
                 "repair": repair.name,
@@ -92,17 +92,17 @@ class DummyEvaluationRunner(EvaluationRunner):
                 "bugs": [self._bug_to_dict(bug) for bug in bugs],
             },
         )
-        self._log(run_dir, f"Started {self.name}")
+        writer.log(f"Started {self.name}")
 
         evaluation_results: list[EvaluationResult] = []
         bug_results: list[dict[str, Any]] = []
 
         for bug in bugs:
             bug_started_at = self._now()
-            self._log(run_dir, f"Starting {self._bug_label(bug)}")
+            writer.log(f"Starting {self._bug_label(bug)}")
 
             try:
-                result_entry = self._run_one_bug(run_dir, bug, benchmark, repair)
+                result_entry = self._run_one_bug(writer, bug, benchmark, repair)
                 status = str(result_entry["status"])
             except Exception as exc:
                 status = "error"
@@ -113,7 +113,7 @@ class DummyEvaluationRunner(EvaluationRunner):
                     "finished_at": self._iso(self._now()),
                     "error": f"{type(exc).__name__}: {exc}",
                 }
-                self._log(run_dir, f"ERROR {self._bug_label(bug)}: {exc}")
+                writer.log(f"ERROR {self._bug_label(bug)}: {exc}")
 
             bug_finished_at = self._now()
             result_entry.setdefault("started_at", self._iso(bug_started_at))
@@ -127,30 +127,30 @@ class DummyEvaluationRunner(EvaluationRunner):
                     finished_at=bug_finished_at,
                 )
             )
-            self._log(run_dir, f"Finished {self._bug_label(bug)} with status {status}")
+            writer.log(f"Finished {self._bug_label(bug)} with status {status}")
 
         finished_at = self._now()
         run_status = "completed"
         if any(entry["status"] == "error" for entry in bug_results):
             run_status = "error"
 
-        self._write_json(
-            run_dir / "results.json",
+        writer.write_json(
+            "results.json",
             {
-                "run_id": run_dir.name,
+                "run_id": writer.run_dir.name,
                 "status": run_status,
                 "started_at": self._iso(started_at),
                 "finished_at": self._iso(finished_at),
                 "results": bug_results,
             },
         )
-        self._log(run_dir, f"Finished run with status {run_status}")
+        writer.log(f"Finished run with status {run_status}")
 
         return evaluation_results
 
     def _run_one_bug(
         self,
-        run_dir: Path,
+        writer: RunWriter,
         bug: BugIdentifier,
         benchmark: BenchmarkAdapter,
         repair: RepairAlgorithm,
@@ -160,17 +160,17 @@ class DummyEvaluationRunner(EvaluationRunner):
             / ".workspace"
             / "bugsinpy"
             / "evaluation"
-            / run_dir.name
+            / writer.run_dir.name
             / f"{bug.project}_{bug.bug_id}"
         )
 
-        self._log(run_dir, f"Checking out {self._bug_label(bug)}")
+        writer.log(f"Checking out {self._bug_label(bug)}")
         checkout = benchmark.checkout(bug, checkout_destination)
 
-        self._log(run_dir, f"Preparing baseline environment for {self._bug_label(bug)}")
+        writer.log(f"Preparing baseline environment for {self._bug_label(bug)}")
         benchmark.prepare_environment(checkout)
 
-        self._log(run_dir, f"Running baseline tests for {self._bug_label(bug)}")
+        writer.log(f"Running baseline tests for {self._bug_label(bug)}")
         baseline_tests = benchmark.run_tests(checkout)
 
         patches = repair.generate_patches(checkout.bug, checkout)
@@ -185,16 +185,12 @@ class DummyEvaluationRunner(EvaluationRunner):
             }
 
         patch = patches[0]
-        self._log(
-            run_dir,
-            f"Selected patch {patch.patch_id} for {self._bug_label(checkout.bug)}",
-        )
+        writer.log(f"Selected patch {patch.patch_id} for {self._bug_label(checkout.bug)}")
 
         patch_apply = None
         if patch.diff_text:
             patch_apply = self._apply_patch(checkout.worktree, patch)
-            self._log(
-                run_dir,
+            writer.log(
                 f"Applied patch for {self._bug_label(checkout.bug)} "
                 f"with return code {patch_apply['returncode']}",
             )
@@ -209,15 +205,12 @@ class DummyEvaluationRunner(EvaluationRunner):
                     "patch_apply": patch_apply,
                 }
 
-            self._log(
-                run_dir,
-                f"Preparing patched environment for {self._bug_label(checkout.bug)}",
-            )
+            writer.log(f"Preparing patched environment for {self._bug_label(checkout.bug)}")
             benchmark.prepare_environment(checkout)
         else:
-            self._log(run_dir, f"No-op patch selected for {self._bug_label(checkout.bug)}")
+            writer.log(f"No-op patch selected for {self._bug_label(checkout.bug)}")
 
-        self._log(run_dir, f"Running final tests for {self._bug_label(checkout.bug)}")
+        writer.log(f"Running final tests for {self._bug_label(checkout.bug)}")
         final_tests = benchmark.run_tests(checkout)
 
         status = self._status_for_patch(patch, final_tests)
@@ -253,33 +246,11 @@ class DummyEvaluationRunner(EvaluationRunner):
             return "correct"
         return "failed"
 
-    def _create_run_dir(self) -> Path:
-        self._runs_dir.mkdir(parents=True, exist_ok=True)
-        next_id = 1
-        for child in self._runs_dir.iterdir():
-            if not child.is_dir() or not child.name.startswith("run_"):
-                continue
-            suffix = child.name.removeprefix("run_")
-            if suffix.isdigit():
-                next_id = max(next_id, int(suffix) + 1)
-
-        run_dir = self._runs_dir / f"run_{next_id:03d}"
-        run_dir.mkdir()
-        return run_dir
-
     def _resolve_runs_dir(self, runs_dir: Path | str) -> Path:
         path = Path(runs_dir)
         if path.is_absolute():
             return path
         return self._project_root / path
-
-    def _log(self, run_dir: Path, message: str) -> None:
-        timestamp = self._iso(self._now())
-        with (run_dir / "execution.log").open("a", encoding="utf-8") as log_file:
-            log_file.write(f"[{timestamp}] {message}\n")
-
-    def _write_json(self, path: Path, data: dict[str, Any]) -> None:
-        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     def _test_result_to_dict(self, result: TestRunResult) -> dict[str, Any]:
         return {
