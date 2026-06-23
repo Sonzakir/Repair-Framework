@@ -490,6 +490,8 @@ python -m apr_framework bugsinpy test black 1
 
 # Dummy repair evaluation (writes runs/run_xxx/)
 python -m apr_framework bugsinpy evaluate-dummy --seed 123
+````
+
 | BugsInPy run tests | `bugsinpy test` |
 | Structured test results | `TestRunResult` with counts and raw output |
 | FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
@@ -501,9 +503,6 @@ python -m apr_framework bugsinpy evaluate-dummy --seed 123
 | CLI entry point | `python -m apr_framework` and `apr-framework` script |
 | Dummy repair component | `DummyRepairAlgorithm` |
 | Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` |
-
-
-
 ---
 
 ## 2 - Commands 

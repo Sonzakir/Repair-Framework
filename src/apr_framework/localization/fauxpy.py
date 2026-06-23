@@ -1338,7 +1338,7 @@ def parse_fauxpy_output(
     row_pattern = re.compile(
         r"^(?P<file>.+?)\s+\|"
         r"(?:\s+(?P<function>.+?)\s+\|)?"
-        r"\s+(?P<line>\d+)\s+\|"
+        r"\s+(?P<line>\d+)(?:-(?P<end_line>\d+))?\s+\|"
         r"\s+(?P<score>[+-]?\d+(?:\.\d+)?)\s*$"
     )
 
@@ -1368,6 +1368,7 @@ def parse_fauxpy_output(
         function = row_match.group("function")
         function = function.strip() if function is not None else None
         line_number = int(row_match.group("line"))
+        end_line = row_match.group("end_line")
         score = float(row_match.group("score"))
         current_rows.append(
             RankedLocation(
@@ -1380,6 +1381,7 @@ def parse_fauxpy_output(
                 ),
                 score=score,
                 line=line_number,
+                end_line=int(end_line) if end_line is not None else None,
                 function=function,
                 raw_location=line.strip(),
                 metadata={"score_formula": current_metric},
