@@ -304,3 +304,42 @@ python -m apr_framework bugsinpy setup
 | CLI entry point | `python -m apr_framework` and `apr-framework` script |
 | Dummy repair component | `DummyRepairAlgorithm` |
 | Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` , `*.zip`|
+
+
+## Starting the application in clean ubuntu 24.04 Container 
+
+```bash
+docker run -it --rm \
+  -v "$(pwd)":/repo -w /repo \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  ubuntu:24.04 bash
+```
+
+```bash
+apt-get update && apt-get install -y docker.io docker-compose-v2
+```
+
+```bash
+export APR_HOST_PROJECT_ROOT=/path/to/project
+
+docker compose build
+docker compose run --rm apr-framework
+```
+
+
+```bash
+# One-time: clone BugsInPy, build apr-bugsinpy:local, start the executor
+python -m apr_framework bugsinpy setup
+
+# Sanity checks
+python -m apr_framework list-benchmarks
+python -m apr_framework bugsinpy list-projects
+python -m apr_framework bugsinpy list-bugs black
+
+# Run a bug end-to-end
+python -m apr_framework bugsinpy checkout black 1
+python -m apr_framework bugsinpy test black 1
+
+# Dummy repair evaluation (writes runs/run_xxx/)
+python -m apr_framework bugsinpy evaluate-dummy --seed 123
+```
