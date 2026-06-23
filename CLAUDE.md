@@ -33,6 +33,16 @@ pytest "tests/test_imports.py::test_public_modules_import[apr_framework.localiza
 
 The only test file is `tests/test_imports.py`, which parametrizes a smoke-import check over every public module. Integration tests require Docker.
 
+> **Validation requirement — Docker end-to-end is mandatory.** Unit tests (`pytest tests/`) are NOT sufficient to accept a change. Every change must be executed end-to-end inside the Docker container and its real results observed before the work is considered done. Build and run the framework via Docker Compose, run the affected command(s) against an actual checked-out/compiled bug, and confirm the output is correct — do not rely on import smoke tests or local reasoning alone:
+> ```bash
+> docker compose build
+> docker compose run --rm apr-framework
+> # Inside the container, exercise the actual changed path, e.g.:
+> python -m apr_framework bugsinpy setup
+> python -m apr_framework bugsinpy test <project> <bug_id>     # checkout + compile + run tests
+> python -m apr_framework localize --project <project> --bug <bug_id> [flags exercising the change]
+> ```
+
 ### CLI entry points
 ```bash
 python -m apr_framework <command>
@@ -53,7 +63,8 @@ python -m apr_framework bugsinpy test <project> <bug_id>
 python -m apr_framework localize --project <project> --bug <bug_id> \
   [--backend fauxpy] [--family sbfl] [--granularity statement|function] \
   [--metric ochiai|tarantula|dstar|jaccard|sbi] [--top-n N] \
-  [--src <pkg>] [--failing_tests "test::id"] [--show-raw-output]
+  [--src <pkg>] [--failing_tests "test::id"] [--test-target "test::id"] \
+  [--show-raw-output]
 
 # MBFL localization
 python -m apr_framework localize --project <project> --bug <bug_id> \
@@ -61,8 +72,16 @@ python -m apr_framework localize --project <project> --bug <bug_id> \
   [--metric metallaxis|muse] [--top-n N] \
   [--mutation-strategy random] [--budget N] [--seed N]
 
+# Hybrid localization (weighted merge of SBFL + MBFL)
+python -m apr_framework localize --project <project> --bug <bug_id> \
+  --family hybrid [--granularity statement|function] \
+  [--sbfl-metric ochiai] [--mbfl-metric metallaxis] \
+  [--sbfl-weight 0.5] [--mbfl-weight 0.5] [--top-n N]
+
 python -m apr_framework bugsinpy evaluate-dummy --seed 123
 ```
+
+`--test-target` is repeatable (`action="append"`); pass it once per pytest target. When `--metric` is omitted for SBFL/MBFL the family default applies; for hybrid runs use `--sbfl-metric`/`--mbfl-metric` instead.
 
 ## Architecture
 
@@ -86,6 +105,7 @@ src/apr_framework/
     base.py          # FaultLocalizer ABC
     fauxpy.py        # FauxPyLocalizer, FauxPyConfig, FauxPyToolchain, parse_fauxpy_output,
                      # load_pytest_targets, extract_mbfl_tracking_metadata
+    hybrid.py        # HybridFaultLocalizer — weighted normalized merge of SBFL + MBFL rankings
   repair/
     base.py          # RepairAlgorithm ABC
     dummy.py         # DummyRepairAlgorithm (random ground-truth / no-op)
@@ -93,7 +113,8 @@ src/apr_framework/
     base.py          # EvaluationRunner ABC
     dummy_runner.py  # DummyEvaluationRunner — writes runs/run_NNN/{config,results,execution.log}
   reporting/
-    base.py          # ReportGenerator ABC (not yet implemented)
+    base.py          # ReportGenerator ABC
+    archive.py       # ArchiveReportGenerator — writes report.md summary + zips run artifacts
 ```
 
 ### Key design decisions
@@ -108,7 +129,9 @@ src/apr_framework/
 - *SBFL metric patch* — adds `MetricJaccard` and `MetricSBI` to FauxPy's SQLite schema and ranking pipeline (these metrics are not in stock FauxPy 0.7.0).
 - *MBFL selection patch* — injects `--mutation-selection`, `--mutation-budget`, and `--mutation-seed` pytest options so the framework can cap expensive mutant validation.
 
-Both patches use `replace_once` helpers that are idempotent (safe to re-apply). `parse_fauxpy_output` handles both statement rows (`File | Line | Score`) and function rows (`File | Function | Line | Score`).
+Both patches use `replace_once` helpers that are idempotent (safe to re-apply). `parse_fauxpy_output` handles both statement rows (`File | Line | Score`) and function rows (`File | Function | Line | Score`); for function granularity it also captures the optional end line, populating `RankedLocation.line`, `.end_line`, and `.function`.
+
+**Hybrid localization.** `HybridFaultLocalizer` (`localization/hybrid.py`) runs both the SBFL and MBFL localizers, min-max-normalizes each backend's scores independently, then combines them with normalized `sbfl_weight`/`mbfl_weight` and re-ranks. Ties break toward locations found by *both* backends, then by best per-backend rank. The reusable merge logic lives in the static `HybridFaultLocalizer.combine_rankings`; the combined `LocalizationResult.metadata` records the effective weights and the per-backend score formulas. Selected via `--family hybrid` with `--sbfl-metric`/`--mbfl-metric` (not `--metric`).
 
 **`load_pytest_targets`** in `localization/fauxpy.py` converts BugsInPy `run_test.sh` scripts (pytest or `python -m unittest`) into pytest-compatible target strings. It raises `ConfigurationError` for `unittest discover`.
 

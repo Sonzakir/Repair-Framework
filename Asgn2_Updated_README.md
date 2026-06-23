@@ -4,78 +4,64 @@ important part: "#### FauxPy fault localization"
 ---
 # Automated Debugging and Repair Framework
 
-  
-  
-
-- Architectural: benchmark-specific details are hidden behind framework APIs, while repair, localization, evaluation, and reporting are modeled as replaceable/extendable components.
-
-  
+Architectural: benchmark-specific details are hidden behind framework APIs, while repair, localization, evaluation, and reporting are modeled as replaceable and extendable components.
 
 ## What is implemented
 
-  
-
-- General Development/Source Code: Importable Python package under `src/apr_framework`
-
+- General development/source code: importable Python package under `src/apr_framework`
 - Abstract interfaces for:
 
-- benchmark integrations ``src/apr_framework/benchmarks``
+  - benchmark integrations `src/apr_framework/benchmarks`
 
-- fault localization ``src/apr_framework/localization``
+  - fault localization `src/apr_framework/localization`
 
-- repair algorithms ``src/apr_framework/repair``
+  - repair algorithms `src/apr_framework/repair`
 
-- evaluation runners ``src/apr_framework/evaluation``
+  - evaluation runners `src/apr_framework/evaluation`
 
-- report generators ``src/apr_framework/reporting``
+  - report generators `src/apr_framework/reporting`
 
 - BugsInPy benchmark adapter with support for:
 
-- listing available projects
+  - listing available projects
 
-- listing bugs for a project
+  - listing bugs for a project
 
-- checking out buggy versions
+  - checking out buggy versions
 
-- preparing the checked-out environment
+  - preparing the checked-out environment
 
-- running failing tests
+  - running failing tests
 
-- returning structured test counts and raw output
+  - returning structured test counts and raw output
 
 - Command-line interface via `python -m apr_framework`
-
 - Docker-based BugsInPy executor container
-
 - FauxPy fault-localization integration with CLI support for:
 
-- SBFL and MBFL mode selection
+  - SBFL and MBFL mode selection
 
-- statement-level and function-level granularity
+  - statement-level and function-level granularity
 
-- metric selection with `--metric`
+  - metric selection with `--metric`
 
-- limiting ranked locations with `--top-n`
+  - limiting ranked locations with `--top-n`
 
-- optional failing-test selection with `--failing_tests`
+  - optional failing-test selection with `--failing_tests`
 
-- parsing all FauxPy metric tables for later reuse
+  - parsing all FauxPy metric tables for later reuse
 
-- Generalized FauxPy output parser that supports both `File | Line | Score`
-
-and `File | Function | Line | Score` table formats
-
+- Generalized FauxPy output parser that supports both `File | Line | Score` and `File | Function | Line | Score` table formats
 - Dummy repair algorithm for three BugsInPy `black` bugs (1/3/23)
-
 - Dummy evaluation runner that creates structured run artifacts:
 
-- `config.json`
+  - `config.json`
 
-- `results.json`
+  - `results.json`
 
-- `execution.log`
+  - `execution.log`
 
-- timestamps and per-bug statuses
+  - timestamps and per-bug statuses
 
   
 
