@@ -165,34 +165,10 @@ class BugsInPyDockerExecutor:
         Returns:
             The completed Docker process for the executed BugsInPy command.
         """
-        self._ensure_docker_available()
-        if not self._container_exists():
-            raise BenchmarkError(
-                "The BugsInPy executor container is not available. "
-                "Run `python -m apr_framework bugsinpy setup` first."
-            )
-
-        if not self._container_running():
-            self._run_docker(["start", self.container], check=True)
-
-        container_cwd = (
-            self._to_container_path(cwd)
-            if cwd is not None
-            else str(BUGSINPY_CONTAINER_WORKSPACE)
-        )
-        translated_args = [self._translate_argument(arg) for arg in args]
         command_path = str(BUGSINPY_CONTAINER_HOME / "framework" / "bin" / command_name)
-
-        return self._run_docker(
-            [
-                "exec",
-                "-w",
-                container_cwd,
-                self.container,
-                "bash",
-                command_path,
-                *translated_args,
-            ],
+        return self._exec_in_container(
+            ["bash", command_path, *args],
+            cwd=cwd,
             check=check,
             capture_output=capture_output,
         )
@@ -205,6 +181,31 @@ class BugsInPyDockerExecutor:
         check: bool = True,
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        """
+        Run an arbitrary command inside the BugsInPy executor container via docker exec.
+        """
+        return self._exec_in_container(
+            args,
+            cwd=cwd,
+            check=check,
+            capture_output=capture_output,
+        )
+
+    def _exec_in_container(
+        self,
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        check: bool = True,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        """
+        Core plumbing for all docker exec calls into the BugsInPy container.
+
+        Ensures the container is running, resolves the working directory, translates
+        any host paths in args to their container equivalents, then delegates to
+        _run_docker.
+        """
         self._ensure_docker_available()
         if not self._container_exists():
             raise BenchmarkError(
@@ -223,13 +224,7 @@ class BugsInPyDockerExecutor:
         translated_args = [self._translate_argument(arg) for arg in args]
 
         return self._run_docker(
-            [
-                "exec",
-                "-w",
-                container_cwd,
-                self.container,
-                *translated_args,
-            ],
+            ["exec", "-w", container_cwd, self.container, *translated_args],
             check=check,
             capture_output=capture_output,
         )

@@ -921,6 +921,9 @@ def _translate_unittest_target(target: str) -> str:
 
 
 def _unittest_targets(parts: list[str]) -> list[str]:
+    """
+    Helper method to convert arguments from unit tests into test targets 
+    """
     targets: list[str] = []
     skip_next = False
     options_with_values = {"-k", "--pattern"}
@@ -957,6 +960,7 @@ def load_pytest_targets(run_test_script: Path) -> list[str]:
         raise ConfigurationError(f"No BugsInPy test script found at {run_test_script}")
 
     targets: list[str] = []
+    # In script some bugs has multiple tests (node IDs)
     for raw_line in run_test_script.read_text().splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -1077,14 +1081,14 @@ class FauxPyToolchain:
     """
 
     def __init__(self, runner: DockerCommandRunner) -> None:
-        """Create a toolchain using ``runner`` for all subprocess execution."""
+        """Create a toolchain using runner for all subprocess execution"""
         self._runner = runner
 
     def localize(self, config: FauxPyConfig, checkout: CheckoutResult) -> LocalizationResult:
-        """Run FauxPy for ``checkout`` and return ranked locations for ``config.metric``.
+        """Run FauxPy for checkout and return ranked locations for config.metric
 
         The result metadata includes the raw command output, the selected score
-        formula, the FauxPy run options, and ``all_metrics`` containing every
+        formula, the FauxPy run options, and all_metrics containing every
         parsed metric table for later consumers.
         """
         # Use a relative interpreter path because BugsInPy creates the venv in
@@ -1296,7 +1300,7 @@ class FauxPyLocalizer(FaultLocalizer):
         """
         return self._toolchain.localize(self._config, checkout)
 
-
+# TODO: 
 @overload
 def parse_fauxpy_output(
     raw_output: str,
@@ -1325,11 +1329,11 @@ def parse_fauxpy_output(
 ) -> dict[str, list[RankedLocation]] | list[RankedLocation]:
     """Parse FauxPy metric tables from pytest output.
 
-    FauxPy emits one ASCII table per scoring metric. When ``metric_filter`` is
-    ``None``, this function returns every table as ``{metric_name: rows}``.
-    When ``metric_filter`` is set, it returns only that metric's ranked rows.
-    Statement rows use ``File | Line | Score`` and function rows use
-    ``File | Function | Line | Score``.
+    FauxPy emits one ASCII table per scoring metric. When metric_filter is
+    None, this function returns every table as {metric_name: rows}.
+    When metric_filter is set, it returns only that metric's ranked rows.
+    Statement rows use File | Line | Score and function rows use
+    File | Function | Line | Score.
     """
     metric_tables: dict[str, list[RankedLocation]] = {}
     current_metric: str | None = None

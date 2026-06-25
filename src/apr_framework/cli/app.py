@@ -587,9 +587,13 @@ def _validate_localize_args(args, family: str) -> None:
 
 
 def _infer_fauxpy_src(worktree: Path, project: str) -> str:
+    """
+    Helper function to find --src (source code) of the project to give the FauxPy
+    """
+    # Convert project names to Python package style 
     package_name = project.replace("-", "_")
 
-    # Enumerate real names to handle case-sensitive filesystems inside Docker.
+    # Enumerate real names to handle case-sensitive filesystems inside Docker
     try:
         entries = {e.name: e for e in worktree.iterdir()}
     except OSError:
