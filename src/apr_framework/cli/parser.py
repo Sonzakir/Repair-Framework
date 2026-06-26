@@ -136,4 +136,81 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # Repair command
+    repair_parser = subparsers.add_parser(
+        "repair",
+        help="Apply template-based APR to a checked-out and localized bug.",
+    )
+    repair_parser.add_argument("--project", required=True, help="BugsInPy project name")
+    repair_parser.add_argument("--bug", type=int, required=True, help="Bug ID")
+    repair_parser.add_argument(
+        "--technique",
+        choices=["template"],
+        default="template",
+        help="Repair technique (default: template)",
+    )
+    repair_parser.add_argument(
+        "--budget",
+        type=int,
+        default=200,
+        help="Max patch validations (default: 200)",
+    )
+    repair_parser.add_argument(
+        "--top-n",
+        dest="top_n",
+        type=int,
+        default=5,
+        help="Top-N suspicious locations to attempt (default: 5)",
+    )
+    repair_parser.add_argument(
+        "--operators",
+        type=str,
+        default="arith,comp,obo,bool,negate,return",
+        help="Comma-separated list of enabled mutation operators (default: all)",
+    )
+    repair_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="Seconds allowed per test-suite invocation (default: 120)",
+    )
+    repair_parser.add_argument(
+        "--no-fail-fast",
+        dest="no_fail_fast",
+        action="store_true",
+        help="Disable fail-fast validation mode",
+    )
+    repair_parser.add_argument(
+        "--stop-on-first",
+        dest="stop_on_first",
+        action="store_true",
+        help="Stop after the first plausible patch is found",
+    )
+    repair_parser.add_argument(
+        "--localization-metric",
+        dest="localization_metric",
+        type=str,
+        default="ochiai",
+        help="SBFL metric used when re-running localization (default: ochiai)",
+    )
+    repair_parser.add_argument(
+        "--skip-localize",
+        dest="skip_localize",
+        action="store_true",
+        help="Skip re-running localization; load a cached result from disk",
+    )
+    repair_parser.add_argument(
+        "--granularity",
+        type=str,
+        default="statement",
+        choices=["statement", "function"],
+        help="Localization granularity used when re-running (default: statement)",
+    )
+    repair_parser.add_argument(
+        "--runs-dir",
+        dest="runs_dir",
+        default="runs",
+        help="Directory for run output (default: runs)",
+    )
+
     return parser

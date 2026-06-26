@@ -11,7 +11,7 @@ from apr_framework.core.exceptions import (
     BenchmarkError,
     ConfigurationError,
 )
-from apr_framework.core.models import BugIdentifier, CheckoutResult
+from apr_framework.core.models import BugIdentifier, CheckoutResult, RepairAttemptResult
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
 from apr_framework.evaluation.run_writer import RunWriter, serialize_localization_result
 from apr_framework.evaluation.localization_runner import LocalizationComparisonRunner
@@ -23,7 +23,7 @@ from apr_framework.localization import (
 )
 from apr_framework.localization.fauxpy import load_pytest_targets
 from apr_framework.core.models import EvaluationResult
-from apr_framework.repair import DummyRepairAlgorithm
+from apr_framework.repair import DummyRepairAlgorithm, TemplateRepairAlgorithm, TemplateRepairConfig
 from apr_framework.reporting import ArchiveReportGenerator
 
 
@@ -371,7 +371,233 @@ def _run() -> int:
         if args.bugsinpy_command == "evaluate-localization":
             return _run_evaluate_localization(args, project_root, adapter)
 
+    if args.command == "repair":
+        adapter = create_bugsinpy_adapter(project_root)
+        return handle_repair(args, adapter, project_root)
+
     return 1
+
+
+def handle_repair(args, adapter, project_root: Path) -> int:
+    """Orchestrate a template-based repair run from CLI arguments.
+
+    Steps:
+    1. Verify the project is checked out and compiled.
+    2. Run localization (or load a cached result if --skip-localize).
+    3. Build TemplateRepairConfig and TemplateRepairAlgorithm.
+    4. Call algorithm.repair() with budget and operators.
+    5. Write repair_results.json to the run directory.
+    6. Print a human-readable summary.
+    """
+    import json
+
+    from apr_framework.localization import FauxPyConfig, FauxPyLocalizer, FauxPyToolchain
+
+    project_root = Path(project_root)
+    project = args.project
+    bug_id = args.bug
+
+    # ── Resolve worktree ────────────────────────────────────────────────
+    adapter.toolchain.ensure_installed()
+    canonical_project = adapter.resolve_project(project)
+    bug = BugIdentifier(benchmark="bugsinpy", project=canonical_project, bug_id=bug_id)
+
+    destination = project_root / ".workspace" / "bugsinpy" / f"{canonical_project}_{bug_id}"
+    worktree = destination / canonical_project
+    if not worktree.exists():
+        raise BenchmarkError(
+            f"No checkout found at {worktree}. "
+            f"Run `python -m apr_framework bugsinpy checkout {project} {bug_id}` first."
+        )
+
+    checkout = CheckoutResult(
+        bug=bug,
+        worktree=worktree,
+        success=True,
+        prepared=True,
+    )
+
+    # ── Set up run writer ────────────────────────────────────────────────
+    from apr_framework.evaluation.run_writer import RunWriter
+    runs_dir = Path(args.runs_dir)
+    if not runs_dir.is_absolute():
+        runs_dir = project_root / runs_dir
+    writer = RunWriter.create(runs_dir)
+
+    started_at = datetime.now(timezone.utc)
+    writer.log(f"Started template repair for {canonical_project}#{bug_id}")
+
+    enabled_operators = [op.strip() for op in args.operators.split(",") if op.strip()]
+
+    config = TemplateRepairConfig(
+        budget=args.budget,
+        top_n_locations=args.top_n,
+        enabled_operators=enabled_operators,
+        timeout_per_test=args.timeout,
+        fail_fast=not args.no_fail_fast,
+        stop_on_first=args.stop_on_first,
+    )
+
+    config_data = {
+        "runner": "template-repair",
+        "project": canonical_project,
+        "bug_id": bug_id,
+        "technique": args.technique,
+        "budget": config.budget,
+        "top_n_locations": config.top_n_locations,
+        "enabled_operators": config.enabled_operators,
+        "timeout_per_test": config.timeout_per_test,
+        "fail_fast": config.fail_fast,
+        "stop_on_first": config.stop_on_first,
+        "localization_metric": args.localization_metric,
+        "granularity": args.granularity,
+        "skip_localize": args.skip_localize,
+        "started_at": started_at.isoformat(),
+    }
+    writer.write_json("config.json", config_data)
+
+    # ── Localization ─────────────────────────────────────────────────────
+    localization_result = None
+
+    if args.skip_localize:
+        # Look for a cached results.json in the most recent run that has ranked_locations.
+        results_files = sorted(runs_dir.glob("run_*/results.json"), reverse=True)
+        for rf in results_files:
+            try:
+                cached = json.loads(rf.read_text(encoding="utf-8"))
+                if "ranked_locations" in cached:
+                    from apr_framework.core.models import LocalizationResult, RankedLocation
+                    ranked = [
+                        RankedLocation(**{
+                            k: v for k, v in loc.items()
+                            if k in RankedLocation.__dataclass_fields__
+                        })
+                        for loc in cached["ranked_locations"]
+                    ]
+                    localization_result = LocalizationResult(
+                        bug=bug,
+                        backend=cached.get("backend", "cached"),
+                        ranked_locations=ranked,
+                        metadata=cached.get("metadata", {}),
+                    )
+                    writer.log(f"Loaded cached localization from {rf} ({len(ranked)} locations)")
+                    break
+            except Exception as exc:
+                writer.log(f"Could not load cached result from {rf}: {exc}")
+
+        if localization_result is None:
+            writer.log("No cached localization found — running fresh localization.")
+
+    if localization_result is None:
+        projects_dir = adapter.toolchain.repo_dir / "projects"
+        bug_dir = projects_dir / canonical_project / "bugs" / str(bug_id)
+        if not bug_dir.is_dir():
+            raise BenchmarkError(
+                f"No such bug {bug_id} for BugsInPy project {canonical_project}"
+            )
+
+        src = _infer_fauxpy_src(worktree, canonical_project)
+        bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        bug_test_ids = [t for t in bug_test_targets if not t.startswith("-")]
+
+        fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
+        fl_config = FauxPyConfig(
+            src=src,
+            test_targets=bug_test_targets,
+            family="sbfl",
+            granularity=args.granularity,
+            failing_tests=bug_test_ids,
+            metric=args.localization_metric,
+        )
+        localizer = FauxPyLocalizer(fl_config, fauxpy_toolchain)
+
+        writer.log(f"Running SBFL localization (metric={args.localization_metric})")
+        try:
+            localization_result = localizer.localize(bug, checkout)
+            writer.log(
+                f"Localization done: {len(localization_result.ranked_locations)} locations ranked"
+            )
+        except Exception as exc:
+            writer.log(f"Localization failed: {exc}")
+            raise
+
+    # ── Repair ───────────────────────────────────────────────────────────
+    algorithm = TemplateRepairAlgorithm(
+        localization_result=localization_result,
+        adapter=adapter,
+        config=config,
+    )
+
+    writer.log(
+        f"Repair started: budget={config.budget}, top_n={config.top_n_locations}, "
+        f"operators={config.enabled_operators}"
+    )
+
+    summary_result, all_results = algorithm.repair(bug, checkout)
+
+    finished_at = datetime.now(timezone.utc)
+    elapsed_s = (finished_at - started_at).total_seconds()
+
+    writer.log(
+        f"Repair finished: status={summary_result.status.value}, "
+        f"candidates_validated={len(all_results)}, elapsed={elapsed_s:.1f}s"
+    )
+
+    # ── Persist results ──────────────────────────────────────────────────
+    plausible = [r for r in all_results if r.status.value == "plausible"]
+
+    def _serialise_result(r: "RepairAttemptResult") -> dict:
+        return {
+            "patch_id": r.patch.patch_id if r.patch else None,
+            "status": r.status.value,
+            "summary": r.patch.summary if r.patch else None,
+            "validation_summary": r.validation_summary,
+            "diff_text": r.patch.diff_text if r.patch else None,
+            "metadata": {
+                k: v
+                for k, v in (r.patch.metadata if r.patch else {}).items()
+                if k != "patched_source"  # omit large source blobs
+            },
+        }
+
+    repair_results_payload = {
+        "run_id": writer.run_dir.name,
+        "project": canonical_project,
+        "bug_id": bug_id,
+        "status": summary_result.status.value,
+        "validation_summary": summary_result.validation_summary,
+        "started_at": started_at.isoformat(),
+        "finished_at": finished_at.isoformat(),
+        "elapsed_seconds": elapsed_s,
+        "config": config_data,
+        "candidates_validated": len(all_results),
+        "plausible_count": len(plausible),
+        "plausible_patches": [_serialise_result(r) for r in plausible],
+        "all_results": [_serialise_result(r) for r in all_results],
+    }
+    writer.write_json("repair_results.json", repair_results_payload)
+
+    # ── Print summary ────────────────────────────────────────────────────
+    print(f"\nRun directory: {writer.run_dir}")
+    print(f"Project:       {canonical_project}")
+    print(f"Bug ID:        {bug_id}")
+    print(f"Status:        {summary_result.status.value}")
+    print(f"Elapsed:       {elapsed_s:.1f}s")
+    print(f"Validated:     {len(all_results)} candidate(s)")
+    print(f"Plausible:     {len(plausible)} patch(es)")
+
+    if plausible:
+        print("\nPlausible patches:")
+        for r in plausible:
+            if r.patch:
+                print(f"  [{r.patch.patch_id}] {r.patch.summary}")
+                print(f"    {r.validation_summary}")
+    elif all_results:
+        print(f"\n{summary_result.validation_summary}")
+    else:
+        print(f"\n{summary_result.validation_summary}")
+
+    return 0
 
 
 def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
