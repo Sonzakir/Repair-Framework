@@ -641,5 +641,3 @@ def _parse_fauxpy_test_targets_command(values: list[str] | None) -> list[str]:
     for value in values:
         targets.extend(item.strip() for item in value.split(",") if item.strip())
     return targets
-
-
