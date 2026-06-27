@@ -435,7 +435,34 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
             fauxpy_toolchain,
         )
 
+    def _make_mbfl_traditional(bug: BugIdentifier) -> FauxPyLocalizer:
+        """MBFL baseline — random selection capped at traditional_budget statements.
+
+        Stock FauxPy MBFL is exhaustive (no budget limit) but takes hours on
+        large projects like black.  We use a larger budget here than the extension
+        (traditional_budget=200 vs extension budget=50) so both complete in
+        reasonable time while preserving a meaningful comparison.
+        """
+        bug_dir = patch_dir(bug)
+        test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        test_ids = [t for t in test_targets if not t.startswith("-")]
+        return FauxPyLocalizer(
+            FauxPyConfig(
+                src=_src(bug),
+                test_targets=test_targets,
+                family="mbfl",
+                granularity=granularity,
+                failing_tests=test_ids,
+                metric="metallaxis",
+                mutation_strategy="random",
+                mutation_budget=args.traditional_budget,
+                mutation_seed=args.seed,
+            ),
+            fauxpy_toolchain,
+        )
+
     def _make_mbfl(bug: BugIdentifier) -> FauxPyLocalizer:
+        """MBFL with random mutation-budget extension """
         bug_dir = patch_dir(bug)
         test_targets = load_pytest_targets(bug_dir / "run_test.sh")
         test_ids = [t for t in test_targets if not t.startswith("-")]
@@ -482,7 +509,7 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
             FauxPyLocalizer(mbfl_cfg, fauxpy_toolchain),
         )
 
-    techniques = _build_techniques(_make_sbfl, _make_mbfl, _make_hybrid)
+    techniques = _build_techniques(_make_sbfl, _make_mbfl_traditional, _make_mbfl, _make_hybrid)
 
     runner = LocalizationComparisonRunner(top_ks=top_ks)
 
@@ -503,8 +530,18 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
     return 0
 
 
-def _build_techniques(make_sbfl, make_mbfl, make_hybrid):
-    """Return (name, per-bug-localizer) pairs for all techniques."""
+def _build_techniques(make_sbfl, make_mbfl_traditional, make_mbfl, make_hybrid):
+    """Return (name, per-bug-localizer) pairs for all techniques.
+
+    Baselines are stock FauxPy 0.7.0 behaviour:
+      - SBFL: Ochiai, Tarantula, D*
+      - MBFL: Metallaxis with traditional (exhaustive) mutation strategy
+
+    Extensions added by this framework:
+      - SBFL: Jaccard, SBI (custom metrics via in-place FauxPy patch)
+      - MBFL: Metallaxis with random mutation-budget selection (Task 3)
+      - Hybrid: normalised weighted merge of SBFL + MBFL scores (Task 4)
+    """
 
     class _BugLocalizer:
         def __init__(self, factory):
@@ -514,13 +551,14 @@ def _build_techniques(make_sbfl, make_mbfl, make_hybrid):
             return self._factory(bug).localize(bug, checkout, test_result)
 
     return [
-        ("SBFL-Ochiai (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "ochiai"))),
-        ("SBFL-Tarantula (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "tarantula"))),
-        ("SBFL-DStar (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "dstar"))),
-        ("SBFL-Jaccard (extension)", _BugLocalizer(lambda bug: make_sbfl(bug, "jaccard"))),
-        ("SBFL-SBI (extension)", _BugLocalizer(lambda bug: make_sbfl(bug, "sbi"))),
-        ("MBFL-Metallaxis (baseline)", _BugLocalizer(make_mbfl)),
-        ("Hybrid SBFL+MBFL (extension)", _BugLocalizer(make_hybrid)),
+        ("SBFL-Ochiai (baseline)",            _BugLocalizer(lambda bug: make_sbfl(bug, "ochiai"))),
+        ("SBFL-Tarantula (baseline)",          _BugLocalizer(lambda bug: make_sbfl(bug, "tarantula"))),
+        ("SBFL-DStar (baseline)",              _BugLocalizer(lambda bug: make_sbfl(bug, "dstar"))),
+        ("SBFL-Jaccard (extension)",           _BugLocalizer(lambda bug: make_sbfl(bug, "jaccard"))),
+        ("SBFL-SBI (extension)",               _BugLocalizer(lambda bug: make_sbfl(bug, "sbi"))),
+        ("MBFL-Metallaxis (baseline)",         _BugLocalizer(make_mbfl_traditional)),
+        ("MBFL-Metallaxis-Random (extension)", _BugLocalizer(make_mbfl)),
+        ("Hybrid SBFL+MBFL (extension)",       _BugLocalizer(make_hybrid)),
     ]
 
 

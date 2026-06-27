@@ -135,5 +135,17 @@ def build_parser() -> argparse.ArgumentParser:
             "Defaults to black:1,black:3,black:7."
         ),
     )
+    eval_loc_parser.add_argument(
+        "--traditional-budget",
+        dest="traditional_budget",
+        type=int,
+        default=200,
+        help=(
+            "Mutation budget for the MBFL baseline technique (default: 200). "
+            "Stock FauxPy MBFL is exhaustive but impractical on large projects; "
+            "this caps the baseline at a larger budget than --budget (the extension) "
+            "so both complete in reasonable time while preserving the comparison."
+        ),
+    )
 
     return parser

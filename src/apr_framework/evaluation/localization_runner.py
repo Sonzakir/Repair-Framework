@@ -256,15 +256,26 @@ def _build_discussion(
             for bug in bugs
             if (r := index.get((bug, tech))) and r.top_k_hits.get(1)
         )
-    best_tech = max(top1_counts, key=lambda t: top1_counts[t])
-    worst_tech = min(top1_counts, key=lambda t: top1_counts[t])
+    best_count = max(top1_counts.values())
+    worst_count = min(top1_counts.values())
 
-    paras.append(
-        f"**Extension vs baseline.**  "
-        f"Among the techniques evaluated, `{best_tech}` achieved the highest Top-1 accuracy "
-        f"({top1_counts[best_tech]}/{len(bugs)} bugs), while `{worst_tech}` ranked lowest "
-        f"({top1_counts[worst_tech]}/{len(bugs)})."
-    )
+    if best_count == worst_count:
+        paras.append(
+            f"**Extension vs baseline.**  "
+            f"All techniques achieved the same Top-1 accuracy "
+            f"({best_count}/{len(bugs)} bugs).  "
+            f"The extensions (Jaccard, SBI, Hybrid) and the baselines (Ochiai, Tarantula, D*) "
+            f"are indistinguishable by this metric on the evaluated bug set."
+        )
+    else:
+        best_tech  = max(top1_counts, key=lambda t: top1_counts[t])
+        worst_tech = min(top1_counts, key=lambda t: top1_counts[t])
+        paras.append(
+            f"**Extension vs baseline.**  "
+            f"Among the techniques evaluated, `{best_tech}` achieved the highest Top-1 accuracy "
+            f"({top1_counts[best_tech]}/{len(bugs)} bugs), while `{worst_tech}` ranked lowest "
+            f"({top1_counts[worst_tech]}/{len(bugs)})."
+        )
 
     # Rank trends
     rank_avgs: dict[str, float] = {}
