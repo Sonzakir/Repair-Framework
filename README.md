@@ -112,7 +112,7 @@ objects instead of parsing FauxPy output directly.
 - **FauxPy metrics are reusable.** The configured metric is used as the primary
 ranking shown by the CLI, and every metric table parsed from FauxPy output is
 stored in `metadata["all_metrics"]`. This keeps Tarantula, Ochiai, DStar,
-Jaccard, SBI, and other emitted tables available for later repair or reporting
+Jaccard, WSBI, and other emitted tables available for later repair or reporting
 components.
 
 ## Requirements
@@ -262,21 +262,49 @@ python -m apr_framework localize --project PySnooper --bug 1 --src pysnooper
 python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai
 ```
 
-Jaccard and SBI are available for SBFL runs through the framework's FauxPy 0.7.0
+Jaccard and WSBI are available for SBFL runs through the framework's FauxPy 0.7.0
 patch, which is applied inside the prepared checkout environment before localization:
 
 ```bash
 python -m apr_framework localize --project PySnooper --bug 1 --metric jaccard
-python -m apr_framework localize --project PySnooper --bug 1 --metric sbi
+python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi
+```
+
+- Use `--wsbi-alpha` to control the passing-test weight (default: `0.5`):
+
+```bash
+# Default alpha=0.5: passing tests count half as much as failing tests
+python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi
+
+# alpha=1.0 reduces to plain SBI (equal weight)
+python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi --wsbi-alpha 1.0
+
+# alpha=0.25 further discounts passing-test coverage
+python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi --wsbi-alpha 0.25
 ```
 
 Implementation note: FauxPy normally computes Tarantula, Ochiai, and DStar for
-SBFL. The framework adds Jaccard and SBI by patching the installed FauxPy copy
-in the bug checkout's virtual environment before running localization. The patch
-adds `MetricJaccard` and `MetricSBI` formulas, registers them with FauxPy's
-SBFL metric list, extends FauxPy's local SQLite score table, and lets the
-existing output parser select the emitted `Scores for Jaccard` or
-`Scores for SBI` tables with `--metric`.
+SBFL. The framework adds Jaccard (a known literature metric) and WSBI (a custom
+weighted metric) by patching the installed FauxPy copy in the bug checkout's
+virtual environment before running localization. The patch adds `MetricJaccard`
+and `MetricWSBI` formulas, registers them with FauxPy's SBFL metric list,
+extends FauxPy's local SQLite score table, and lets the existing output parser
+select the emitted `Scores for Jaccard` or `Scores for WSBI` tables with
+`--metric`.
+
+**WSBI — Weighted SBI (custom metric):** Unlike standard SBI (`ef / (ef + ep)`),
+the framework's WSBI uses a weighted denominator:
+
+```
+score = ef / (ef + alpha * ep)    where alpha ∈ (0, 1], default 0.5
+```
+
+The intuition is that a passing test covering a statement is weaker evidence
+of innocence than a failing test is evidence of guilt. With `alpha = 0.5`,
+passing tests count half as much as failing tests — making the metric more
+sensitive to failing-test coverage while still penalizing statements that are
+also covered by many passing tests. Setting `alpha = 1` recovers plain SBI;
+smaller values of alpha make the metric increasingly aggressive.
 
 - Limit the number of ranked locations printed:
 
@@ -495,7 +523,7 @@ python -m apr_framework bugsinpy evaluate-dummy --seed 123
 | BugsInPy run tests | `bugsinpy test` |
 | Structured test results | `TestRunResult` with counts and raw output |
 | FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
-| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard` |
+| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard`, `localize --metric wsbi --wsbi-alpha 0.5` |
 | Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
 | FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
 | FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |

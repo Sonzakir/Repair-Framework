@@ -54,6 +54,17 @@ def build_parser() -> argparse.ArgumentParser:
     localize_parser.add_argument("--mbfl-metric", type=str, default="metallaxis")
     localize_parser.add_argument("--sbfl-weight", type=float, default=0.5)
     localize_parser.add_argument("--mbfl-weight", type=float, default=0.5)
+    localize_parser.add_argument(
+        "--wsbi-alpha",
+        dest="wsbi_alpha",
+        type=float,
+        default=0.5,
+        help=(
+            "Passing-test weight for the WSBI metric: score = ef / (ef + alpha * ep). "
+            "Must be > 0. alpha=1 reduces to plain SBI; alpha=0.5 (default) halves "
+            "the influence of passing-test coverage."
+        ),
+    )
     localize_parser.add_argument("--runs-dir", default="runs")
 
 

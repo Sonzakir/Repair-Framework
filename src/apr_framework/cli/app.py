@@ -169,13 +169,14 @@ def _run() -> int:
                 src=src,
                 test_targets=test_targets,
                 family=family,
-                granularity=args.granularity, 
+                granularity=args.granularity,
                 failing_tests=failing_tests,
                 top_n=args.top_n,
-                mutation_strategy = args.mutation_strategy, 
-                mutation_budget = args.mutation_budget , 
+                mutation_strategy=args.mutation_strategy,
+                mutation_budget=args.mutation_budget,
                 mutation_seed=args.seed,
-                metric = metric
+                metric=metric,
+                wsbi_alpha=args.wsbi_alpha,
             )
             localizer = FauxPyLocalizer(config, fauxpy_toolchain)
 
@@ -538,7 +539,7 @@ def _build_techniques(make_sbfl, make_mbfl_traditional, make_mbfl, make_hybrid):
       - MBFL: Metallaxis with traditional (exhaustive) mutation strategy
 
     Extensions added by this framework:
-      - SBFL: Jaccard, SBI (custom metrics via in-place FauxPy patch)
+      - SBFL: Jaccard (literature), WSBI (custom weighted metric via in-place FauxPy patch)
       - MBFL: Metallaxis with random mutation-budget selection (Task 3)
       - Hybrid: normalised weighted merge of SBFL + MBFL scores (Task 4)
     """
@@ -555,7 +556,7 @@ def _build_techniques(make_sbfl, make_mbfl_traditional, make_mbfl, make_hybrid):
         ("SBFL-Tarantula (baseline)",          _BugLocalizer(lambda bug: make_sbfl(bug, "tarantula"))),
         ("SBFL-DStar (baseline)",              _BugLocalizer(lambda bug: make_sbfl(bug, "dstar"))),
         ("SBFL-Jaccard (extension)",           _BugLocalizer(lambda bug: make_sbfl(bug, "jaccard"))),
-        ("SBFL-SBI (extension)",               _BugLocalizer(lambda bug: make_sbfl(bug, "sbi"))),
+        ("SBFL-WSBI (extension)",              _BugLocalizer(lambda bug: make_sbfl(bug, "wsbi"))),
         ("MBFL-Metallaxis (baseline)",         _BugLocalizer(make_mbfl_traditional)),
         ("MBFL-Metallaxis-Random (extension)", _BugLocalizer(make_mbfl)),
         ("Hybrid SBFL+MBFL (extension)",       _BugLocalizer(make_hybrid)),

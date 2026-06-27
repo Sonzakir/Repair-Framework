@@ -266,6 +266,8 @@ class FauxPyConfig:
     mutation_seed: int = 0
     # Metric selection
     metric: str | None = None
+    # WSBI alpha — weight applied to passing-test coverage (0 < alpha <= 1)
+    wsbi_alpha: float = 0.5
 
     def __post_init__(self) -> None:
         """Validate FauxPy options and reject unsupported combinations early."""
@@ -295,6 +297,8 @@ class FauxPyConfig:
             )
         elif not isinstance(self.metric, str) or not self.metric.strip():
             raise ConfigurationError("FauxPy metric must be a non-empty string.")
+        if not isinstance(self.wsbi_alpha, (int, float)) or self.wsbi_alpha <= 0:
+            raise ConfigurationError("wsbi_alpha must be a positive number.")
         if not isinstance(self.src, str) or not self.src.strip():
             raise ConfigurationError("FauxPy src must be a non-empty string.")
         if self.top_n is not None:
@@ -351,7 +355,7 @@ class FauxPyToolchain:
                 f"{checkout.bug.project} {checkout.bug.bug_id}` first."
             )
 
-        self._ensure_patched_fauxpy_installed(python, checkout.worktree)
+        self._ensure_patched_fauxpy_installed(python, checkout.worktree, config.wsbi_alpha)
 
         fauxpy_command = self._build_fauxpy_command(python , config)
         before_report_dirs = _list_fauxpy_report_dirs(checkout.worktree)
@@ -381,7 +385,7 @@ class FauxPyToolchain:
             raise ConfigurationError(
                 f"Metric '{config.metric}' was not emitted by FauxPy. "
                 f"Available metrics: {available_metrics}. "
-                "If you requested Jaccard or SBI, make sure the prepared checkout uses "
+                "If you requested Jaccard or WSBI, make sure the prepared checkout uses "
                 "the framework's patched FauxPy installation."
             )
 
@@ -417,9 +421,9 @@ class FauxPyToolchain:
             metadata=metadata,
         )
 
-    def _ensure_patched_fauxpy_installed(self, python: Path, cwd: Path) -> None:
+    def _ensure_patched_fauxpy_installed(self, python: Path, cwd: Path, wsbi_alpha: float) -> None:
         self._ensure_fauxpy_installed(python, cwd)
-        self._apply_fauxpy_sbfl_metric_patch(python, cwd)
+        self._apply_fauxpy_sbfl_metric_patch(python, cwd, wsbi_alpha)
         self._apply_fauxpy_mbfl_selection_patch(python, cwd)
 
     def _ensure_fauxpy_installed(self, python: Path, cwd: Path) -> None:
@@ -446,9 +450,11 @@ class FauxPyToolchain:
                 f"failed. {_completed_output(install)}".strip()
             )
 
-    def _apply_fauxpy_sbfl_metric_patch(self, python: Path, cwd: Path) -> None:
+    def _apply_fauxpy_sbfl_metric_patch(self, python: Path, cwd: Path, wsbi_alpha: float) -> None:
+        # Prepend the alpha value so the patch script can embed it in metric_wsbi.py.
+        script = f"_WSBI_ALPHA = {wsbi_alpha!r}\n" + _FAUXPY_SBFL_METRICS_PATCH_SCRIPT
         patch = self._runner.run_command(
-            [str(python), "-c", _FAUXPY_SBFL_METRICS_PATCH_SCRIPT],
+            [str(python), "-c", script],
             cwd=cwd,
             check=False,
             capture_output=True,

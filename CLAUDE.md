@@ -62,7 +62,7 @@ python -m apr_framework bugsinpy test <project> <bug_id>
 # SBFL localization (default family)
 python -m apr_framework localize --project <project> --bug <bug_id> \
   [--backend fauxpy] [--family sbfl] [--granularity statement|function] \
-  [--metric ochiai|tarantula|dstar|jaccard|sbi] [--top-n N] \
+  [--metric ochiai|tarantula|dstar|jaccard|wsbi] [--wsbi-alpha ALPHA] [--top-n N] \
   [--src <pkg>] [--failing_tests "test::id"] [--test-target "test::id"] \
   [--show-raw-output]
 
@@ -126,7 +126,7 @@ src/apr_framework/
 **Shared domain models.** All components communicate through dataclasses from `core/models.py` — not raw strings or dicts. `LocalizationResult.metadata["all_metrics"]` stores every metric table parsed from FauxPy output so later stages (repair, reporting) can consume any metric without re-running FauxPy. For MBFL runs, `metadata` also stores cost-control fields from `extract_mbfl_tracking_metadata` (e.g. `mutants_generated`, `mutants_validated`, `mutation_generation_time_seconds`).
 
 **FauxPy isolation.** `FauxPyLocalizer` implements `FaultLocalizer`; `FauxPyToolchain` handles pinned FauxPy 0.7.0 installation and applies **two** in-place source patches before every localization run:
-- *SBFL metric patch* — adds `MetricJaccard` and `MetricSBI` to FauxPy's SQLite schema and ranking pipeline (these metrics are not in stock FauxPy 0.7.0).
+- *SBFL metric patch* — adds `MetricJaccard` (known literature metric) and `MetricWSBI` (custom **Weighted SBI**) to FauxPy's SQLite schema and ranking pipeline (these metrics are not in stock FauxPy 0.7.0). `MetricWSBI` computes `ef / (ef + alpha * ep)` where `alpha` is configurable via `--wsbi-alpha` (default 0.5). The `_WSBI_ALPHA` value is injected into the patch script at run time and baked into the written `metric_wsbi.py` file.
 - *MBFL selection patch* — injects `--mutation-selection`, `--mutation-budget`, and `--mutation-seed` pytest options so the framework can cap expensive mutant validation.
 
 Both patches use `replace_once` helpers that are idempotent (safe to re-apply). `parse_fauxpy_output` handles both statement rows (`File | Line | Score`) and function rows (`File | Function | Line | Score`); for function granularity it also captures the optional end line, populating `RankedLocation.line`, `.end_line`, and `.function`.
@@ -151,5 +151,5 @@ runs/run_NNN/          # evaluation outputs: config.json, results.json, executio
 - On Windows: change line endings from CRLF to LF for shell scripts.
 - FauxPy localization requires a checked-out and compiled bug. Run `checkout` then `compile` (or `test`, which does both) before `localize`.
 - FauxPy currently requires `run_test.sh` to invoke pytest directly. Projects using only `unittest discover` are not supported.
-- If FauxPy reports a missing `Jaccard` or `SBI` metric, the framework's SBFL patch was not applied — check that the checkout's virtual environment is intact and re-run `compile`.
+- If FauxPy reports a missing `Jaccard` or `WSBI` metric, the framework's SBFL patch was not applied — check that the checkout's virtual environment is intact and re-run `compile`.
 - To do a full clean rebuild: `docker compose down --remove-orphans && docker rm -f apr-bugsinpy-executor 2>/dev/null; docker rmi apr-framework:local apr-bugsinpy:local 2>/dev/null; docker compose build --no-cache`.
