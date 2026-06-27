@@ -382,6 +382,33 @@ mutation_text = replace_once(
 )
 write(mutation_manager_path, mutation_text)
 
+# Fix: FauxPy MBFL uses bare "python" for subprocess calls, but in pyenv-managed
+# environments the "python" shim resolves to no version unless pyenv global is set.
+# Replace with sys.executable so the subprocess inherits the venv's Python binary.
+collect_mbfl_api_path = package_root / "fault_localization" / "collect_mbfl" / "api_lib.py"
+api_text = read(collect_mbfl_api_path)
+api_text = replace_once(
+    api_text,
+    '''from fauxpy.fault_localization.collect_mbfl.api_file import CollectMbflApiFileManager
+from fauxpy.fault_localization.util.run_lib import CommandRunner
+from fauxpy.session_lib.fauxpy_path import FauxpyPath''',
+    '''import sys
+
+from fauxpy.fault_localization.collect_mbfl.api_file import CollectMbflApiFileManager
+from fauxpy.fault_localization.util.run_lib import CommandRunner
+from fauxpy.session_lib.fauxpy_path import FauxpyPath''',
+    "CollectMbflApi sys import",
+)
+api_text = replace_once(
+    api_text,
+    '''        command = (
+            ["python", "-m", "pytest"]''',
+    '''        command = (
+            [sys.executable, "-m", "pytest"]''',
+    "CollectMbflApi sys.executable fix",
+)
+write(collect_mbfl_api_path, api_text)
+
 mbfl_run_manager_path = package_root / "fault_localization" / "mbfl" / "mbfl_run_manager.py"
 run_text = read(mbfl_run_manager_path)
 run_text = replace_once(

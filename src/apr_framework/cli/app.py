@@ -437,12 +437,10 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
         )
 
     def _make_mbfl_traditional(bug: BugIdentifier) -> FauxPyLocalizer:
-        """MBFL baseline — random selection capped at traditional_budget statements.
+        """True stock FauxPy MBFL baseline —> exhaustive mutation, no budget cap.
 
-        Stock FauxPy MBFL is exhaustive (no budget limit) but takes hours on
-        large projects like black.  We use a larger budget here than the extension
-        (traditional_budget=200 vs extension budget=50) so both complete in
-        reasonable time while preserving a meaningful comparison.
+        No mutation_strategy or mutation_budget means FauxPy runs all generated
+        mutants, which is the stock behaviour of FauxPy 0.7.0
         """
         bug_dir = patch_dir(bug)
         test_targets = load_pytest_targets(bug_dir / "run_test.sh")
@@ -455,9 +453,6 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
                 granularity=granularity,
                 failing_tests=test_ids,
                 metric="metallaxis",
-                mutation_strategy="random",
-                mutation_budget=args.traditional_budget,
-                mutation_seed=args.seed,
             ),
             fauxpy_toolchain,
         )

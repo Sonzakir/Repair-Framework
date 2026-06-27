@@ -79,9 +79,17 @@ python -m apr_framework localize --project <project> --bug <bug_id> \
   [--sbfl-weight 0.5] [--mbfl-weight 0.5] [--top-n N]
 
 python -m apr_framework bugsinpy evaluate-dummy --seed 123
+
+# Multi-technique localization evaluation (compares SBFL/MBFL/Hybrid against ground truth)
+python -m apr_framework bugsinpy evaluate-localization \
+  [--bugs black:1,black:3,black:7] [--granularity statement|function] \
+  [--budget N] [--seed N] [--top-ks 1,5,10] \
+  [--output-dir experiment_results]
 ```
 
 `--test-target` is repeatable (`action="append"`); pass it once per pytest target. When `--metric` is omitted for SBFL/MBFL the family default applies; for hybrid runs use `--sbfl-metric`/`--mbfl-metric` instead.
+
+`evaluate-localization` runs all 8 techniques (3 SBFL baselines, 2 SBFL extensions, 1 MBFL baseline, 1 MBFL-random extension, 1 Hybrid) on each specified bug and compares their rankings against the ground-truth faulty lines parsed from `bug_patch.txt`. All bugs must be checked out and compiled before running.
 
 ## Architecture
 
@@ -110,8 +118,16 @@ src/apr_framework/
     base.py          # RepairAlgorithm ABC
     dummy.py         # DummyRepairAlgorithm (random ground-truth / no-op)
   evaluation/
-    base.py          # EvaluationRunner ABC
-    dummy_runner.py  # DummyEvaluationRunner — writes runs/run_NNN/{config,results,execution.log}
+    base.py               # EvaluationRunner ABC
+    run_writer.py         # RunWriter — creates runs/run_NNN/, writes config.json/results.json/execution.log;
+                          # serialize_localization_result() converts LocalizationResult to JSON-safe dict
+    dummy_runner.py       # DummyEvaluationRunner — full APR pipeline with checkout/compile/repair/test
+    ground_truth.py       # GroundTruthLine, parse_bug_patch (parses bug_patch.txt diff → deleted lines),
+                          # find_faulty_rank (lowest rank of any ground-truth line in a ranking),
+                          # in_top_k, _files_match (flexible relative-path comparison)
+    localization_runner.py  # LocalizationComparisonRunner — runs N techniques × M bugs, scores each
+                            # against ground truth, writes results.json + README.md;
+                            # LocalizationTechniqueResult holds ranked_locations + top_k_hits per run
   reporting/
     base.py          # ReportGenerator ABC
     archive.py       # ArchiveReportGenerator — writes report.md summary + zips run artifacts
@@ -137,11 +153,14 @@ Both patches use `replace_once` helpers that are idempotent (safe to re-apply). 
 
 **`FauxPyConfig` metric defaults.** When `--metric` is not supplied, the default is `ochiai` for SBFL and `metallaxis` for MBFL. Validation in `__post_init__` rejects unsupported family/granularity/mutation combinations before any subprocess runs.
 
+**`LocalizationComparisonRunner`** (`evaluation/localization_runner.py`) runs the full 8-technique comparison matrix and emits a markdown report with per-bug tables, an aggregate Top-k accuracy table, and an auto-generated discussion section. The technique list is built in `app._build_techniques()` and covers: SBFL (Ochiai/Tarantula/D*/Jaccard/WSBI), MBFL-Metallaxis (exhaustive baseline), MBFL-Metallaxis-Random (budget-capped extension), and Hybrid. Ground-truth matching via `_files_match` is path-flexible — it handles FauxPy's short relative paths against git-diff absolute paths by comparing suffixes and, as a last resort, filenames.
+
 ### Directory conventions
 ```
 .tools/bugsinpy        # BugsInPy clone (git submodule managed by setup command)
 .workspace/bugsinpy/   # checked-out project worktrees (e.g. PySnooper_1/PySnooper/)
-runs/run_NNN/          # evaluation outputs: config.json, results.json, execution.log
+runs/run_NNN/          # single-localization run outputs: config.json, results.json, execution.log
+experiment_results/    # evaluate-localization outputs: results.json + README.md comparison report
 ```
 
 ## Troubleshooting

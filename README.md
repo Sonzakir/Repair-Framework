@@ -32,6 +32,12 @@
   - parsing all FauxPy metric tables for later reuse
 - Generalized FauxPy output parser that supports both `File | Line | Score`
 and `File | Function | Line | Score` table formats
+- **Custom SBFL metric extensions** (patched into FauxPy 0.7.0 at runtime):
+  - **Jaccard** — set-intersection scoring: `ef / (ef + ep + fn)`
+  - **WSBI (Weighted SBI)** — novel custom metric: `ef / (ef + alpha × ep)` with configurable `alpha` (default `0.5`). Reduces to plain SBI at `alpha=1`; smaller alpha makes the metric more aggressive by discounting passing-test coverage
+- **Hybrid SBFL+MBFL localizer** — min-max normalises and combines scores from both families with configurable weights; locations found by both backends receive a tiebreak bonus
+- **MBFL random-budget extension** — caps expensive mutant validation at `--budget N` mutants using random selection, making MBFL practical on large projects
+- **`evaluate-localization` command** — runs all 8 techniques (5 SBFL, 2 MBFL, 1 Hybrid) on a configurable set of BugsInPy bugs, ranks the ground-truth faulty line for each, and writes `experiment_results/results.json` and `experiment_results/README.md`
 - Dummy repair algorithm for three BugsInPy `black` bugs (1/3/23)
 - Dummy evaluation runner that creates structured run artifacts:
   - `config.json`
@@ -445,6 +451,62 @@ ground-truth repair and unchanged/no-patch behavior.
 
 
 
+## Experiment Results (Task 5 Evaluation)
+
+The framework was evaluated on three real BugsInPy bugs: **fastapi#3**, **fastapi#6**, and **luigi#33**. All 8 techniques were compared against the ground-truth faulty line from each bug's patch. Full results are in [`experiment_results/README.md`](experiment_results/README.md).
+
+### Summary table
+
+| Bug | Technique | Type | Rank | Top-10 |
+|---|---|---|---|---|
+| fastapi#3 | SBFL-Ochiai | baseline | 8 | ✓ |
+| fastapi#3 | SBFL-Tarantula | baseline | 11 | ✗ |
+| fastapi#3 | SBFL-DStar | baseline | 8 | ✓ |
+| fastapi#3 | SBFL-Jaccard | **extension** | 8 | ✓ |
+| fastapi#3 | SBFL-WSBI | **extension** | 11 | ✗ |
+| fastapi#3 | MBFL-Metallaxis | baseline | 18 | ✗ |
+| fastapi#3 | MBFL-Metallaxis-Random | **extension** | 11 | ✗ |
+| fastapi#3 | Hybrid SBFL+MBFL | **extension** | 11 | ✗ |
+| fastapi#6 | SBFL-Ochiai | baseline | 82 | ✗ |
+| fastapi#6 | SBFL-DStar | baseline | 82 | ✗ |
+| fastapi#6 | SBFL-Jaccard | **extension** | 82 | ✗ |
+| fastapi#6 | MBFL-Metallaxis | baseline | 6 | ✓ |
+| fastapi#6 | MBFL-Metallaxis-Random | **extension** | — | ✗ |
+| fastapi#6 | **Hybrid SBFL+MBFL** | **extension** | **3** | **✓ (top-5)** |
+| luigi#33 | SBFL-Ochiai | baseline | 11 | ✗ |
+| luigi#33 | SBFL-Tarantula | baseline | 191 | ✗ |
+| luigi#33 | SBFL-DStar | baseline | 11 | ✗ |
+| luigi#33 | SBFL-Jaccard | **extension** | 11 | ✗ |
+| luigi#33 | SBFL-WSBI | **extension** | 191 | ✗ |
+| luigi#33 | MBFL-Metallaxis | baseline | — | ✗ |
+| luigi#33 | Hybrid SBFL+MBFL | **extension** | 26 | ✗ |
+
+### Key findings
+
+**Jaccard (extension) matches the best SBFL baseline on fastapi#3.** Ochiai, D*, and Jaccard all rank the faulty line at position 8. Tarantula and WSBI fall to rank 11, showing that formula choice matters.
+
+**Hybrid reaches rank 3 on fastapi#6** — the only technique to enter the top 5. SBFL alone is stuck at rank 82 for this bug; MBFL alone reaches rank 6. Combining both via the weighted hybrid further improves to rank 3, demonstrating the value of the extension.
+
+**WSBI degenerates on luigi#33** (rank 191, same as Tarantula). Luigi#33 has no passing tests — when `ep = 0`, WSBI and SBI both assign score `1.0` to every executed line with no differentiation. Ochiai (`sqrt(ef/F)`) preserves a gradient across the four failing tests and correctly ranks the faulty line at 11. This is an honest limitation of the WSBI metric and motivates future work on handling the zero-passing-test edge case.
+
+### Running the evaluation
+
+```bash
+# Checkout and compile the three bugs first
+for proj_bug in "fastapi 3" "fastapi 6" "luigi 33"; do
+  set -- $proj_bug
+  python -m apr_framework bugsinpy checkout $1 $2
+  python -m apr_framework bugsinpy compile $1 $2
+done
+
+# Run all 8 techniques, write to experiment_results/
+python -m apr_framework bugsinpy evaluate-localization \
+    --bugs "fastapi:3,fastapi:6,luigi:33" \
+    --budget 50 --seed 42 \
+    --granularity statement \
+    --output-dir experiment_results
+```
+
 ## Troubleshooting
 
 - If Docker Compose cannot infer the host repository path, set it explicitly:
@@ -524,7 +586,12 @@ python -m apr_framework bugsinpy evaluate-dummy --seed 123
 | Structured test results | `TestRunResult` with counts and raw output |
 | FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
 | FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard`, `localize --metric wsbi --wsbi-alpha 0.5` |
+| Custom SBFL metrics | Jaccard and WSBI (Weighted SBI) added via runtime patch to FauxPy 0.7.0 |
+| WSBI configurable alpha | `localize --metric wsbi --wsbi-alpha 0.5` (default); range (0, 1] |
 | Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
+| MBFL random-budget extension | `localize --mbfl --mutation-strategy random --budget 50` |
+| Multi-technique evaluation | `bugsinpy evaluate-localization --bugs "fastapi:3,fastapi:6,luigi:33"` |
+| Evaluation output | `experiment_results/results.json` and `experiment_results/README.md` |
 | FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
 | FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
 | FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |

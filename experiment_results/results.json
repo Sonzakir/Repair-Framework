@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-27T13:51:46.112036+00:00",
+  "generated_at": "2026-06-27T19:42:53.244647+00:00",
   "results": [
     {
       "bug": {
@@ -191,7 +191,7 @@
         "project": "fastapi",
         "bug_id": 3
       },
-      "technique": "SBFL-SBI (extension)",
+      "technique": "SBFL-WSBI (extension)",
       "faulty_rank": 11,
       "top_k_hits": {
         "1": false,
@@ -238,7 +238,7 @@
         "bug_id": 3
       },
       "technique": "MBFL-Metallaxis (baseline)",
-      "faulty_rank": null,
+      "faulty_rank": 18,
       "top_k_hits": {
         "1": false,
         "5": false,
@@ -274,7 +274,7 @@
           "line": 69
         }
       ],
-      "total_ranked": 0,
+      "total_ranked": 23,
       "error": null
     },
     {
@@ -284,7 +284,7 @@
         "bug_id": 3
       },
       "technique": "MBFL-Metallaxis-Random (extension)",
-      "faulty_rank": null,
+      "faulty_rank": 11,
       "top_k_hits": {
         "1": false,
         "5": false,
@@ -320,7 +320,7 @@
           "line": 69
         }
       ],
-      "total_ranked": 0,
+      "total_ranked": 12,
       "error": null
     },
     {
@@ -330,7 +330,203 @@
         "bug_id": 3
       },
       "technique": "Hybrid SBFL+MBFL (extension)",
-      "faulty_rank": 8,
+      "faulty_rank": 11,
+      "top_k_hits": {
+        "1": false,
+        "5": false,
+        "10": false
+      },
+      "ground_truth_lines": [
+        {
+          "file": "fastapi/routing.py",
+          "line": 63
+        },
+        {
+          "file": "fastapi/routing.py",
+          "line": 64
+        },
+        {
+          "file": "fastapi/routing.py",
+          "line": 65
+        },
+        {
+          "file": "fastapi/routing.py",
+          "line": 66
+        },
+        {
+          "file": "fastapi/routing.py",
+          "line": 67
+        },
+        {
+          "file": "fastapi/routing.py",
+          "line": 68
+        },
+        {
+          "file": "fastapi/routing.py",
+          "line": 69
+        }
+      ],
+      "total_ranked": 76,
+      "error": null
+    },
+    {
+      "bug": {
+        "benchmark": "bugsinpy",
+        "project": "fastapi",
+        "bug_id": 6
+      },
+      "technique": "SBFL-Ochiai (baseline)",
+      "faulty_rank": 82,
+      "top_k_hits": {
+        "1": false,
+        "5": false,
+        "10": false
+      },
+      "ground_truth_lines": [
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 632
+        },
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 633
+        },
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 634
+        }
+      ],
+      "total_ranked": 137,
+      "error": null
+    },
+    {
+      "bug": {
+        "benchmark": "bugsinpy",
+        "project": "fastapi",
+        "bug_id": 6
+      },
+      "technique": "SBFL-Tarantula (baseline)",
+      "faulty_rank": 82,
+      "top_k_hits": {
+        "1": false,
+        "5": false,
+        "10": false
+      },
+      "ground_truth_lines": [
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 632
+        },
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 633
+        },
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 634
+        }
+      ],
+      "total_ranked": 137,
+      "error": null
+    },
+    {
+      "bug": {
+        "benchmark": "bugsinpy",
+        "project": "fastapi",
+        "bug_id": 6
+      },
+      "technique": "SBFL-DStar (baseline)",
+      "faulty_rank": 82,
+      "top_k_hits": {
+        "1": false,
+        "5": false,
+        "10": false
+      },
+      "ground_truth_lines": [
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 632
+        },
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 633
+        },
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 634
+        }
+      ],
+      "total_ranked": 137,
+      "error": null
+    },
+    {
+      "bug": {
+        "benchmark": "bugsinpy",
+        "project": "fastapi",
+        "bug_id": 6
+      },
+      "technique": "SBFL-Jaccard (extension)",
+      "faulty_rank": 82,
+      "top_k_hits": {
+        "1": false,
+        "5": false,
+        "10": false
+      },
+      "ground_truth_lines": [
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 632
+        },
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 633
+        },
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 634
+        }
+      ],
+      "total_ranked": 137,
+      "error": null
+    },
+    {
+      "bug": {
+        "benchmark": "bugsinpy",
+        "project": "fastapi",
+        "bug_id": 6
+      },
+      "technique": "SBFL-WSBI (extension)",
+      "faulty_rank": 82,
+      "top_k_hits": {
+        "1": false,
+        "5": false,
+        "10": false
+      },
+      "ground_truth_lines": [
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 632
+        },
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 633
+        },
+        {
+          "file": "fastapi/dependencies/utils.py",
+          "line": 634
+        }
+      ],
+      "total_ranked": 137,
+      "error": null
+    },
+    {
+      "bug": {
+        "benchmark": "bugsinpy",
+        "project": "fastapi",
+        "bug_id": 6
+      },
+      "technique": "MBFL-Metallaxis (baseline)",
+      "faulty_rank": 6,
       "top_k_hits": {
         "1": false,
         "5": false,
@@ -338,52 +534,6 @@
       },
       "ground_truth_lines": [
         {
-          "file": "fastapi/routing.py",
-          "line": 63
-        },
-        {
-          "file": "fastapi/routing.py",
-          "line": 64
-        },
-        {
-          "file": "fastapi/routing.py",
-          "line": 65
-        },
-        {
-          "file": "fastapi/routing.py",
-          "line": 66
-        },
-        {
-          "file": "fastapi/routing.py",
-          "line": 67
-        },
-        {
-          "file": "fastapi/routing.py",
-          "line": 68
-        },
-        {
-          "file": "fastapi/routing.py",
-          "line": 69
-        }
-      ],
-      "total_ranked": 76,
-      "error": null
-    },
-    {
-      "bug": {
-        "benchmark": "bugsinpy",
-        "project": "fastapi",
-        "bug_id": 6
-      },
-      "technique": "SBFL-Ochiai (baseline)",
-      "faulty_rank": 82,
-      "top_k_hits": {
-        "1": false,
-        "5": false,
-        "10": false
-      },
-      "ground_truth_lines": [
-        {
           "file": "fastapi/dependencies/utils.py",
           "line": 632
         },
@@ -396,157 +546,7 @@
           "line": 634
         }
       ],
-      "total_ranked": 137,
-      "error": null
-    },
-    {
-      "bug": {
-        "benchmark": "bugsinpy",
-        "project": "fastapi",
-        "bug_id": 6
-      },
-      "technique": "SBFL-Tarantula (baseline)",
-      "faulty_rank": 82,
-      "top_k_hits": {
-        "1": false,
-        "5": false,
-        "10": false
-      },
-      "ground_truth_lines": [
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 632
-        },
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 633
-        },
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 634
-        }
-      ],
-      "total_ranked": 137,
-      "error": null
-    },
-    {
-      "bug": {
-        "benchmark": "bugsinpy",
-        "project": "fastapi",
-        "bug_id": 6
-      },
-      "technique": "SBFL-DStar (baseline)",
-      "faulty_rank": 82,
-      "top_k_hits": {
-        "1": false,
-        "5": false,
-        "10": false
-      },
-      "ground_truth_lines": [
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 632
-        },
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 633
-        },
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 634
-        }
-      ],
-      "total_ranked": 137,
-      "error": null
-    },
-    {
-      "bug": {
-        "benchmark": "bugsinpy",
-        "project": "fastapi",
-        "bug_id": 6
-      },
-      "technique": "SBFL-Jaccard (extension)",
-      "faulty_rank": 82,
-      "top_k_hits": {
-        "1": false,
-        "5": false,
-        "10": false
-      },
-      "ground_truth_lines": [
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 632
-        },
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 633
-        },
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 634
-        }
-      ],
-      "total_ranked": 137,
-      "error": null
-    },
-    {
-      "bug": {
-        "benchmark": "bugsinpy",
-        "project": "fastapi",
-        "bug_id": 6
-      },
-      "technique": "SBFL-SBI (extension)",
-      "faulty_rank": 82,
-      "top_k_hits": {
-        "1": false,
-        "5": false,
-        "10": false
-      },
-      "ground_truth_lines": [
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 632
-        },
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 633
-        },
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 634
-        }
-      ],
-      "total_ranked": 137,
-      "error": null
-    },
-    {
-      "bug": {
-        "benchmark": "bugsinpy",
-        "project": "fastapi",
-        "bug_id": 6
-      },
-      "technique": "MBFL-Metallaxis (baseline)",
-      "faulty_rank": null,
-      "top_k_hits": {
-        "1": false,
-        "5": false,
-        "10": false
-      },
-      "ground_truth_lines": [
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 632
-        },
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 633
-        },
-        {
-          "file": "fastapi/dependencies/utils.py",
-          "line": 634
-        }
-      ],
-      "total_ranked": 0,
+      "total_ranked": 44,
       "error": null
     },
     {
@@ -576,7 +576,7 @@
           "line": 634
         }
       ],
-      "total_ranked": 0,
+      "total_ranked": 14,
       "error": null
     },
     {
@@ -586,11 +586,11 @@
         "bug_id": 6
       },
       "technique": "Hybrid SBFL+MBFL (extension)",
-      "faulty_rank": 82,
+      "faulty_rank": 3,
       "top_k_hits": {
         "1": false,
-        "5": false,
-        "10": false
+        "5": true,
+        "10": true
       },
       "ground_truth_lines": [
         {
@@ -703,7 +703,7 @@
         "project": "luigi",
         "bug_id": 33
       },
-      "technique": "SBFL-SBI (extension)",
+      "technique": "SBFL-WSBI (extension)",
       "faulty_rank": 191,
       "top_k_hits": {
         "1": false,
@@ -738,7 +738,7 @@
           "line": 334
         }
       ],
-      "total_ranked": 0,
+      "total_ranked": 173,
       "error": null
     },
     {
@@ -760,7 +760,7 @@
           "line": 334
         }
       ],
-      "total_ranked": 0,
+      "total_ranked": 16,
       "error": null
     },
     {
@@ -770,7 +770,7 @@
         "bug_id": 33
       },
       "technique": "Hybrid SBFL+MBFL (extension)",
-      "faulty_rank": 11,
+      "faulty_rank": 26,
       "top_k_hits": {
         "1": false,
         "5": false,
