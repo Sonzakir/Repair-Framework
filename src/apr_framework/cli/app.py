@@ -46,13 +46,13 @@ def _run() -> int:
     args = parser.parse_args()
     project_root = Path.cwd()
 
-    # BugsInPy
+    # List Integrated Benchmarks in the Framework
     if args.command == "list-benchmarks":
         for name in list_benchmark_names():
             print(name)
         return 0
 
-    # FauxPy 
+    # -- FauxPy --
     if args.command == "localize":
         family = _resolve_localize_family(args)
         _validate_localize_args(args, family)
@@ -247,7 +247,7 @@ def _run() -> int:
         return 0
     
 
-    # BugsInPy
+    # --  BugsInPy --
     if args.command == "bugsinpy":
         adapter = create_bugsinpy_adapter(project_root)
 
@@ -371,7 +371,11 @@ def _run() -> int:
         if args.bugsinpy_command == "evaluate-localization":
             return _run_evaluate_localization(args, project_root, adapter)
 
+
+    # -- Repair -- 
+
     if args.command == "repair":
+        # Currently repair components are working on the BugsInPy Projects 
         adapter = create_bugsinpy_adapter(project_root)
         return handle_repair(args, adapter, project_root)
 
@@ -478,12 +482,19 @@ def handle_repair(args, adapter, project_root: Path) -> int:
         )
 
     if localization_result is None and args.skip_localize:
-        # Look for a cached results.json in the most recent run that has ranked_locations.
+        # Look for a cached results.json in the most recent run for this exact bug
+        # that has ranked_locations.  Filter on project and bug_id so a cache entry
+        # from a different bug is never mistakenly loaded.
         results_files = sorted(runs_dir.glob("run_*/results.json"), reverse=True)
         for rf in results_files:
             try:
                 cached = json.loads(rf.read_text(encoding="utf-8"))
-                if "ranked_locations" in cached:
+                cached_bug = cached.get("bug", {})
+                if (
+                    "ranked_locations" in cached
+                    and cached_bug.get("project") == canonical_project
+                    and cached_bug.get("bug_id") == bug_id
+                ):
                     from apr_framework.core.models import LocalizationResult, RankedLocation
                     ranked = [
                         RankedLocation(**{

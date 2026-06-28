@@ -285,6 +285,6 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
                 return worktree_stripped_path
 
         logger.warning(
-            "Source file not found: %s (worktree: %s)", raw, checkout.worktree
+            "Source file not found: %s (worktree: %s)", file_path_str, checkout.worktree
         )
         return None

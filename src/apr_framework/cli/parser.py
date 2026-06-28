@@ -196,7 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["auto", "perfect"],
         default="auto",
         help=(
-            "Fault-localization mode: 'auto' runs the Assignment-2 localizer "
+            "Fault-localization mode: 'auto' runs the FauxPy localizer "
             "(see --fl-family); 'perfect' uses the BugsInPy developer-fix lines as "
             "the oracle fault location, ignoring --fl-family and --skip-localize "
             "(default: auto)"

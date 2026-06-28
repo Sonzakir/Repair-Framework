@@ -1,11 +1,12 @@
 """Perfect (oracle) fault localization for the FL-guided repair baseline (T-3).
 
-Task 3 asks for two FL conditions feeding the repair algorithm:
+Two FL conditions feeding the repair algorithm:
 
-  * **Automated FL** — the Assignment-2 localizers (SBFL/MBFL/hybrid). This already
-    exists and is selected with ``repair --fl-mode auto --fl-family ...``.
+  * **Automated FL** — the integrated FauxPy localizers (SBFL/MBFL/hybrid). 
+        Selected with ``repair --fl-mode auto --fl-family ...``.
   * **Perfect FL** — the *ground-truth* fault location from BugsInPy, bypassing any
-    localizer. This module implements that "upper bound" condition.
+    localizer. 
+        This module implements that "upper bound" condition.
 
 The developer fix is stored as a unified diff at
 ``projects/<project>/bugs/<id>/bug_patch.txt`` (exposed by
@@ -16,8 +17,7 @@ headers and bodies to recover those buggy-side line numbers, wrap them in
 the repair algorithm already consumes. So perfect FL is just a different *source* of
 suspicious locations; the repair/validation pipeline is untouched.
 
-``PerfectFaultLocalizer`` implements the :class:`FaultLocalizer` ABC so it is
-interchangeable with the FauxPy-backed localizers everywhere a localizer is expected.
+
 """
 
 import re
@@ -104,9 +104,13 @@ def derive_oracle_locations(reference_diff: str | None) -> list[RankedLocation]:
             # anchor it to the buggy line at the insertion point.
             if not run_has_minus:
                 _emit(current_file, old_line)
+        elif raw.startswith("\\"):
+            # "\ No newline at end of file" meta-marker — not a source line, so
+            # old_line must NOT advance and run_has_minus must NOT be cleared.
+            pass
         else:
-            # Context line (or the trailing "\ No newline" marker) — advance the
-            # buggy-side counter and end any in-progress change run.
+            # Context line — advance the buggy-side counter and end any
+            # in-progress change run.
             old_line += 1
             run_has_minus = False
 
