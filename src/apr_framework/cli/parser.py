@@ -191,6 +191,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     repair_parser.set_defaults(regression_check=True)
     repair_parser.add_argument(
+        "--fl-mode",
+        dest="fl_mode",
+        choices=["auto", "perfect"],
+        default="auto",
+        help=(
+            "Fault-localization mode: 'auto' runs the Assignment-2 localizer "
+            "(see --fl-family); 'perfect' uses the BugsInPy developer-fix lines as "
+            "the oracle fault location, ignoring --fl-family and --skip-localize "
+            "(default: auto)"
+        ),
+    )
+    repair_parser.add_argument(
         "--fl-family",
         dest="fl_family",
         choices=["sbfl", "mbfl", "hybrid"],

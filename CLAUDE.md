@@ -144,6 +144,59 @@ Both patches use `replace_once` helpers that are idempotent (safe to re-apply). 
 runs/run_NNN/          # evaluation outputs: config.json, results.json, execution.log
 ```
 
+## Naming conventions
+
+These rules apply to every variable and method name written or modified in this codebase. They are enforced during code review and must be respected when generating new code.
+
+### Variable naming rules
+
+**No single-letter variables** outside of math/index contexts (`i`, `j`, `k` in tight loops are acceptable; `r`, `x`, `v`, `n` as standalone locals are not).
+
+**No vague abbreviations.** Forbidden: `op`, `src`, `cls`, `val`, `arg`, `tmp`, `res`, `obj`, `cfg`, `ctx`, `msg`. Write the full word or a precise compound.
+
+**No misleading names** that imply more than the variable actually holds. Example: do not call a variable `best` if it is merely the first item in a list.
+
+**No generic nouns without qualifying context.** Words like `result`, `data`, `info`, `item`, `value`, `output`, `working`, `trigger`, `baseline`, `candidate` are only acceptable when the surrounding type already makes the content unambiguous, and even then a more precise compound is preferred.
+
+**Count variables must say they are counts.** Append `_count`:
+- `passed` → `passed_count`, `plausible` → `plausible_count`
+
+**Variables holding `Path` objects or path strings must say so.** Append `_path` (for `Path`) or `_path_str` / `_str` (for raw strings):
+- `raw` holding a file-path string → `file_path_str`
+- `candidate` holding a `Path` → `candidate_file_path`
+
+**Variables holding collections of domain objects must name both the adjective and the noun.** A list of plausible `RepairAttemptResult` objects → `plausible_results`, not `plausible`. A list of ranked locations → `ranked_locations`, not `locations`.
+
+**Variables holding test-run results must say so.** Suffix with `_run_result` or `_result`:
+- `baseline` holding a `TestRunResult` → `baseline_run_result`
+- `regression` holding a `TestRunResult` → `regression_run_result`
+
+### Method naming rules
+
+**Methods must describe what they return or do, not just what they touch.** Prefer verb phrases:
+- `get_patch()` → `generate_patch()` or `fetch_patch()` depending on whether it computes or retrieves
+- `process()` → name the specific action: `validate_candidates()`, `normalise_scores()`
+
+**Boolean-returning methods must start with `is_`, `has_`, or `can_`.** Examples: `is_plausible()`, `has_reference_patch()`, `can_derive_suite_command()`.
+
+**Factory and builder methods** that construct and return an object must start with `build_`, `create_`, or `make_`:
+- `regression_context()` → `build_regression_context()`
+
+**Private helpers** (single leading underscore) follow the same rules. The leading underscore does not relax the clarity requirement.
+
+### Concrete examples from this codebase
+
+| Was | Now | Rule violated |
+|-----|-----|---------------|
+| `trigger` (NameError — undefined) | `trigger_command_content` | wrong name, variable didn't exist |
+| `r for r in self.all_results` | `attempt_result for attempt_result in self.all_results` | single-letter variable |
+| `op`, `src`, `line` (logging locals) | `operator_key`, `source_path_str`, `target_line_str` | vague abbreviations |
+| `plausible` (list of results) | `plausible_results` | generic noun without noun qualifier |
+| `first_plausible` (a result object) | `first_plausible_result` | incomplete compound |
+| `cls` (holds a class type) | `operator_class` | vague abbreviation in the explicit banned list |
+| `raw` (file-path string) | `file_path_str` | no `_str` suffix for path string |
+| `stripped` (a `Path`) | `stripped_file_path` | no `_path` suffix for `Path` object |
+
 ## Troubleshooting
 
 - If the executor container has stale volume mounts: `docker rm -f apr-bugsinpy-executor` then re-run `bugsinpy setup`.

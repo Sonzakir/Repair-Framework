@@ -129,8 +129,8 @@ def validate_patch(
                 )
                 return candidate, False
             regression_ran = True
-            patched_failing = parse_failing_test_ids(regression_result.raw_output)
-            new_failures = sorted(patched_failing - regression.baseline_failing)
+            patched_suite_failing_tests = parse_failing_test_ids(regression_result.raw_output)
+            new_failures = sorted(patched_suite_failing_tests - regression.baseline_failing)
             regression_ok = not new_failures
 
         is_plausible = trigger_passed and regression_ok

@@ -740,9 +740,9 @@ class BugsInPyAdapter(BenchmarkAdapter):
     def get_reference_patch(self, bug: BugIdentifier) -> str | None:
         """Return the developer fix for a bug as a unified diff, or None if absent.
 
-        BugsInPy stores the ground-truth fix (buggy → fixed) as a unified diff at
+        BugsInPy stores the ground-truth fix (buggy -> fixed) as a unified diff at
         ``projects/<project>/bugs/<bug_id>/bug_patch.txt``. The patch-validation
-        pipeline (Task 2) compares plausible patches against this reference to
+        pipeline (T-2) compares plausible patches against this reference to
         decide whether they are *correct*, not merely plausible.
 
         Args:

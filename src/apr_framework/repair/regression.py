@@ -129,36 +129,36 @@ def build_regression_context(
     if not enabled:
         return RegressionContext(enabled=False)
 
-    trigger = _read_checkout_file(checkout, "bugsinpy_run_test.sh")
+    trigger_command_content = _read_checkout_file(checkout, "bugsinpy_run_test.sh")
     test_file = _read_test_file(checkout)
-    if not trigger:
+    if not trigger_command_content:
         logger.warning(
             "Regression check disabled: no bugsinpy_run_test.sh in %s",
             checkout.worktree,
         )
         return RegressionContext(enabled=False)
 
-    command = derive_regression_command(trigger, test_file)
+    command = derive_regression_command(trigger_command_content, test_file)
     if command is None:
         logger.warning(
             "Regression check disabled: could not derive a suite command from "
             "trigger=%r test_file=%r",
-            trigger.strip(),
+            trigger_command_content.strip(),
             test_file,
         )
         return RegressionContext(enabled=False)
 
     logger.info("Establishing regression baseline via: %s", command)
-    baseline = adapter.run_tests(checkout, timeout=timeout, command=command)
-    baseline_failing = parse_failing_test_ids(baseline.raw_output)
+    baseline_run_result = adapter.run_tests(checkout, timeout=timeout, command=command)
+    baseline_failing = parse_failing_test_ids(baseline_run_result.raw_output)
 
     # If the baseline suite produced no parseable result at all (e.g. collection
     # crash on the buggy checkout), the subset test would be meaningless — disable.
-    if baseline.passed_count == 0 and not baseline_failing:
+    if baseline_run_result.passed_count == 0 and not baseline_failing:
         logger.warning(
             "Regression check disabled: baseline suite produced no usable results "
             "(rc=%d). Falling back to trigger-test plausibility only.",
-            baseline.return_code,
+            baseline_run_result.return_code,
         )
         return RegressionContext(enabled=False)
 

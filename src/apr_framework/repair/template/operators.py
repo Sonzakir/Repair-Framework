@@ -63,26 +63,26 @@ class ArithmeticOperatorReplacer(_LineTargetedTransformer):
 
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
         """
-        Generate multiple AST variants by swapping arithmetic/binary operators  one at a time 
+        Generate multiple AST variants by swapping arithmetic/binary operators  one at a time
         """
         results: list[ast.AST] = []
-        working = copy.deepcopy(tree)
-        for node in ast.walk(working):
+        tree_copy = copy.deepcopy(tree)
+        for node in ast.walk(tree_copy):
             if not isinstance(node, ast.BinOp):
                 continue
             if not self._on_target_line(node):
                 continue
             for original_cls, replacement_cls in _ARITH_SWAPS:
                 if isinstance(node.op, original_cls):
-                    variant = copy.deepcopy(working)
-                    for vnode in ast.walk(variant):
+                    variant = copy.deepcopy(tree_copy)
+                    for variant_node in ast.walk(variant):
                         if (
-                            isinstance(vnode, ast.BinOp)
-                            and isinstance(vnode.op, original_cls)
-                            and getattr(vnode, "lineno", None) == getattr(node, "lineno", None)
-                            and getattr(vnode, "col_offset", None) == getattr(node, "col_offset", None)
+                            isinstance(variant_node, ast.BinOp)
+                            and isinstance(variant_node.op, original_cls)
+                            and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
+                            and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
                         ):
-                            vnode.op = replacement_cls()
+                            variant_node.op = replacement_cls()
                             break
                     ast.fix_missing_locations(variant)
                     results.append(variant)
@@ -112,11 +112,11 @@ class ComparisonOperatorReplacer(_LineTargetedTransformer):
 
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
         """
-        Generate multiple AST variants by swapping comparison operators  one at a time 
+        Generate multiple AST variants by swapping comparison operators  one at a time
         """
         results: list[ast.AST] = []
-        working = copy.deepcopy(tree)
-        for node in ast.walk(working):
+        tree_copy = copy.deepcopy(tree)
+        for node in ast.walk(tree_copy):
             if not isinstance(node, ast.Compare):
                 continue
             if not self._on_target_line(node):
@@ -124,16 +124,16 @@ class ComparisonOperatorReplacer(_LineTargetedTransformer):
             for op_idx, op in enumerate(node.ops):
                 for original_cls, replacement_cls in _COMP_SWAPS:
                     if isinstance(op, original_cls):
-                        variant = copy.deepcopy(working)
-                        for vnode in ast.walk(variant):
+                        variant = copy.deepcopy(tree_copy)
+                        for variant_node in ast.walk(variant):
                             if (
-                                isinstance(vnode, ast.Compare)
-                                and getattr(vnode, "lineno", None) == getattr(node, "lineno", None)
-                                and getattr(vnode, "col_offset", None) == getattr(node, "col_offset", None)
-                                and len(vnode.ops) > op_idx
-                                and isinstance(vnode.ops[op_idx], original_cls)
+                                isinstance(variant_node, ast.Compare)
+                                and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
+                                and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                                and len(variant_node.ops) > op_idx
+                                and isinstance(variant_node.ops[op_idx], original_cls)
                             ):
-                                vnode.ops[op_idx] = replacement_cls()
+                                variant_node.ops[op_idx] = replacement_cls()
                                 break
                         ast.fix_missing_locations(variant)
                         results.append(variant)
@@ -149,29 +149,28 @@ class OffByOneReplacer(_LineTargetedTransformer):
 
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
         """
-        Generate multiple AST variants by of by one changes (+1/-1)  one at a time 
+        Generate multiple AST variants by of by one changes (+1/-1)  one at a time
         """
         results: list[ast.AST] = []
-        working = copy.deepcopy(tree)
-    
+        tree_copy = copy.deepcopy(tree)
+
         # Visit only target line nodes
-        for node in ast.walk(working):
+        for node in ast.walk(tree_copy):
             if not self._on_target_line(node):
                 continue
 
             # Integer Constant nodes
             if isinstance(node, ast.Constant) and isinstance(node.value, int):
                 for delta in (+1, -1):
-                    variant = copy.deepcopy(working)
-                    #TODO: Review 
-                    for vnode in ast.walk(variant):
+                    variant = copy.deepcopy(tree_copy)
+                    for variant_node in ast.walk(variant):
                         if (
-                            isinstance(vnode, ast.Constant)
-                            and isinstance(vnode.value, int)
-                            and getattr(vnode, "lineno", None) == getattr(node, "lineno", None)
-                            and getattr(vnode, "col_offset", None) == getattr(node, "col_offset", None)
+                            isinstance(variant_node, ast.Constant)
+                            and isinstance(variant_node.value, int)
+                            and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
+                            and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
                         ):
-                            vnode.value = node.value + delta
+                            variant_node.value = node.value + delta
                             break
                     ast.fix_missing_locations(variant)
                     results.append(variant)
@@ -187,19 +186,19 @@ class OffByOneReplacer(_LineTargetedTransformer):
                 last_arg = node.args[-1]
                 if isinstance(last_arg, ast.Constant) and isinstance(last_arg.value, int):
                     for delta in (+1, -1):
-                        variant = copy.deepcopy(working)
-                        for vnode in ast.walk(variant):
+                        variant = copy.deepcopy(tree_copy)
+                        for variant_node in ast.walk(variant):
                             if (
-                                isinstance(vnode, ast.Call)
-                                and isinstance(vnode.func, ast.Name)
-                                and vnode.func.id == "range"
-                                and vnode.args
-                                and getattr(vnode, "lineno", None) == getattr(node, "lineno", None)
-                                and getattr(vnode, "col_offset", None) == getattr(node, "col_offset", None)
+                                isinstance(variant_node, ast.Call)
+                                and isinstance(variant_node.func, ast.Name)
+                                and variant_node.func.id == "range"
+                                and variant_node.args
+                                and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
+                                and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
                             ):
-                                varg = vnode.args[-1]
-                                if isinstance(varg, ast.Constant):
-                                    varg.value = last_arg.value + delta
+                                variant_range_arg = variant_node.args[-1]
+                                if isinstance(variant_range_arg, ast.Constant):
+                                    variant_range_arg.value = last_arg.value + delta
                                 break
                         ast.fix_missing_locations(variant)
                         results.append(variant)
@@ -216,22 +215,22 @@ class BooleanOperatorReplacer(_LineTargetedTransformer):
 
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
         results: list[ast.AST] = []
-        working = copy.deepcopy(tree)
-        for node in ast.walk(working):
+        tree_copy = copy.deepcopy(tree)
+        for node in ast.walk(tree_copy):
             if not isinstance(node, ast.BoolOp):
                 continue
             if not self._on_target_line(node):
                 continue
-            swapped_cls = ast.Or if isinstance(node.op, ast.And) else ast.And
-            variant = copy.deepcopy(working)
-            for vnode in ast.walk(variant):
+            replacement_op_cls = ast.Or if isinstance(node.op, ast.And) else ast.And
+            variant = copy.deepcopy(tree_copy)
+            for variant_node in ast.walk(variant):
                 if (
-                    isinstance(vnode, ast.BoolOp)
-                    and type(vnode.op) is type(node.op)
-                    and getattr(vnode, "lineno", None) == getattr(node, "lineno", None)
-                    and getattr(vnode, "col_offset", None) == getattr(node, "col_offset", None)
+                    isinstance(variant_node, ast.BoolOp)
+                    and type(variant_node.op) is type(node.op)
+                    and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
+                    and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
                 ):
-                    vnode.op = swapped_cls()
+                    variant_node.op = replacement_op_cls()
                     break
             ast.fix_missing_locations(variant)
             results.append(variant)
@@ -248,8 +247,8 @@ class ConditionNegator(_LineTargetedTransformer):
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
         """Generate variants by negating target-line if/while conditions."""
         results: list[ast.AST] = []
-        working = copy.deepcopy(tree)
-        for node in ast.walk(working):
+        tree_copy = copy.deepcopy(tree)
+        for node in ast.walk(tree_copy):
             if not isinstance(node, (ast.If, ast.While)):
                 continue
             if not self._on_target_line(node):
@@ -257,17 +256,17 @@ class ConditionNegator(_LineTargetedTransformer):
             # Skip if the test is already negated, to avoid generating `not not x`.
             if isinstance(node.test, ast.UnaryOp) and isinstance(node.test.op, ast.Not):
                 continue
-            variant = copy.deepcopy(working)
-            for vnode in ast.walk(variant):
+            variant = copy.deepcopy(tree_copy)
+            for variant_node in ast.walk(variant):
                 if (
-                    isinstance(vnode, (ast.If, ast.While))
-                    and type(vnode) is type(node)
-                    and getattr(vnode, "lineno", None) == getattr(node, "lineno", None)
-                    and getattr(vnode, "col_offset", None) == getattr(node, "col_offset", None)
+                    isinstance(variant_node, (ast.If, ast.While))
+                    and type(variant_node) is type(node)
+                    and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
+                    and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
                 ):
-                    negated = ast.UnaryOp(op=ast.Not(), operand=copy.deepcopy(vnode.test))
-                    ast.copy_location(negated, vnode.test)
-                    vnode.test = negated
+                    negated = ast.UnaryOp(op=ast.Not(), operand=copy.deepcopy(variant_node.test))
+                    ast.copy_location(negated, variant_node.test)
+                    variant_node.test = negated
                     break
             ast.fix_missing_locations(variant)
             results.append(variant)
@@ -284,59 +283,59 @@ class ReturnValueMutator(_LineTargetedTransformer):
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
         """Generate variants by mutating target-line return values."""
         results: list[ast.AST] = []
-        working = copy.deepcopy(tree)
-        for node in ast.walk(working):
+        tree_copy = copy.deepcopy(tree)
+        for node in ast.walk(tree_copy):
             if not isinstance(node, ast.Return):
                 continue
             if not self._on_target_line(node):
                 continue
-            val = node.value
+            return_value = node.value
 
             # True → False
-            if isinstance(val, ast.Constant) and val.value is True:
-                variant = copy.deepcopy(working)
-                for vnode in ast.walk(variant):
+            if isinstance(return_value, ast.Constant) and return_value.value is True:
+                variant = copy.deepcopy(tree_copy)
+                for variant_node in ast.walk(variant):
                     if (
-                        isinstance(vnode, ast.Return)
-                        and getattr(vnode, "lineno", None) == getattr(node, "lineno", None)
-                        and getattr(vnode, "col_offset", None) == getattr(node, "col_offset", None)
-                        and isinstance(vnode.value, ast.Constant)
-                        and vnode.value.value is True
+                        isinstance(variant_node, ast.Return)
+                        and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
+                        and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                        and isinstance(variant_node.value, ast.Constant)
+                        and variant_node.value.value is True
                     ):
-                        vnode.value = ast.Constant(value=False)
-                        ast.copy_location(vnode.value, val)
+                        variant_node.value = ast.Constant(value=False)
+                        ast.copy_location(variant_node.value, return_value)
                         break
                 ast.fix_missing_locations(variant)
                 results.append(variant)
 
             # False → True
-            elif isinstance(val, ast.Constant) and val.value is False:
-                variant = copy.deepcopy(working)
-                for vnode in ast.walk(variant):
+            elif isinstance(return_value, ast.Constant) and return_value.value is False:
+                variant = copy.deepcopy(tree_copy)
+                for variant_node in ast.walk(variant):
                     if (
-                        isinstance(vnode, ast.Return)
-                        and getattr(vnode, "lineno", None) == getattr(node, "lineno", None)
-                        and getattr(vnode, "col_offset", None) == getattr(node, "col_offset", None)
-                        and isinstance(vnode.value, ast.Constant)
-                        and vnode.value.value is False
+                        isinstance(variant_node, ast.Return)
+                        and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
+                        and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                        and isinstance(variant_node.value, ast.Constant)
+                        and variant_node.value.value is False
                     ):
-                        vnode.value = ast.Constant(value=True)
-                        ast.copy_location(vnode.value, val)
+                        variant_node.value = ast.Constant(value=True)
+                        ast.copy_location(variant_node.value, return_value)
                         break
                 ast.fix_missing_locations(variant)
                 results.append(variant)
 
             # non-None return → return None
-            elif val is not None and not (isinstance(val, ast.Constant) and val.value is None):
-                variant = copy.deepcopy(working)
-                for vnode in ast.walk(variant):
+            elif return_value is not None and not (isinstance(return_value, ast.Constant) and return_value.value is None):
+                variant = copy.deepcopy(tree_copy)
+                for variant_node in ast.walk(variant):
                     if (
-                        isinstance(vnode, ast.Return)
-                        and getattr(vnode, "lineno", None) == getattr(node, "lineno", None)
-                        and getattr(vnode, "col_offset", None) == getattr(node, "col_offset", None)
+                        isinstance(variant_node, ast.Return)
+                        and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
+                        and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
                     ):
-                        vnode.value = ast.Constant(value=None)
-                        ast.copy_location(vnode.value, val)
+                        variant_node.value = ast.Constant(value=None)
+                        ast.copy_location(variant_node.value, return_value)
                         break
                 ast.fix_missing_locations(variant)
                 results.append(variant)
@@ -364,9 +363,9 @@ def get_operator_class(key: str) -> type[_LineTargetedTransformer]:
     Raises:
         ConfigurationError: If the key is not recognized.
     """
-    cls = _OPERATOR_REGISTRY.get(key)
-    if cls is None:
+    operator_class = _OPERATOR_REGISTRY.get(key)
+    if operator_class is None:
         raise ConfigurationError(
             f"Unknown operator key {key!r}. Valid keys: {sorted(_OPERATOR_REGISTRY)}"
         )
-    return cls
+    return operator_class

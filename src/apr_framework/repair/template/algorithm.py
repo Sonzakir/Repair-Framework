@@ -172,16 +172,16 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
                 validation_summary=f"All tests passed with patch {updated_patch.patch_id}.",
             )
 
-        passed = updated_patch.metadata.get("test_passed_count", "?")
-        failed = updated_patch.metadata.get("test_failed_count", "?")
-        errors = updated_patch.metadata.get("test_error_count", "?")
+        passed_count = updated_patch.metadata.get("test_passed_count", "?")
+        failed_count = updated_patch.metadata.get("test_failed_count", "?")
+        error_count = updated_patch.metadata.get("test_error_count", "?")
         return RepairAttemptResult(
             bug=bug,
             patch=updated_patch,
             status=RepairStatus.FAILED,
             validation_summary=(
                 f"Patch {updated_patch.patch_id} did not fix all tests "
-                f"(passed={passed}, failed={failed}, errors={errors})."
+                f"(passed={passed_count}, failed={failed_count}, errors={error_count})."
             ),
         )
 
@@ -259,30 +259,30 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
         sometimes prefixed with `./`.  This method strips the prefix and joins with
         the worktree to produce a concrete, verifiable Path.
         """
-        raw = location.file_path
-        if not raw:
+        file_path_str = location.file_path
+        if not file_path_str:
             return None
 
-        candidate = Path(raw)
+        file_path = Path(file_path_str)
 
         # Absolute path — verify it sits under the worktree.
-        if candidate.is_absolute():
-            if candidate.exists():
-                return candidate
+        if file_path.is_absolute():
+            if file_path.exists():
+                return file_path
             return None
 
         # Relative path — join with worktree.
-        resolved = (checkout.worktree / candidate).resolve()
+        resolved = (checkout.worktree / file_path).resolve()
         if resolved.exists():
             return resolved
 
         # Try stripping a leading "./" component that FauxPy sometimes emits.
-        parts = candidate.parts
+        parts = file_path.parts
         if parts and parts[0] in (".", "./"):
-            stripped = Path(*parts[1:]) if len(parts) > 1 else Path(raw)
-            resolved2 = (checkout.worktree / stripped).resolve()
-            if resolved2.exists():
-                return resolved2
+            stripped_file_path = Path(*parts[1:]) if len(parts) > 1 else Path(file_path_str)
+            worktree_stripped_path = (checkout.worktree / stripped_file_path).resolve()
+            if worktree_stripped_path.exists():
+                return worktree_stripped_path
 
         logger.warning(
             "Source file not found: %s (worktree: %s)", raw, checkout.worktree

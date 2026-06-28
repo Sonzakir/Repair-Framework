@@ -593,6 +593,54 @@ Correct:       0 patch(es)
 Total time:    1.0s
 ```
 
+## FL-guided repair & perfect FL baseline (Assignment 3 — Task 3)
+
+Repair quality depends heavily on the fault location it is given. To separate the
+repair algorithm's strength from the localizer's, the `repair` command runs under
+**two FL conditions**, selected with `--fl-mode`:
+
+| Mode | Flag | Fault location source |
+|---|---|---|
+| **Automated FL** | `--fl-mode auto` (default) | the Assignment-2 localizer chosen by `--fl-family {sbfl,mbfl,hybrid}` |
+| **Perfect FL** | `--fl-mode perfect` | the BugsInPy developer fix (`bug_patch.txt`) — the *oracle* fault location, no localizer runs |
+
+```bash
+# Automated FL (e.g. SBFL/Ochiai) drives the repair targets:
+python -m apr_framework repair --project black --bug 1 --fl-mode auto --fl-family sbfl
+
+# Perfect FL (oracle): repair targets are the exact lines the developer changed.
+python -m apr_framework repair --project black --bug 1 --fl-mode perfect
+```
+
+**How perfect FL works.** `PerfectFaultLocalizer`
+(`src/apr_framework/localization/perfect.py`) implements the same `FaultLocalizer`
+interface as the FauxPy localizers, so it is a drop-in replacement. Instead of
+analysing the program, it reads the developer fix via
+`BugsInPyAdapter.get_reference_patch` and parses the unified diff's **buggy-side**
+line numbers (`derive_oracle_locations`): each hunk header `@@ -old_start,… @@`
+anchors a counter that walks the hunk body, so every `-` (changed/removed) line
+becomes a ranked oracle location, and pure insertions are anchored to their
+insertion point. The resulting `LocalizationResult` (`backend="perfect-fl"`) flows
+into the *unchanged* repair/validation pipeline — perfect FL is just a different
+*source* of suspicious locations.
+
+For black#1, perfect FL yields exactly the three developer-fix lines:
+
+```text
+rank 1: black.py:621   rank 2: black.py:636   rank 3: black.py:646
+```
+
+The selected mode is recorded in the result files: `config.json` and each bug's
+`config` block in `repair_results.json` carry `fl_mode` (`auto`/`perfect`) and
+`fl_backend` (the FL family, or `oracle`), so Task-5 comparisons can group runs by
+mode. `--fl-mode perfect` ignores `--fl-family` and `--skip-localize` (no FL is run),
+and raises a clear error if the bug has no `bug_patch.txt`.
+
+> Note: perfect FL is an *upper bound on localization*, not on operator reach — a bug
+> whose fix is out of the mutation operators' reach (e.g. black#1's `try/except`
+> wrapper) still yields `correct=0` even with perfect locations. See the design notes
+> in [`docs/assignment3/assignment3_task3_implementation.md`](docs/assignment3/assignment3_task3_implementation.md).
+
 ## Included evaluation artifact
 
 - This repository includes an example completed evaluation run at

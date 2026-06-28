@@ -52,7 +52,7 @@ class LoopOutcome:
 
     @property
     def plausible_results(self) -> list[RepairAttemptResult]:
-        return [r for r in self.all_results if r.status in (RepairStatus.PLAUSIBLE, RepairStatus.CORRECT)]
+        return [attempt_result for attempt_result in self.all_results if attempt_result.status in (RepairStatus.PLAUSIBLE, RepairStatus.CORRECT)]
 
 
 def run_validation_loop(
@@ -77,10 +77,12 @@ def run_validation_loop(
     """
     started_at = time.monotonic()
 
+    # Generate all candidate patches 
     candidates = repair.generate_patches(bug, checkout)
     total_generated = len(candidates)
     logger.info("Total candidates generated: %d", total_generated)
 
+    # No patch generated
     if not candidates:
         elapsed = time.monotonic() - started_at
         return LoopOutcome(
@@ -98,6 +100,7 @@ def run_validation_loop(
             total_wall_clock_seconds=elapsed,
         )
 
+
     budget_remaining = budget
     all_results: list[RepairAttemptResult] = []
     time_to_first_plausible: float | None = None
@@ -107,18 +110,19 @@ def run_validation_loop(
             logger.info("Budget exhausted — stopping validation loop.")
             break
 
-        op = candidate.metadata.get("operator", "?")
-        src = candidate.metadata.get("source_path", "?")
-        line = candidate.metadata.get("target_line", "?")
+        operator_key = candidate.metadata.get("operator", "?")
+        source_path_str = candidate.metadata.get("source_path", "?")
+        target_line_str = candidate.metadata.get("target_line", "?")
         logger.info(
             "Validating %s (op=%s, file=%s:%s) — budget remaining: %d",
             candidate.patch_id,
-            op,
-            Path(src).name if src != "?" else src,
-            line,
+            operator_key,
+            Path(source_path_str).name if source_path_str != "?" else source_path_str,
+            target_line_str,
             budget_remaining,
         )
 
+        # Execute the test suite to assess whether candidate patch is plausible
         try:
             result = repair.validate_patch(bug, checkout, candidate)
         except Exception as exc:  # noqa: BLE001 — never abort the loop on one patch
@@ -146,26 +150,26 @@ def run_validation_loop(
 
     elapsed = time.monotonic() - started_at
     validated_count = len(all_results)
-    plausible = [r for r in all_results if r.status == RepairStatus.PLAUSIBLE]
+    plausible_results = [result for result in all_results if result.status == RepairStatus.PLAUSIBLE]
 
     logger.info(
         "Repair loop finished in %.1fs: %d validated, %d plausible",
         elapsed,
         validated_count,
-        len(plausible),
+        len(plausible_results),
     )
 
-    if plausible:
-        best = plausible[0]
+    if plausible_results:
+        first_plausible_result = plausible_results[0]
         summary = RepairAttemptResult(
             bug=bug,
-            patch=best.patch,
+            patch=first_plausible_result.patch,
             status=RepairStatus.PLAUSIBLE,
             validation_summary=(
-                f"Found {len(plausible)} plausible patch(es) out of "
+                f"Found {len(plausible_results)} plausible patch(es) out of "
                 f"{validated_count} validated (budget: {budget}, "
                 f"elapsed: {elapsed:.1f}s). "
-                f"Best: {best.patch.patch_id if best.patch else '?'}."
+                f"First plausible: {first_plausible_result.patch.patch_id if first_plausible_result.patch else '?'}."
             ),
         )
     else:

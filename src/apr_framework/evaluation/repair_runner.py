@@ -1,4 +1,4 @@
-"""Patch-validation evaluation runner (Assignment 3, Task 2).
+"""Patch-validation evaluation runner (A-3, T-2).
 
 ``RepairEvaluationRunner`` implements the :class:`EvaluationRunner` ABC and turns a
 repair algorithm into a proper *patch-validation pipeline*:
@@ -9,8 +9,6 @@ repair algorithm into a proper *patch-validation pipeline*:
      plausible count, correct count, time-to-first-plausible, and total wall-clock
      time — into the structured ``repair_results.json`` output.
 
-It uses only the ``RepairAlgorithm`` ABC methods (via ``run_validation_loop``), so a
-future LLM repair backend drops in without touching this runner.
 """
 
 import logging
@@ -134,14 +132,14 @@ class RepairEvaluationRunner(EvaluationRunner):
 
         return [
             EvaluationResult(
-                bug=r.bug,
-                status=r.status.value,
-                started_at=r.started_at,
-                finished_at=r.finished_at,
-                metrics=r.metrics,
+                bug=bug_result.bug,
+                status=bug_result.status.value,
+                started_at=bug_result.started_at,
+                finished_at=bug_result.finished_at,
+                metrics=bug_result.metrics,
                 run_dir=str(writer.run_dir),
             )
-            for r in bug_run_results
+            for bug_result in bug_run_results
         ]
 
     # ------------------------------------------------------------------
@@ -158,7 +156,7 @@ class RepairEvaluationRunner(EvaluationRunner):
         started_at = datetime.now(timezone.utc)
         checkout = self._resolve_checkout(bug, benchmark)
 
-        # Plausibility — shared generate-and-validate loop (with timing/counts).
+        # Plausibility —> shared generate-and-validate loop (with timing/counts).
         outcome = run_validation_loop(
             repair,
             bug,
@@ -223,9 +221,9 @@ class RepairEvaluationRunner(EvaluationRunner):
     # ------------------------------------------------------------------
 
     def _persist(self, writer: RunWriter, results: list[_BugRunResult]) -> None:
-        bug_payloads = [self._serialise_bug(writer, r) for r in results]
+        bug_payloads = [self._serialise_bug(writer, bug_result) for bug_result in results]
 
-        # The repair CLI runs one bug at a time → keep the long-standing single-bug
+        # The repair CLI runs one bug at a time -> keep the long-standing single-bug
         # repair_results.json schema (consumed by ranking/evaluation in later
         # tasks). For multiple bugs, wrap them in a "bugs" list.
         if len(bug_payloads) == 1:
@@ -235,32 +233,32 @@ class RepairEvaluationRunner(EvaluationRunner):
 
         writer.write_json("repair_results.json", payload)
 
-    def _serialise_bug(self, writer: RunWriter, r: _BugRunResult) -> dict[str, Any]:
-        plausible = r.outcome.plausible_results
-        self._write_patch_artifacts(writer, plausible)
+    def _serialise_bug(self, writer: RunWriter, bug_result: _BugRunResult) -> dict[str, Any]:
+        plausible_results = bug_result.outcome.plausible_results
+        self._write_patch_artifacts(writer, plausible_results)
 
         return {
-            "project": r.bug.project,
-            "bug_id": r.bug.bug_id,
-            "status": r.status.value,
-            "validation_summary": r.outcome.summary.validation_summary,
-            "started_at": r.started_at.isoformat(),
-            "finished_at": r.finished_at.isoformat(),
-            "elapsed_seconds": r.metrics.total_wall_clock_seconds,
+            "project": bug_result.bug.project,
+            "bug_id": bug_result.bug.bug_id,
+            "status": bug_result.status.value,
+            "validation_summary": bug_result.outcome.summary.validation_summary,
+            "started_at": bug_result.started_at.isoformat(),
+            "finished_at": bug_result.finished_at.isoformat(),
+            "elapsed_seconds": bug_result.metrics.total_wall_clock_seconds,
             "config": self._config_data,
-            "candidates_validated": r.metrics.candidates_validated,
-            "plausible_count": r.metrics.plausible_count,
-            "correct_count": r.metrics.correct_count,
+            "candidates_validated": bug_result.metrics.candidates_validated,
+            "plausible_count": bug_result.metrics.plausible_count,
+            "correct_count": bug_result.metrics.correct_count,
             "metrics": {
-                "total_candidates_generated": r.metrics.total_candidates_generated,
-                "candidates_validated": r.metrics.candidates_validated,
-                "plausible_count": r.metrics.plausible_count,
-                "correct_count": r.metrics.correct_count,
-                "time_to_first_plausible_seconds": r.metrics.time_to_first_plausible_seconds,
-                "total_wall_clock_seconds": r.metrics.total_wall_clock_seconds,
+                "total_candidates_generated": bug_result.metrics.total_candidates_generated,
+                "candidates_validated": bug_result.metrics.candidates_validated,
+                "plausible_count": bug_result.metrics.plausible_count,
+                "correct_count": bug_result.metrics.correct_count,
+                "time_to_first_plausible_seconds": bug_result.metrics.time_to_first_plausible_seconds,
+                "total_wall_clock_seconds": bug_result.metrics.total_wall_clock_seconds,
             },
-            "plausible_patches": [self._serialise_result(x) for x in plausible],
-            "all_results": [self._serialise_result(x) for x in r.outcome.all_results],
+            "plausible_patches": [self._serialise_result(attempt_result) for attempt_result in plausible_results],
+            "all_results": [self._serialise_result(attempt_result) for attempt_result in bug_result.outcome.all_results],
         }
 
     @staticmethod
@@ -282,13 +280,13 @@ class RepairEvaluationRunner(EvaluationRunner):
 
     @staticmethod
     def _write_patch_artifacts(
-        writer: RunWriter, plausible: list[RepairAttemptResult]
+        writer: RunWriter, plausible_results: list[RepairAttemptResult]
     ) -> None:
-        if not plausible:
+        if not plausible_results:
             return
         patches_dir = writer.run_dir / "patches"
         patches_dir.mkdir(exist_ok=True)
-        for result in plausible:
+        for result in plausible_results:
             patch = result.patch
             if patch is None:
                 continue
@@ -301,7 +299,7 @@ class RepairEvaluationRunner(EvaluationRunner):
                     patched_source, encoding="utf-8"
                 )
         writer.log(
-            f"Wrote {len(plausible)} plausible patch artifact(s) to {patches_dir}"
+            f"Wrote {len(plausible_results)} plausible patch artifact(s) to {patches_dir}"
         )
 
     # ------------------------------------------------------------------

@@ -386,7 +386,7 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     2. Run localization (or load a cached result if --skip-localize).
     3. Build TemplateRepairConfig and TemplateRepairAlgorithm.
     4. Delegate the generate-validate-correctness pipeline to
-       RepairEvaluationRunner (Task 2), which writes repair_results.json (incl.
+       RepairEvaluationRunner (T-2), which writes repair_results.json (incl.
        the validation metrics) and the plausible-patch artifacts.
     5. Print a human-readable summary.
     """
@@ -450,6 +450,8 @@ def handle_repair(args, adapter, project_root: Path) -> int:
         "timeout_per_test": config.timeout_per_test,
         "stop_on_first": config.stop_on_first,
         "regression_check": config.regression_check,
+        "fl_mode": args.fl_mode,
+        "fl_backend": "oracle" if args.fl_mode == "perfect" else args.fl_family,
         "fl_family": args.fl_family,
         "localization_metric": args.localization_metric,
         "mbfl_metric": args.mbfl_metric,
@@ -462,7 +464,20 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     # -- Localization --
     localization_result = None
 
-    if args.skip_localize:
+    # Perfect FL (T-3): bypass any localizer and use the BugsInPy developer-fix
+    # lines as the oracle fault location. Ignores --fl-family / --skip-localize.
+    if args.fl_mode == "perfect":
+        from apr_framework.localization import PerfectFaultLocalizer
+
+        writer.log("Running perfect (oracle) FL from the BugsInPy developer fix")
+        localizer = PerfectFaultLocalizer(adapter)
+        localization_result = localizer.localize(bug, checkout)
+        writer.log(
+            f"Perfect FL done: {len(localization_result.ranked_locations)} "
+            "oracle location(s) from bug_patch.txt"
+        )
+
+    if localization_result is None and args.skip_localize:
         # Look for a cached results.json in the most recent run that has ranked_locations.
         results_files = sorted(runs_dir.glob("run_*/results.json"), reverse=True)
         for rf in results_files:
