@@ -52,7 +52,7 @@ class LoopOutcome:
 
     @property
     def plausible_results(self) -> list[RepairAttemptResult]:
-        return [r for r in self.all_results if r.status == RepairStatus.PLAUSIBLE]
+        return [r for r in self.all_results if r.status in (RepairStatus.PLAUSIBLE, RepairStatus.CORRECT)]
 
 
 def run_validation_loop(
