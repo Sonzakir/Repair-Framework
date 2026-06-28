@@ -175,16 +175,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds allowed per test-suite invocation (default: 120)",
     )
     repair_parser.add_argument(
-        "--no-fail-fast",
-        dest="no_fail_fast",
-        action="store_true",
-        help="Disable fail-fast validation mode",
-    )
-    repair_parser.add_argument(
         "--stop-on-first",
         dest="stop_on_first",
         action="store_true",
         help="Stop after the first plausible patch is found",
+    )
+    repair_parser.add_argument(
+        "--no-regression-check",
+        dest="regression_check",
+        action="store_false",
+        help=(
+            "Only require the bug's trigger test to pass for plausibility; skip the "
+            "regression run that verifies no previously passing test broke (faster)"
+        ),
+    )
+    repair_parser.set_defaults(regression_check=True)
+    repair_parser.add_argument(
+        "--fl-family",
+        dest="fl_family",
+        choices=["sbfl", "mbfl", "hybrid"],
+        default="sbfl",
+        help="Fault-localization family used to rank repair targets (default: sbfl)",
     )
     repair_parser.add_argument(
         "--localization-metric",
@@ -192,6 +203,40 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="ochiai",
         help="SBFL metric used when re-running localization (default: ochiai)",
+    )
+    repair_parser.add_argument(
+        "--mbfl-metric",
+        dest="mbfl_metric",
+        type=str,
+        default="metallaxis",
+        help="MBFL metric (used for --fl-family mbfl/hybrid; default: metallaxis)",
+    )
+    repair_parser.add_argument(
+        "--mutation-budget",
+        dest="mutation_budget",
+        type=int,
+        default=50,
+        help="Max mutants per bug for MBFL/hybrid localization (default: 50)",
+    )
+    repair_parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Random seed for MBFL mutation selection (default: 0)",
+    )
+    repair_parser.add_argument(
+        "--sbfl-weight",
+        dest="sbfl_weight",
+        type=float,
+        default=0.5,
+        help="Weight of the SBFL backend for --fl-family hybrid (default: 0.5)",
+    )
+    repair_parser.add_argument(
+        "--mbfl-weight",
+        dest="mbfl_weight",
+        type=float,
+        default=0.5,
+        help="Weight of the MBFL backend for --fl-family hybrid (default: 0.5)",
     )
     repair_parser.add_argument(
         "--skip-localize",

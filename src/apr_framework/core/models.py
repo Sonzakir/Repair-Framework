@@ -111,6 +111,10 @@ class TestRunResult:
     passed_count: int = 0
     failed_count: int = 0
     error_count: int = 0
+    # Process exit code of the underlying test command. 0 means the runner exited
+    # cleanly; any non-zero value (collection error, crash, timeout) signals that
+    # the run cannot be trusted as "all tests passed" even if no failures parsed.
+    return_code: int = 0
 
     @property
     def total(self) -> int:
@@ -191,6 +195,39 @@ class RepairAttemptResult:
 
 
 @dataclass
+class RepairRunMetrics:
+    """
+    Patch-validation metrics for one repair run on a single bug (Task 2).
+
+    These are the quantities the patch-validation pipeline must track and report:
+    how many candidates were produced, how many were plausible/correct, how quickly
+    the first plausible patch appeared, and how long the whole run took.
+
+    Fields:
+        total_candidates_generated:        Candidate patches produced by the
+            repair algorithm before any validation/budget capping.
+        candidates_validated:              Candidates actually executed against
+            the test suite (≤ generated, bounded by the budget / early stop).
+        plausible_count:                   Candidates whose patched program passed
+            the whole test suite.
+        correct_count:                     Plausible candidates that also match the
+            developer fix at the diff level (semantic ground truth proxy).
+        time_to_first_plausible_seconds:   Wall-clock seconds from the start of the
+            validation loop until the first plausible patch, or None if none was
+            found.
+        total_wall_clock_seconds:          Wall-clock seconds for the whole repair
+            run (generation + validation).
+    """
+
+    total_candidates_generated: int = 0
+    candidates_validated: int = 0
+    plausible_count: int = 0
+    correct_count: int = 0
+    time_to_first_plausible_seconds: float | None = None
+    total_wall_clock_seconds: float = 0.0
+
+
+@dataclass
 class EvaluationResult:
     """
     Result of one evaluation run for a specific bug, including its execution status and start/end timestamps
@@ -200,6 +237,10 @@ class EvaluationResult:
     status: str
     started_at: datetime
     finished_at: datetime
+    # Optional, populated by repair evaluation runs (Task 2). Left None by simpler
+    # runners (e.g. the dummy runner) so the dataclass stays backward compatible.
+    metrics: "RepairRunMetrics | None" = None
+    run_dir: str | None = None
 
 
 

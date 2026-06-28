@@ -11,7 +11,7 @@ from apr_framework.core.exceptions import (
     BenchmarkError,
     ConfigurationError,
 )
-from apr_framework.core.models import BugIdentifier, CheckoutResult, RepairAttemptResult
+from apr_framework.core.models import BugIdentifier, CheckoutResult
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
 from apr_framework.evaluation.run_writer import RunWriter, serialize_localization_result
 from apr_framework.evaluation.localization_runner import LocalizationComparisonRunner
@@ -385,9 +385,10 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     1. Verify the project is checked out and compiled.
     2. Run localization (or load a cached result if --skip-localize).
     3. Build TemplateRepairConfig and TemplateRepairAlgorithm.
-    4. Call algorithm.repair() with budget and operators.
-    5. Write repair_results.json to the run directory.
-    6. Print a human-readable summary.
+    4. Delegate the generate-validate-correctness pipeline to
+       RepairEvaluationRunner (Task 2), which writes repair_results.json (incl.
+       the validation metrics) and the plausible-patch artifacts.
+    5. Print a human-readable summary.
     """
     import json
 
@@ -397,7 +398,7 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     project = args.project
     bug_id = args.bug
 
-    # ── Resolve worktree ────────────────────────────────────────────────
+    # -- Resolve worktree 
     adapter.toolchain.ensure_installed()
     canonical_project = adapter.resolve_project(project)
     bug = BugIdentifier(benchmark="bugsinpy", project=canonical_project, bug_id=bug_id)
@@ -417,7 +418,7 @@ def handle_repair(args, adapter, project_root: Path) -> int:
         prepared=True,
     )
 
-    # ── Set up run writer ────────────────────────────────────────────────
+    # -- Set up run writer --
     from apr_framework.evaluation.run_writer import RunWriter
     runs_dir = Path(args.runs_dir)
     if not runs_dir.is_absolute():
@@ -434,8 +435,8 @@ def handle_repair(args, adapter, project_root: Path) -> int:
         top_n_locations=args.top_n,
         enabled_operators=enabled_operators,
         timeout_per_test=args.timeout,
-        fail_fast=not args.no_fail_fast,
         stop_on_first=args.stop_on_first,
+        regression_check=args.regression_check,
     )
 
     config_data = {
@@ -447,16 +448,18 @@ def handle_repair(args, adapter, project_root: Path) -> int:
         "top_n_locations": config.top_n_locations,
         "enabled_operators": config.enabled_operators,
         "timeout_per_test": config.timeout_per_test,
-        "fail_fast": config.fail_fast,
         "stop_on_first": config.stop_on_first,
+        "regression_check": config.regression_check,
+        "fl_family": args.fl_family,
         "localization_metric": args.localization_metric,
+        "mbfl_metric": args.mbfl_metric,
         "granularity": args.granularity,
         "skip_localize": args.skip_localize,
         "started_at": started_at.isoformat(),
     }
     writer.write_json("config.json", config_data)
 
-    # ── Localization ─────────────────────────────────────────────────────
+    # -- Localization --
     localization_result = None
 
     if args.skip_localize:
@@ -501,17 +504,55 @@ def handle_repair(args, adapter, project_root: Path) -> int:
         bug_test_ids = [t for t in bug_test_targets if not t.startswith("-")]
 
         fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
-        fl_config = FauxPyConfig(
-            src=src,
-            test_targets=bug_test_targets,
-            family="sbfl",
-            granularity=args.granularity,
-            failing_tests=bug_test_ids,
-            metric=args.localization_metric,
-        )
-        localizer = FauxPyLocalizer(fl_config, fauxpy_toolchain)
 
-        writer.log(f"Running SBFL localization (metric={args.localization_metric})")
+        def _make_sbfl() -> FauxPyLocalizer:
+            return FauxPyLocalizer(
+                FauxPyConfig(
+                    src=src,
+                    test_targets=bug_test_targets,
+                    family="sbfl",
+                    granularity=args.granularity,
+                    failing_tests=bug_test_ids,
+                    metric=args.localization_metric,
+                ),
+                fauxpy_toolchain,
+            )
+
+        def _make_mbfl() -> FauxPyLocalizer:
+            return FauxPyLocalizer(
+                FauxPyConfig(
+                    src=src,
+                    test_targets=bug_test_targets,
+                    family="mbfl",
+                    granularity=args.granularity,
+                    failing_tests=bug_test_ids,
+                    metric=args.mbfl_metric,
+                    mutation_strategy="random",
+                    mutation_budget=args.mutation_budget,
+                    mutation_seed=args.seed,
+                ),
+                fauxpy_toolchain,
+            )
+
+        if args.fl_family == "sbfl":
+            localizer = _make_sbfl()
+            writer.log(f"Running SBFL localization (metric={args.localization_metric})")
+        elif args.fl_family == "mbfl":
+            localizer = _make_mbfl()
+            writer.log(f"Running MBFL localization (metric={args.mbfl_metric})")
+        else:  # hybrid
+            from apr_framework.localization import HybridFaultLocalizer
+
+            localizer = HybridFaultLocalizer(
+                _make_sbfl(),
+                _make_mbfl(),
+                sbfl_weight=args.sbfl_weight,
+                mbfl_weight=args.mbfl_weight,
+            )
+            writer.log(
+                f"Running hybrid localization (sbfl={args.localization_metric}@"
+                f"{args.sbfl_weight}, mbfl={args.mbfl_metric}@{args.mbfl_weight})"
+            )
         try:
             localization_result = localizer.localize(bug, checkout)
             writer.log(
@@ -521,7 +562,12 @@ def handle_repair(args, adapter, project_root: Path) -> int:
             writer.log(f"Localization failed: {exc}")
             raise
 
-    # ── Repair ───────────────────────────────────────────────────────────
+    # -- Repair + patch validation pipeline (2) --
+    # The RepairEvaluationRunner drives the generate-and-validate loop, compares
+    # plausible patches against the developer fix (correctness), records the
+    # validation metrics, and writes repair_results.json + patch artifacts.
+    from apr_framework.evaluation.repair_runner import RepairEvaluationRunner
+
     algorithm = TemplateRepairAlgorithm(
         localization_result=localization_result,
         adapter=adapter,
@@ -533,69 +579,37 @@ def handle_repair(args, adapter, project_root: Path) -> int:
         f"operators={config.enabled_operators}"
     )
 
-    summary_result, all_results = algorithm.repair(bug, checkout)
-
-    finished_at = datetime.now(timezone.utc)
-    elapsed_s = (finished_at - started_at).total_seconds()
+    runner = RepairEvaluationRunner(
+        project_root=project_root,
+        runs_dir=runs_dir,
+        budget=config.budget,
+        stop_on_first=config.stop_on_first,
+        config_data=config_data,
+        writer=writer,
+    )
+    eval_results = runner.run([bug], adapter, algorithm)
+    result = eval_results[0]
+    metrics = result.metrics
 
     writer.log(
-        f"Repair finished: status={summary_result.status.value}, "
-        f"candidates_validated={len(all_results)}, elapsed={elapsed_s:.1f}s"
+        f"Repair finished: status={result.status}, "
+        f"candidates_validated={metrics.candidates_validated}, "
+        f"elapsed={metrics.total_wall_clock_seconds:.1f}s"
     )
 
-    # ── Persist results ──────────────────────────────────────────────────
-    plausible = [r for r in all_results if r.status.value == "plausible"]
-
-    def _serialise_result(r: "RepairAttemptResult") -> dict:
-        return {
-            "patch_id": r.patch.patch_id if r.patch else None,
-            "status": r.status.value,
-            "summary": r.patch.summary if r.patch else None,
-            "validation_summary": r.validation_summary,
-            "diff_text": r.patch.diff_text if r.patch else None,
-            "metadata": {
-                k: v
-                for k, v in (r.patch.metadata if r.patch else {}).items()
-                if k != "patched_source"  # omit large source blobs
-            },
-        }
-
-    repair_results_payload = {
-        "run_id": writer.run_dir.name,
-        "project": canonical_project,
-        "bug_id": bug_id,
-        "status": summary_result.status.value,
-        "validation_summary": summary_result.validation_summary,
-        "started_at": started_at.isoformat(),
-        "finished_at": finished_at.isoformat(),
-        "elapsed_seconds": elapsed_s,
-        "config": config_data,
-        "candidates_validated": len(all_results),
-        "plausible_count": len(plausible),
-        "plausible_patches": [_serialise_result(r) for r in plausible],
-        "all_results": [_serialise_result(r) for r in all_results],
-    }
-    writer.write_json("repair_results.json", repair_results_payload)
-
-    # ── Print summary ────────────────────────────────────────────────────
+    # -- Print summary --
+    ttfp = metrics.time_to_first_plausible_seconds
+    ttfp_str = f"{ttfp:.1f}s" if ttfp is not None else "n/a"
     print(f"\nRun directory: {writer.run_dir}")
     print(f"Project:       {canonical_project}")
     print(f"Bug ID:        {bug_id}")
-    print(f"Status:        {summary_result.status.value}")
-    print(f"Elapsed:       {elapsed_s:.1f}s")
-    print(f"Validated:     {len(all_results)} candidate(s)")
-    print(f"Plausible:     {len(plausible)} patch(es)")
-
-    if plausible:
-        print("\nPlausible patches:")
-        for r in plausible:
-            if r.patch:
-                print(f"  [{r.patch.patch_id}] {r.patch.summary}")
-                print(f"    {r.validation_summary}")
-    elif all_results:
-        print(f"\n{summary_result.validation_summary}")
-    else:
-        print(f"\n{summary_result.validation_summary}")
+    print(f"Status:        {result.status}")
+    print(f"Generated:     {metrics.total_candidates_generated} candidate(s)")
+    print(f"Validated:     {metrics.candidates_validated} candidate(s)")
+    print(f"Plausible:     {metrics.plausible_count} patch(es)")
+    print(f"Correct:       {metrics.correct_count} patch(es)")
+    print(f"1st plausible: {ttfp_str}")
+    print(f"Total time:    {metrics.total_wall_clock_seconds:.1f}s")
 
     return 0
 

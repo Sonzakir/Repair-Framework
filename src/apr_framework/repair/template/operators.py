@@ -18,12 +18,16 @@ if sys.version_info < (3, 9):
     )
 
 
-class _LineTargetedTransformer(ast.NodeTransformer, ABC):
-    """Base class for operators that restrict mutations to a single target line."""
+class _LineTargetedTransformer(ABC):
+    """Base class for operators that restrict mutations to a single target line.
+
+    Each concrete operator implements ``generate_variants(tree)``, returning one
+    independently mutated *copy* of the AST per applicable substitution found on
+    ``target_line``. Operators never mutate the input tree in place.
+    """
 
     def __init__(self, target_line: int) -> None:
         self._target_line = target_line
-        self._mutations: list[ast.AST] = []
 
     def _on_target_line(self, node: ast.AST) -> bool:
         lineno = getattr(node, "lineno", None)
@@ -34,14 +38,9 @@ class _LineTargetedTransformer(ast.NodeTransformer, ABC):
             end_lineno = lineno
         return lineno <= self._target_line <= end_lineno
 
+    @abstractmethod
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
         """Return one mutated AST copy per applicable substitution at the target line."""
-        self._mutations = []
-        self.visit(copy.deepcopy(tree))
-        return self._mutations
-
-    @abstractmethod
-    def visit(self, node: ast.AST) -> ast.AST:  # type: ignore[override]
         ...
 
 
@@ -63,6 +62,9 @@ class ArithmeticOperatorReplacer(_LineTargetedTransformer):
     """Swaps arithmetic operators in BinOp nodes on the target line."""
 
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
+        """
+        Generate multiple AST variants by swapping arithmetic/binary operators  one at a time 
+        """
         results: list[ast.AST] = []
         working = copy.deepcopy(tree)
         for node in ast.walk(working):
@@ -85,9 +87,6 @@ class ArithmeticOperatorReplacer(_LineTargetedTransformer):
                     ast.fix_missing_locations(variant)
                     results.append(variant)
         return results
-
-    def visit(self, node: ast.AST) -> ast.AST:  # type: ignore[override]
-        return node
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +111,9 @@ class ComparisonOperatorReplacer(_LineTargetedTransformer):
     """Swaps comparison operators in Compare nodes on the target line."""
 
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
+        """
+        Generate multiple AST variants by swapping comparison operators  one at a time 
+        """
         results: list[ast.AST] = []
         working = copy.deepcopy(tree)
         for node in ast.walk(working):
@@ -137,9 +139,6 @@ class ComparisonOperatorReplacer(_LineTargetedTransformer):
                         results.append(variant)
         return results
 
-    def visit(self, node: ast.AST) -> ast.AST:  # type: ignore[override]
-        return node
-
 
 # ---------------------------------------------------------------------------
 # obo — off-by-one replacement
@@ -149,9 +148,13 @@ class OffByOneReplacer(_LineTargetedTransformer):
     """Emits n+1 and n-1 variants for integer constants and range() upper bounds."""
 
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
+        """
+        Generate multiple AST variants by of by one changes (+1/-1)  one at a time 
+        """
         results: list[ast.AST] = []
         working = copy.deepcopy(tree)
-
+    
+        # Visit only target line nodes
         for node in ast.walk(working):
             if not self._on_target_line(node):
                 continue
@@ -160,6 +163,7 @@ class OffByOneReplacer(_LineTargetedTransformer):
             if isinstance(node, ast.Constant) and isinstance(node.value, int):
                 for delta in (+1, -1):
                     variant = copy.deepcopy(working)
+                    #TODO: Review 
                     for vnode in ast.walk(variant):
                         if (
                             isinstance(vnode, ast.Constant)
@@ -202,16 +206,13 @@ class OffByOneReplacer(_LineTargetedTransformer):
 
         return results
 
-    def visit(self, node: ast.AST) -> ast.AST:  # type: ignore[override]
-        return node
-
 
 # ---------------------------------------------------------------------------
 # bool — boolean operator replacement
 # ---------------------------------------------------------------------------
 
 class BooleanOperatorReplacer(_LineTargetedTransformer):
-    """Swaps And↔Or in BoolOp nodes on the target line."""
+    """Swaps And<->Or in BoolOp nodes on the target line."""
 
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
         results: list[ast.AST] = []
@@ -236,9 +237,6 @@ class BooleanOperatorReplacer(_LineTargetedTransformer):
             results.append(variant)
         return results
 
-    def visit(self, node: ast.AST) -> ast.AST:  # type: ignore[override]
-        return node
-
 
 # ---------------------------------------------------------------------------
 # negate — condition negation
@@ -248,6 +246,7 @@ class ConditionNegator(_LineTargetedTransformer):
     """Wraps the test of If/While nodes in Not() on the target line."""
 
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
+        """Generate variants by negating target-line if/while conditions."""
         results: list[ast.AST] = []
         working = copy.deepcopy(tree)
         for node in ast.walk(working):
@@ -255,9 +254,7 @@ class ConditionNegator(_LineTargetedTransformer):
                 continue
             if not self._on_target_line(node):
                 continue
-            # Skip if test is already a Not
-            if isinstance(node.test, ast.UnaryOp) and isinstance(node.op if hasattr(node, "op") else None, ast.Not):
-                continue
+            # Skip if the test is already negated, to avoid generating `not not x`.
             if isinstance(node.test, ast.UnaryOp) and isinstance(node.test.op, ast.Not):
                 continue
             variant = copy.deepcopy(working)
@@ -276,18 +273,16 @@ class ConditionNegator(_LineTargetedTransformer):
             results.append(variant)
         return results
 
-    def visit(self, node: ast.AST) -> ast.AST:  # type: ignore[override]
-        return node
-
 
 # ---------------------------------------------------------------------------
 # return — return value mutation
 # ---------------------------------------------------------------------------
 
 class ReturnValueMutator(_LineTargetedTransformer):
-    """Mutates return statements: True↔False, non-None value → None."""
+    """Mutates return statements: True<->False, non-None value -> None."""
 
     def generate_variants(self, tree: ast.AST) -> list[ast.AST]:
+        """Generate variants by mutating target-line return values."""
         results: list[ast.AST] = []
         working = copy.deepcopy(tree)
         for node in ast.walk(working):
@@ -347,9 +342,6 @@ class ReturnValueMutator(_LineTargetedTransformer):
                 results.append(variant)
 
         return results
-
-    def visit(self, node: ast.AST) -> ast.AST:  # type: ignore[override]
-        return node
 
 
 # ---------------------------------------------------------------------------

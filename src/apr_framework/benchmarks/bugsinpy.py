@@ -9,9 +9,11 @@ import json
 import re
 import shutil
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass
 from os import environ
 from pathlib import Path, PurePosixPath
+from typing import Generator
 
 from apr_framework.benchmarks.base import BenchmarkAdapter
 from apr_framework.core.exceptions import BenchmarkError, ConfigurationError
@@ -148,6 +150,7 @@ class BugsInPyDockerExecutor:
         cwd: Path | None = None,
         check: bool = True,
         capture_output: bool = False,
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """
         Execute a BugsInPy command inside the prepared Docker container.
@@ -161,6 +164,7 @@ class BugsInPyDockerExecutor:
                 BugsInPy workspace inside the container.
             check: Whether Docker should raise on a non-zero command exit code.
             capture_output: Whether stdout and stderr should be captured.
+            timeout: Optional wall-clock limit (seconds) for the command.
 
         Returns:
             The completed Docker process for the executed BugsInPy command.
@@ -195,6 +199,7 @@ class BugsInPyDockerExecutor:
             ],
             check=check,
             capture_output=capture_output,
+            timeout=timeout,
         )
 
     def run_command(
@@ -456,6 +461,7 @@ class BugsInPyDockerExecutor:
         args: list[str],
         check: bool,
         capture_output: bool = False,
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(
@@ -463,11 +469,32 @@ class BugsInPyDockerExecutor:
                 check=check,
                 text=True,
                 capture_output=capture_output,
+                timeout=timeout,
             )
         except FileNotFoundError as exc:
             raise ConfigurationError(
                 "Docker CLI is required to run BugsInPy in its executor container."
             ) from exc
+        except subprocess.TimeoutExpired as exc:
+            # A wall-clock timeout means we cannot trust the run. When the caller
+            # opted into raising (check=True) surface a hard error; otherwise hand
+            # back a synthetic non-zero result so plausibility checks reject it.
+            if check:
+                raise BenchmarkError(
+                    f"Command timed out after {timeout}s: {' '.join(args)}"
+                ) from exc
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode(errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode(errors="replace")
+            return subprocess.CompletedProcess(
+                args=[self._docker, *args],
+                returncode=124,  # conventional timeout exit code
+                stdout=stdout,
+                stderr=stderr,
+            )
 
 
 class BugsInPyToolchain:
@@ -588,6 +615,7 @@ class BugsInPyToolchain:
         cwd: Path | None = None,
         check: bool = True,
         capture_output: bool = False,
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """
         Run a BugsInPy command after verifying the toolchain is installed.
@@ -598,6 +626,7 @@ class BugsInPyToolchain:
             cwd: Optional host-side working directory for the command.
             check: Whether to raise on a non-zero Docker process exit code.
             capture_output: Whether stdout and stderr should be captured.
+            timeout: Optional wall-clock limit (seconds) for the command.
 
         Returns:
             The completed process returned by the Docker executor.
@@ -609,6 +638,7 @@ class BugsInPyToolchain:
             cwd=cwd,
             check=check,
             capture_output=capture_output,
+            timeout=timeout,
         )
 
     def run_command(
@@ -706,6 +736,34 @@ class BugsInPyAdapter(BenchmarkAdapter):
         """
         self._toolchain.ensure_installed()
         return sorted(set(self._project_aliases().values()))
+
+    def get_reference_patch(self, bug: BugIdentifier) -> str | None:
+        """Return the developer fix for a bug as a unified diff, or None if absent.
+
+        BugsInPy stores the ground-truth fix (buggy → fixed) as a unified diff at
+        ``projects/<project>/bugs/<bug_id>/bug_patch.txt``. The patch-validation
+        pipeline (Task 2) compares plausible patches against this reference to
+        decide whether they are *correct*, not merely plausible.
+
+        Args:
+            bug: Bug identifier (project name may be an alias).
+
+        Returns:
+            The unified-diff text of the developer fix, or None when the file is
+            missing.
+        """
+        canonical_project = self.resolve_project(bug.project)
+        patch_file = (
+            self._toolchain.repo_dir
+            / "projects"
+            / canonical_project
+            / "bugs"
+            / str(bug.bug_id)
+            / "bug_patch.txt"
+        )
+        if not patch_file.is_file():
+            return None
+        return patch_file.read_text(encoding="utf-8")
 
     def list_bugs(self, project: str) -> list[BugInfo]:
         """
@@ -817,7 +875,12 @@ class BugsInPyAdapter(BenchmarkAdapter):
 
         checkout.prepared = True
 
-    def run_tests(self, checkout: CheckoutResult) -> TestRunResult:
+    def run_tests(
+        self,
+        checkout: CheckoutResult,
+        timeout: float | None = None,
+        command: str | None = None,
+    ) -> TestRunResult:
         """
         Execute the BugsInPy test command for a prepared checkout.
 
@@ -826,11 +889,23 @@ class BugsInPyAdapter(BenchmarkAdapter):
 
         Args:
             checkout: Checkout result whose worktree should be tested.
+            timeout: Optional wall-clock limit (seconds) for the test command. On
+                timeout the run returns with ``return_code`` 124 so callers treat
+                it as a failed (non-plausible) run.
+            command: Optional override test command. When given, the checkout's
+                ``bugsinpy_run_test.sh`` is temporarily replaced with this command
+                (and restored afterwards) so the regression suite — e.g. the bug's
+                whole ``test_file`` — can be run in the same prepared environment
+                that ``bugsinpy-test`` sets up. When None, the bug's stock trigger
+                test command is used.
 
         Returns:
             Structured test run result for the checked-out bug.
         """
-        
+        if command is not None:
+            with self._overridden_run_test_script(checkout, command):
+                return self.run_tests(checkout, timeout=timeout)
+
         PYTEST_RESULT_KEYWORDS = (
             r"passed|failed|error|skipped|xfailed|xpassed|deselected|warning"
         )
@@ -851,6 +926,7 @@ class BugsInPyAdapter(BenchmarkAdapter):
             cwd=checkout.worktree,
             check=False,
             capture_output=True,
+            timeout=timeout,
         )
 
         raw_output = _completed_output(completed)
@@ -886,4 +962,29 @@ class BugsInPyAdapter(BenchmarkAdapter):
             passed_count=passed,
             failed_count=failed,
             error_count=errors,
+            return_code=_completed_returncode(completed),
         )
+
+    @contextmanager
+    def _overridden_run_test_script(
+        self, checkout: CheckoutResult, command: str
+    ) -> Generator[None, None, None]:
+        """Temporarily replace the checkout's ``bugsinpy_run_test.sh`` command.
+
+        ``bugsinpy-test`` executes every line of ``bugsinpy_run_test.sh`` in the
+        prepared environment. Swapping its contents lets the framework run an
+        arbitrary test selection (e.g. the whole regression ``test_file``) through
+        the exact same environment, then restores the original unconditionally.
+        """
+        script = checkout.worktree / "bugsinpy_run_test.sh"
+        if not script.is_file():
+            raise BenchmarkError(
+                f"Cannot run an override test command: {script} is missing. "
+                "Re-checkout the bug."
+            )
+        original = script.read_text(encoding="utf-8")
+        try:
+            script.write_text(command + "\n", encoding="utf-8")
+            yield
+        finally:
+            script.write_text(original, encoding="utf-8")

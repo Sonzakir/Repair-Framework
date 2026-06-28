@@ -389,7 +389,11 @@ status.
 summary into the run directory and bundles all run artifacts into a single
 `runs/run_xxx.zip` archive. The archive path is printed at the end of the run.
 
-## Template-based APR repair (Task 3)
+## Template-based APR repair (Assignment 3 — Task 1)
+
+> A standalone, learn-by-reading write-up of this technique (design decisions,
+> file map, verification) lives in
+> [`assignment3_task1_implementation.md`](assignment3_task1_implementation.md).
 
 ### Technique overview
 
@@ -399,7 +403,10 @@ The `repair` command implements a **template-based APR** strategy guided by SBFL
 2. **What to try** — AST mutation operators generate syntactically valid program variants at each suspicious line.
 3. **Which variants pass** — each mutated variant is applied to the checkout worktree, the BugsInPy test suite is executed inside the executor container, and the file is restored unconditionally.
 
-A patch is **plausible** when all tests pass (zero failures, zero errors).
+A patch is **plausible** only when the test command exits cleanly
+(`return_code == 0`), reports zero failures and zero errors, **and** at least one
+test actually passed. The exit-code and passed-count guards reject patches that
+break test collection/import (which otherwise look like "0 failed, 0 error").
 
 ### Mutation operators
 
@@ -429,6 +436,10 @@ python -m apr_framework repair --project PySnooper --bug 1 --operators arith,com
 # Stop as soon as the first plausible patch is found:
 python -m apr_framework repair --project PySnooper --bug 1 --stop-on-first
 
+# Choose the fault-localization family that drives the repair targets:
+python -m apr_framework repair --project PySnooper --bug 1 --fl-family mbfl --mbfl-metric metallaxis
+python -m apr_framework repair --project PySnooper --bug 1 --fl-family hybrid --sbfl-weight 0.5 --mbfl-weight 0.5
+
 # Skip re-running localization; load the most recent cached result:
 python -m apr_framework repair --project PySnooper --bug 1 --skip-localize
 
@@ -450,22 +461,32 @@ Mutations are performed on the Python AST using `ast.NodeTransformer` subclasses
 **Line-to-AST-node mapping.**
 Every operator checks `node.lineno <= target_line <= node.end_lineno` before mutating. This maps the SBFL/MBFL statement-level line number to the precise AST sub-tree covering that line, avoiding mutations on unrelated parts of the file.
 
-**Fail-fast validation.**
-When `--fail-fast` is active (default), a validation that returns non-zero failures terminates immediately without running additional diagnostics, keeping budget usage low. Since `bugsinpy-test` always runs the full suite, this is enforced at the result-checking level rather than by test filtering.
+**Cost control: budget, stop-on-first, timeout.**
+`--budget` caps the total number of patch validations — each `adapter.run_tests()`
+call counts as one. Generation (AST mutation) is free; validation (test execution)
+is expensive. `--stop-on-first` halts as soon as a plausible patch is found.
+`--timeout` is a *real* per-test-run wall-clock limit: it threads down to the
+Docker `exec` call, and a timed-out run is treated as a failed (non-plausible)
+candidate (exit code 124) instead of hanging the loop.
 
-**Budget.**
-`--budget` caps the total number of patch validations. Each call to `adapter.run_tests()` counts as one validation. Generation (AST mutation) is free; validation (test execution) is expensive.
+**Fault-localization family is selectable.**
+`--fl-family sbfl|mbfl|hybrid` chooses which Assignment-2 localizer ranks the repair
+targets (SBFL via `--localization-metric`, MBFL via `--mbfl-metric`/`--mutation-budget`/`--seed`,
+or a weighted `HybridFaultLocalizer` via `--sbfl-weight`/`--mbfl-weight`).
 
 **No changes to `RepairAlgorithm` ABC.**
-`TemplateRepairAlgorithm` implements `generate_patches(bug, checkout)` (generate candidates without testing) and `validate_patch(bug, checkout, patch)` (apply + test + revert one candidate) from the existing ABC without modification. An additional non-ABC method `repair(bug, checkout)` orchestrates the full budget loop and is what the CLI calls.
+`TemplateRepairAlgorithm` implements `generate_patches(bug, checkout)` (generate candidates without testing) and `validate_patch(bug, checkout, patch)` (apply + test + revert one candidate) from the existing ABC without modification. An additional non-ABC convenience method `repair(bug, checkout)` orchestrates the full budget loop. As of Task 2 the CLI drives the pipeline through `RepairEvaluationRunner` instead (see the Task 2 section); both share the single loop in `run_validation_loop`.
 
 ### Output
 
 The command creates the next `runs/run_NNN/` directory and writes:
 
 - `config.json` — all configuration parameters
-- `repair_results.json` — per-candidate validation outcomes and plausible patches
+- `repair_results.json` — per-candidate validation outcomes (valid unified diffs,
+  test counts incl. `test_return_code`) and the plausible-patch list
 - `execution.log` — timestamped step log
+- `patches/<patch_id>.diff` and `patches/<patch_id>.patched.py` — written for each
+  **plausible** patch so the fix is recoverable outside the JSON
 
 ### Known limitations
 
@@ -474,6 +495,103 @@ The command creates the next `runs/run_NNN/` directory and writes:
 - Decorators, f-strings with complex expressions, and type-annotated assignments may be reformatted in unexpected ways by `ast.unparse()`.
 - Only projects whose `run_test.sh` invokes pytest directly are supported (same restriction as the `localize` command).
 - Requires Python 3.9+ inside the framework container (for `ast.unparse()`).
+
+## Patch validation pipeline (Assignment 3 — Task 2)
+
+Task 2 turns repair into a proper **patch-validation pipeline** with two levels of
+judgment and a set of tracked metrics, all surfaced in the structured JSON output.
+
+### Two levels of judgment
+
+- **Plausible** — both halves of the spec definition are enforced
+  ([`repair/template/validator.py`](src/apr_framework/repair/template/validator.py)):
+  1. *the failing test now passes* — the bug's trigger test command exits cleanly
+     with zero failures/errors and ≥1 passing test (the return-code and
+     passed-count guards also reject patches that break import/collection); **and**
+  2. *no previously passing test is broken* — a regression run of the bug's whole
+     `test_file` introduces no new failures
+     ([`repair/regression.py`](src/apr_framework/repair/regression.py)).
+- **Correct** — a *plausible* patch that also matches the developer fix
+  (BugsInPy ground truth) at the **diff level**. Implemented in
+  [`repair/correctness.py`](src/apr_framework/repair/correctness.py).
+
+#### Regression check (the "no previously passing test broken" half)
+
+BugsInPy's `run_test.sh` usually contains only the single bug-triggering test, so
+running it alone cannot detect a patch that fixes the trigger but breaks something
+else. To enforce the second half of plausibility, the framework:
+
+1. once per repair run, runs the bug's whole regression suite (the `test_file` from
+   `bugsinpy_bug.info`, broadened from the trigger command) on the **unpatched**
+   checkout and records the **baseline failing set**;
+2. for a candidate that already passes the trigger, runs the same suite **with the
+   patch** and records its failing set;
+3. accepts the patch only if its failing set is a **subset** of the baseline — i.e.
+   it introduces no new failure.
+
+Comparing failing **sets** (not counts) is what makes this correct: a patch that
+fixes the trigger but breaks a different, previously passing test has the same
+failure *count* as the baseline but a non-subset failing *set*, so it is rejected.
+The baseline run is established once and reused for every candidate; the same
+prepared environment is reused by temporarily swapping the checkout's
+`bugsinpy_run_test.sh` (`BugsInPyAdapter.run_tests(..., command=...)`). The check is
+on by default and can be skipped for speed with `--no-regression-check`, in which
+case plausibility falls back to the trigger test only.
+
+The correctness check compares the candidate to the reference fix
+(`projects/<project>/bugs/<id>/bug_patch.txt`, read via
+`BugsInPyAdapter.get_reference_patch`). Because the template generator reconstructs
+source with `ast.unparse` (which reformats whole files), a raw textual diff would
+never match. So we build a **reformatting-neutral minimal diff** — both the original
+and the patched source are round-tripped through `ast.unparse`, so cosmetic noise
+cancels out — then reduce each side (candidate and reference) to its set of
+whitespace-normalized added/removed lines and require them to be equal for the
+touched file. This is a deliberately strict, purely syntactic check.
+
+### Tracked metrics
+
+Every repair run records these in `repair_results.json` under a `"metrics"` block
+(and the headline counts at the top level):
+
+| Metric | Meaning |
+|---|---|
+| `total_candidates_generated` | candidate patches produced before budget capping |
+| `candidates_validated` | candidates actually run against the test suite |
+| `plausible_count` | candidates whose patched program passed all tests |
+| `correct_count` | plausible candidates that match the developer fix |
+| `time_to_first_plausible_seconds` | wall-clock to the first plausible patch (`null` if none) |
+| `total_wall_clock_seconds` | wall-clock for the whole repair run |
+
+Each entry in `all_results` / `plausible_patches` also carries an `is_correct` flag.
+
+### Architecture: `RepairEvaluationRunner`
+
+The pipeline is implemented as a dedicated
+[`RepairEvaluationRunner`](src/apr_framework/evaluation/repair_runner.py) that
+implements the Assignment-1 `EvaluationRunner` ABC. It drives the shared
+generate-and-validate loop ([`repair/run_loop.py`](src/apr_framework/repair/run_loop.py)),
+runs the correctness check on plausible patches, assembles the metrics
+(`RepairRunMetrics` in `core/models.py`), and writes all run artifacts.
+
+> **Interface note (API decision).** The budget/early-stop validation loop was
+> extracted from `TemplateRepairAlgorithm.repair()` into the standalone
+> `run_validation_loop`, which uses **only** the `RepairAlgorithm` ABC methods
+> (`generate_patches` / `validate_patch`). Both the algorithm's convenience
+> `repair()` and the runner call it, so there is a single loop implementation and a
+> future LLM repair backend works with the runner unchanged. `RepairStatus.CORRECT`
+> (already defined in Assignment 1) is now actually used.
+
+No new CLI flags are required — `python -m apr_framework repair ...` now prints and
+persists the validation metrics, e.g.:
+
+```text
+Generated:     2 candidate(s)
+Validated:     2 candidate(s)
+Plausible:     0 patch(es)
+Correct:       0 patch(es)
+1st plausible: n/a
+Total time:    1.0s
+```
 
 ## Included evaluation artifact
 

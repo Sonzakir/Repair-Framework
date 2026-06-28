@@ -1,7 +1,6 @@
 """Template-based APR algorithm: SBFL/MBFL-guided AST mutation repair."""
 
 import logging
-import time
 from pathlib import Path
 
 from apr_framework.benchmarks.bugsinpy import BugsInPyAdapter
@@ -15,7 +14,9 @@ from apr_framework.core.models import (
     RepairStatus,
 )
 from apr_framework.repair.base import RepairAlgorithm
+from apr_framework.repair.regression import RegressionContext, build_regression_context
 from apr_framework.repair.template.config import TemplateRepairConfig
+from apr_framework.repair.run_loop import run_validation_loop
 from apr_framework.repair.template.patch_generator import generate_patches
 from apr_framework.repair.template.validator import validate_patch
 
@@ -44,6 +45,9 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
         self._localization_result = localization_result
         self._adapter = adapter
         self._config = config or TemplateRepairConfig()
+        # Regression baseline is established once, lazily, on first validation
+        # (it needs the checkout) and reused for every candidate.
+        self._regression: RegressionContext | None = None
 
     @property
     def name(self) -> str:
@@ -137,12 +141,14 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
         Returns:
             RepairAttemptResult with status PLAUSIBLE, FAILED, or NO_PATCH.
         """
+        regression = self._regression_context(checkout)
         try:
             updated_patch, is_plausible = validate_patch(
                 candidate=patch,
                 checkout=checkout,
                 adapter=self._adapter,
                 config=self._config,
+                regression=regression,
             )
         except Exception as exc:
             logger.error(
@@ -188,14 +194,14 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
     ) -> tuple[RepairAttemptResult, list[RepairAttemptResult]]:
         """Run the full repair loop with budget and optional early stopping.
 
-        1. Generate all candidate patches from top-N locations.
-        2. Validate candidates one by one until budget is exhausted.
-        3. Collect all per-candidate results.
-        4. Return (summary_result, all_results).
+        Thin convenience wrapper around :func:`run_validation_loop` (the shared,
+        backend-agnostic loop). The summary_result uses the first plausible patch
+        (status=PLAUSIBLE), or RepairStatus.FAILED if candidates existed but none
+        passed, or RepairStatus.NO_PATCH if no candidates were generated.
 
-        The summary_result uses the first plausible patch (status=PLAUSIBLE),
-        or RepairStatus.FAILED if candidates existed but none passed,
-        or RepairStatus.NO_PATCH if no candidates were generated.
+        For the full set of validation metrics (counts, time-to-first-plausible,
+        correctness), use :class:`RepairEvaluationRunner`, which drives the same
+        loop and additionally compares against the developer fix.
 
         Args:
             bug:      Bug identifier.
@@ -205,7 +211,6 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
             (summary_result, all_validation_results)
         """
         config = self._config
-        started_at = time.monotonic()
 
         logger.info(
             "Starting template repair for %s#%d — budget=%d, top_n=%d, operators=%s",
@@ -216,120 +221,34 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
             config.enabled_operators,
         )
 
-        # Step 1: generate all candidates (no test runs)
-        candidates = self.generate_patches(bug, checkout)
-        logger.info("Total candidates generated: %d", len(candidates))
-
-        if not candidates:
-            elapsed = time.monotonic() - started_at
-            logger.info("No candidates generated in %.1fs.", elapsed)
-            no_patch_result = RepairAttemptResult(
-                bug=bug,
-                patch=None,
-                status=RepairStatus.NO_PATCH,
-                validation_summary="No mutation operators matched at the top suspicious locations.",
-            )
-            return no_patch_result, []
-
-        # Step 2: validate with budget
-        budget_remaining = config.budget
-        all_results: list[RepairAttemptResult] = []
-        plausible_results: list[RepairAttemptResult] = []
-
-        for candidate in candidates:
-            if budget_remaining <= 0:
-                logger.info("Budget exhausted — stopping validation loop.")
-                break
-
-            op = candidate.metadata.get("operator", "?")
-            src = candidate.metadata.get("source_path", "?")
-            line = candidate.metadata.get("target_line", "?")
-            logger.info(
-                "Validating %s (op=%s, file=%s:%s) — budget remaining: %d",
-                candidate.patch_id,
-                op,
-                Path(src).name if src != "?" else src,
-                line,
-                budget_remaining,
-            )
-
-            try:
-                result = self.validate_patch(bug, checkout, candidate)
-            except Exception as exc:
-                logger.error(
-                    "Unexpected error validating %s: %s", candidate.patch_id, exc
-                )
-                result = RepairAttemptResult(
-                    bug=bug,
-                    patch=candidate,
-                    status=RepairStatus.FAILED,
-                    validation_summary=f"Unexpected validation error: {exc}",
-                )
-
-            all_results.append(result)
-            budget_remaining -= 1
-
-            if result.status == RepairStatus.PLAUSIBLE:
-                plausible_results.append(result)
-                logger.info(
-                    "Plausible patch: %s",
-                    result.patch.patch_id if result.patch else "?",
-                )
-                if config.stop_on_first:
-                    logger.info("stop_on_first=True — stopping after first plausible patch.")
-                    break
-
-        elapsed = time.monotonic() - started_at
-        validated_count = len(all_results)
-        plausible_count = len(plausible_results)
-
-        logger.info(
-            "Repair loop finished in %.1fs: %d validated, %d plausible",
-            elapsed,
-            validated_count,
-            plausible_count,
+        outcome = run_validation_loop(
+            self,
+            bug,
+            checkout,
+            budget=config.budget,
+            stop_on_first=config.stop_on_first,
         )
-
-        if plausible_results:
-            best = plausible_results[0]
-            summary = RepairAttemptResult(
-                bug=bug,
-                patch=best.patch,
-                status=RepairStatus.PLAUSIBLE,
-                validation_summary=(
-                    f"Found {plausible_count} plausible patch(es) out of "
-                    f"{validated_count} validated (budget: {config.budget}, "
-                    f"elapsed: {elapsed:.1f}s). "
-                    f"Best: {best.patch.patch_id if best.patch else '?'}."
-                ),
-            )
-        elif validated_count > 0:
-            summary = RepairAttemptResult(
-                bug=bug,
-                patch=None,
-                status=RepairStatus.FAILED,
-                validation_summary=(
-                    f"No plausible patch found. "
-                    f"Validated {validated_count}/{len(candidates)} candidates "
-                    f"(budget: {config.budget}, elapsed: {elapsed:.1f}s)."
-                ),
-            )
-        else:
-            summary = RepairAttemptResult(
-                bug=bug,
-                patch=None,
-                status=RepairStatus.NO_PATCH,
-                validation_summary=(
-                    f"No candidates could be validated "
-                    f"(budget: {config.budget}, elapsed: {elapsed:.1f}s)."
-                ),
-            )
-
-        return summary, all_results
+        return outcome.summary, outcome.all_results
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _regression_context(self, checkout: CheckoutResult) -> RegressionContext:
+        """Return the regression baseline, establishing it once on first use.
+
+        The baseline (failing-set of the whole test_file on the unpatched checkout)
+        is identical for every candidate, so it is computed a single time and
+        cached. Disabled configs short-circuit to an inert context.
+        """
+        if self._regression is None:
+            self._regression = build_regression_context(
+                self._adapter,
+                checkout,
+                enabled=self._config.regression_check,
+                timeout=self._config.timeout_per_test,
+            )
+        return self._regression
 
     def _resolve_source_path(
         self, location: RankedLocation, checkout: CheckoutResult

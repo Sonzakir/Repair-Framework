@@ -80,10 +80,16 @@ def generate_patches(
             except Exception:  # noqa: BLE001
                 continue
 
-            patched_lines = patched_text.splitlines(keepends=True)
-            # Add trailing newline if original had one
-            if original_text.endswith("\n") and not patched_text.endswith("\n"):
-                patched_lines.append("\n")
+            # ast.unparse() never emits a trailing newline. Normalise the patched
+            # text to end with one *before* splitting so that every line kept by
+            # splitlines(keepends=True) carries its own "\n". Appending "\n" as a
+            # separate list element (the previous approach) produced corrupted
+            # diffs like "+    return x - 1+" because the mutated last line had no
+            # terminator and the lone "\n" was glued onto it by "".join(...).
+            normalized_patched = (
+                patched_text if patched_text.endswith("\n") else patched_text + "\n"
+            )
+            patched_lines = normalized_patched.splitlines(keepends=True)
 
             diff_lines = list(
                 difflib.unified_diff(
@@ -123,9 +129,7 @@ def generate_patches(
                         "suspiciousness_score": location.score,
                         "location_rank": location.rank,
                         # Store the full patched source to avoid re-parsing in the validator.
-                        "patched_source": patched_text
-                        if patched_text.endswith("\n")
-                        else patched_text + "\n",
+                        "patched_source": normalized_patched,
                     },
                 )
             )
