@@ -136,6 +136,105 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    ## bugsinpy-evaluate-repair (Task 5: repair pipeline comparison)
+    eval_repair_parser = bugsinpy_subparsers.add_parser(
+        "evaluate-repair",
+        help=(
+            "Run the full repair pipeline on a set of bugs under both automated FL "
+            "and perfect FL, apply the ranker, and write an aggregated comparison "
+            "(Assignment 3 Task 5)."
+        ),
+    )
+    eval_repair_parser.add_argument(
+        "--bugs",
+        default=None,
+        help=(
+            "Comma-separated project:bug_id pairs to evaluate "
+            "(e.g. tornado:14,scrapy:2,black:1). "
+            "Defaults to tornado:14,scrapy:2,black:1."
+        ),
+    )
+    eval_repair_parser.add_argument(
+        "--fl-modes",
+        dest="fl_modes",
+        default="auto,perfect",
+        help="Comma-separated FL modes to run per bug (default: auto,perfect).",
+    )
+    eval_repair_parser.add_argument(
+        "--fl-family",
+        dest="fl_family",
+        choices=["sbfl", "mbfl", "hybrid"],
+        default="sbfl",
+        help="Fault-localization family used in automated FL mode (default: sbfl).",
+    )
+    eval_repair_parser.add_argument(
+        "--localization-metric",
+        dest="localization_metric",
+        default="ochiai",
+        help="SBFL metric used in automated FL mode (default: ochiai).",
+    )
+    eval_repair_parser.add_argument(
+        "--mbfl-metric",
+        dest="mbfl_metric",
+        default="metallaxis",
+        help="MBFL metric for automated FL mode (default: metallaxis).",
+    )
+    eval_repair_parser.add_argument(
+        "--mutation-budget",
+        dest="mutation_budget",
+        type=int,
+        default=50,
+        help="Max mutants per bug for MBFL/hybrid automated FL (default: 50).",
+    )
+    eval_repair_parser.add_argument(
+        "--seed", type=int, default=0, help="Random seed for MBFL mutation selection."
+    )
+    eval_repair_parser.add_argument(
+        "--operators",
+        default="arith,comp,obo,bool,negate,return",
+        help="Comma-separated enabled mutation operators (default: all).",
+    )
+    eval_repair_parser.add_argument(
+        "--budget", type=int, default=200, help="Max patch validations per cell (default: 200)."
+    )
+    eval_repair_parser.add_argument(
+        "--top-n", dest="top_n", type=int, default=5,
+        help="Top-N suspicious locations to attempt (default: 5).",
+    )
+    eval_repair_parser.add_argument(
+        "--granularity", choices=["statement", "function"], default="statement",
+        help="Localization granularity for automated FL (default: statement).",
+    )
+    eval_repair_parser.add_argument(
+        "--timeout", type=int, default=120,
+        help="Seconds allowed per test-suite invocation (default: 120).",
+    )
+    eval_repair_parser.add_argument(
+        "--stop-on-first", dest="stop_on_first", action="store_true",
+        help="Stop validating a cell after the first plausible patch.",
+    )
+    eval_repair_parser.add_argument(
+        "--no-regression-check", dest="regression_check", action="store_false",
+        help="Skip the regression half of plausibility (faster).",
+    )
+    eval_repair_parser.set_defaults(regression_check=True)
+    eval_repair_parser.add_argument(
+        "--ranker", choices=["weighted", "none"], default="weighted",
+        help="Patch ranking strategy applied to plausible patches (default: weighted).",
+    )
+    eval_repair_parser.add_argument(
+        "--ranker-weights", dest="ranker_weights", default=None,
+        help="Comma-separated weights for the weighted ranker (default: 0.6,0.25,0.15).",
+    )
+    eval_repair_parser.add_argument(
+        "--output-dir", default="experiment_results/repair",
+        help="Directory for results.json and README.md (default: experiment_results/repair).",
+    )
+    eval_repair_parser.add_argument(
+        "--runs-dir", dest="runs_dir", default="runs",
+        help="Directory for per-cell run artifacts (default: runs).",
+    )
+
     # Repair command
     repair_parser = subparsers.add_parser(
         "repair",

@@ -371,6 +371,9 @@ def _run() -> int:
         if args.bugsinpy_command == "evaluate-localization":
             return _run_evaluate_localization(args, project_root, adapter)
 
+        if args.bugsinpy_command == "evaluate-repair":
+            return _run_evaluate_repair(args, project_root, adapter)
+
 
     # -- Repair -- 
 
@@ -806,6 +809,212 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
     # Print a compact summary table to stdout
     _print_summary(eval_results, top_ks)
     return 0
+
+
+def _run_evaluate_repair(args, project_root: Path, adapter) -> int:
+    """Run the Task-5 repair comparison: each bug under both FL modes + ranker."""
+    from apr_framework.core.models import CheckoutResult
+    from apr_framework.evaluation.repair_comparison_runner import RepairComparisonRunner
+    from apr_framework.localization import (
+        FauxPyConfig,
+        FauxPyLocalizer,
+        FauxPyToolchain,
+        HybridFaultLocalizer,
+        PerfectFaultLocalizer,
+    )
+    from apr_framework.repair import TemplateRepairAlgorithm, TemplateRepairConfig
+
+    adapter.toolchain.ensure_installed()
+    bugs = _parse_bug_list(args.bugs or "tornado:14,scrapy:2,black:1")
+    fl_modes = [mode.strip() for mode in args.fl_modes.split(",") if mode.strip()]
+    for fl_mode in fl_modes:
+        if fl_mode not in ("auto", "perfect"):
+            raise ConfigurationError(
+                f"Invalid FL mode {fl_mode!r} — expected 'auto' or 'perfect'."
+            )
+
+    output_dir = Path(args.output_dir)
+    if not output_dir.is_absolute():
+        output_dir = project_root / output_dir
+    runs_dir = Path(args.runs_dir)
+    if not runs_dir.is_absolute():
+        runs_dir = project_root / runs_dir
+
+    fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
+    projects_dir = adapter.toolchain.repo_dir / "projects"
+
+    # Resolve and validate every bug's checkout up front, keyed by canonical bug.
+    canonical_bug_list: list[BugIdentifier] = []
+    checkouts: dict[BugIdentifier, CheckoutResult] = {}
+    for bug in bugs:
+        canonical_project = adapter.resolve_project(bug.project)
+        canonical_bug = BugIdentifier(
+            benchmark="bugsinpy", project=canonical_project, bug_id=bug.bug_id
+        )
+        worktree = (
+            project_root
+            / ".workspace"
+            / "bugsinpy"
+            / f"{canonical_project}_{bug.bug_id}"
+            / canonical_project
+        )
+        if not worktree.exists():
+            raise BenchmarkError(
+                f"No checkout found for {bug.project} #{bug.bug_id} at {worktree}. "
+                f"Run `python -m apr_framework bugsinpy checkout {bug.project} {bug.bug_id}` "
+                "and then `compile` before evaluating."
+            )
+        canonical_bug_list.append(canonical_bug)
+        checkouts[canonical_bug] = CheckoutResult(
+            bug=canonical_bug, worktree=worktree, success=True, prepared=True
+        )
+
+    def _auto_localizer(canonical_bug: BugIdentifier):
+        worktree = checkouts[canonical_bug].worktree
+        source_package = _infer_fauxpy_src(worktree, canonical_bug.project)
+        bug_dir = projects_dir / canonical_bug.project / "bugs" / str(canonical_bug.bug_id)
+        bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        bug_test_ids = [target for target in bug_test_targets if not target.startswith("-")]
+
+        def _make_sbfl() -> FauxPyLocalizer:
+            return FauxPyLocalizer(
+                FauxPyConfig(
+                    src=source_package,
+                    test_targets=bug_test_targets,
+                    family="sbfl",
+                    granularity=args.granularity,
+                    failing_tests=bug_test_ids,
+                    metric=args.localization_metric,
+                ),
+                fauxpy_toolchain,
+            )
+
+        def _make_mbfl() -> FauxPyLocalizer:
+            return FauxPyLocalizer(
+                FauxPyConfig(
+                    src=source_package,
+                    test_targets=bug_test_targets,
+                    family="mbfl",
+                    granularity=args.granularity,
+                    failing_tests=bug_test_ids,
+                    metric=args.mbfl_metric,
+                    mutation_strategy="random",
+                    mutation_budget=args.mutation_budget,
+                    mutation_seed=args.seed,
+                ),
+                fauxpy_toolchain,
+            )
+
+        if args.fl_family == "sbfl":
+            return _make_sbfl()
+        if args.fl_family == "mbfl":
+            return _make_mbfl()
+        return HybridFaultLocalizer(_make_sbfl(), _make_mbfl())
+
+    perfect_localizer = PerfectFaultLocalizer(adapter)
+
+    def localization_provider(canonical_bug: BugIdentifier, fl_mode: str):
+        checkout = checkouts[canonical_bug]
+        if fl_mode == "perfect":
+            return perfect_localizer.localize(canonical_bug, checkout)
+        return _auto_localizer(canonical_bug).localize(canonical_bug, checkout)
+
+    enabled_operators = [
+        operator_key.strip()
+        for operator_key in args.operators.split(",")
+        if operator_key.strip()
+    ]
+    repair_config = TemplateRepairConfig(
+        budget=args.budget,
+        top_n_locations=args.top_n,
+        enabled_operators=enabled_operators,
+        timeout_per_test=args.timeout,
+        stop_on_first=args.stop_on_first,
+        regression_check=args.regression_check,
+    )
+
+    def repair_algorithm_factory(localization_result):
+        return TemplateRepairAlgorithm(
+            localization_result=localization_result,
+            adapter=adapter,
+            config=repair_config,
+        )
+
+    ranker = _build_ranker(args)
+    repair_config_data = {
+        "technique": "template",
+        "budget": repair_config.budget,
+        "top_n_locations": repair_config.top_n_locations,
+        "enabled_operators": repair_config.enabled_operators,
+        "timeout_per_test": repair_config.timeout_per_test,
+        "stop_on_first": repair_config.stop_on_first,
+        "regression_check": repair_config.regression_check,
+        "fl_family": args.fl_family,
+        "localization_metric": args.localization_metric,
+        "granularity": args.granularity,
+    }
+
+    runner = RepairComparisonRunner(
+        project_root=project_root,
+        runs_dir=runs_dir,
+        ranker=ranker,
+        repair_config_data=repair_config_data,
+        budget=repair_config.budget,
+        stop_on_first=repair_config.stop_on_first,
+    )
+
+    print(
+        f"Evaluating {len(bugs)} bug(s) x {len(fl_modes)} FL mode(s) "
+        f"({', '.join(fl_modes)}) with ranker={ranker.name if ranker else 'none'}..."
+    )
+    cells = runner.run(
+        bugs=canonical_bug_list,
+        fl_modes=fl_modes,
+        benchmark=adapter,
+        localization_provider=localization_provider,
+        repair_algorithm_factory=repair_algorithm_factory,
+    )
+
+    readme_path = runner.write_results(cells, output_dir)
+    print(f"\nResults written to: {output_dir}")
+    print(f"README: {readme_path}")
+    _print_repair_summary(cells)
+    return 0
+
+
+def _print_repair_summary(cells) -> None:
+    print("\n=== Repair comparison summary ===")
+    header = (
+        f"{'Bug':<16} {'FL':<8} {'Gen':>4} {'Plaus':>6} {'Corr':>5} "
+        f"{'GenRank':>8} {'RankRank':>9}"
+    )
+    print(header)
+    print("-" * len(header))
+    for cell in cells:
+        bug_label = f"{cell.bug.project}#{cell.bug.bug_id}"
+        if cell.error:
+            short_error = " ".join(
+                part.strip() for part in cell.error.splitlines() if part.strip()
+            )
+            if len(short_error) > 120:
+                short_error = short_error[:120].rstrip() + " …"
+            print(f"{bug_label:<16} {cell.fl_mode:<8} ERROR: {short_error}")
+            continue
+        generation_rank = (
+            str(cell.generation_rank_of_first_correct)
+            if cell.generation_rank_of_first_correct is not None
+            else "-"
+        )
+        ranked_rank = (
+            str(cell.ranked_rank_of_first_correct)
+            if cell.ranked_rank_of_first_correct is not None
+            else "-"
+        )
+        print(
+            f"{bug_label:<16} {cell.fl_mode:<8} {cell.total_candidates_generated:>4} "
+            f"{cell.plausible_count:>6} {cell.correct_count:>5} "
+            f"{generation_rank:>8} {ranked_rank:>9}"
+        )
 
 
 def _build_techniques(make_sbfl, make_mbfl, make_hybrid):
