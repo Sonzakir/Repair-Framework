@@ -605,6 +605,13 @@ def handle_repair(args, adapter, project_root: Path) -> int:
         f"operators={config.enabled_operators}"
     )
 
+    ranker = _build_ranker(args)
+    if ranker is not None:
+        writer.log(f"Patch ranker: {ranker.name}")
+        config_data["ranker"] = ranker.name
+    else:
+        config_data["ranker"] = "none"
+
     runner = RepairEvaluationRunner(
         project_root=project_root,
         runs_dir=runs_dir,
@@ -612,6 +619,8 @@ def handle_repair(args, adapter, project_root: Path) -> int:
         stop_on_first=config.stop_on_first,
         config_data=config_data,
         writer=writer,
+        ranker=ranker,
+        localization_result=localization_result,
     )
     eval_results = runner.run([bug], adapter, algorithm)
     result = eval_results[0]
@@ -636,8 +645,38 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     print(f"Correct:       {metrics.correct_count} patch(es)")
     print(f"1st plausible: {ttfp_str}")
     print(f"Total time:    {metrics.total_wall_clock_seconds:.1f}s")
+    if ranker is not None:
+        rank_str = str(metrics.rank_of_first_correct) if metrics.rank_of_first_correct is not None else "n/a"
+        print(f"Rank of 1st correct (ranked): {rank_str}")
 
     return 0
+
+
+def _build_ranker(args):
+    """Construct a PatchRanker from CLI args, or return None if ranking is disabled."""
+    if args.ranker == "none":
+        return None
+    from apr_framework.repair.ranking import create_ranker
+
+    ranker_kwargs: dict = {}
+    if args.ranker_weights:
+        weight_parts = [part.strip() for part in args.ranker_weights.split(",")]
+        if len(weight_parts) != 3:
+            raise ConfigurationError(
+                "--ranker-weights must be exactly three comma-separated numbers: "
+                "suspiciousness_weight,simplicity_weight,operator_priority_weight"
+            )
+        try:
+            ranker_kwargs = {
+                "suspiciousness_weight": float(weight_parts[0]),
+                "simplicity_weight": float(weight_parts[1]),
+                "operator_priority_weight": float(weight_parts[2]),
+            }
+        except ValueError:
+            raise ConfigurationError(
+                "--ranker-weights values must be numeric (e.g. 0.6,0.25,0.15)"
+            )
+    return create_ranker(args.ranker, **ranker_kwargs)
 
 
 def _run_evaluate_localization(args, project_root: Path, adapter) -> int:

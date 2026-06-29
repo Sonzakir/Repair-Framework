@@ -225,6 +225,7 @@ class RepairRunMetrics:
     correct_count: int = 0
     time_to_first_plausible_seconds: float | None = None
     total_wall_clock_seconds: float = 0.0
+    rank_of_first_correct: int | None = None
 
 
 @dataclass

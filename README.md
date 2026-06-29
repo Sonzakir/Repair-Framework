@@ -641,6 +641,76 @@ and raises a clear error if the bug has no `bug_patch.txt`.
 > wrapper) still yields `correct=0` even with perfect locations. See the design notes
 > in [`docs/assignment3/assignment3_task3_implementation.md`](docs/assignment3/assignment3_task3_implementation.md).
 
+## Patch ranking (Assignment 3 — Task 4)
+
+> A detailed write-up of design decisions and refactoring pointers lives in
+> [`docs/assignment3/assignment3_task4_implementation.md`](docs/assignment3/assignment3_task4_implementation.md).
+
+When a repair run produces more than one plausible patch, the order in which
+patches are shown to a developer matters. Task 4 adds a **patch ranker** that
+reorders plausible patches by a composite score before they appear in the output,
+while keeping the original generation-order list as a baseline so the two orderings
+can be compared.
+
+### Ranking formula
+
+```
+ranking_score = w1 * suspiciousness + w2 * patch_simplicity + w3 * operator_priority
+```
+
+All three components are normalised to `[0, 1]` before weighting. Higher score means
+the patch is surfaced first.
+
+| Component | Source | Rationale |
+|---|---|---|
+| `suspiciousness` | FL score of the targeted line (`patch.metadata["suspiciousness_score"]`), normalised by the max across the plausible batch | The most evidence-based signal — comes from running the actual tests |
+| `patch_simplicity` | `1 − (changed_lines / max_changed_lines)` — a two-line template change scores higher than a multi-line one | Smaller patches overfit less; simpler is more trustworthy |
+| `operator_priority` | Fixed tier per operator key (`obo`=1.0, `comp`=0.9, `bool`=0.7, `negate`=0.6, `arith`=0.5, `return`=0.4) | Off-by-one and comparison bugs are the most common single-statement Python fix patterns |
+
+Default weights: **w1 = 0.6, w2 = 0.25, w3 = 0.15**. These are normalised internally,
+so only relative magnitudes matter — `--ranker-weights 6,2.5,1.5` is identical to
+the defaults.
+
+### CLI
+
+```bash
+# Default: no ranking — generation order, identical to pre-Task-4 behavior
+python -m apr_framework repair --project black --bug 1
+
+# Opt in to ranking with default weights (0.6 / 0.25 / 0.15)
+python -m apr_framework repair --project black --bug 1 --ranker weighted
+
+# Custom weights
+python -m apr_framework repair --project black --bug 1 \
+    --ranker weighted --ranker-weights 0.7,0.2,0.1
+```
+
+When a ranker is active, the CLI summary prints an extra line:
+
+```text
+Rank of 1st correct (ranked): 2
+```
+
+### Output
+
+`repair_results.json` always contains `plausible_patches` in generation order.
+When a ranker is active, it also contains `ranked_plausible_patches` — the same
+patches reordered, each annotated with `rank_position` and per-patch
+`ranking_score` / `ranking_score_components` inside `metadata`.
+`rank_of_first_correct` (1-indexed) appears at both the top level and inside the
+`metrics` block, so Task-5 comparison scripts can read it directly.
+
+### Architecture
+
+The ranker is a fully optional component. `RepairEvaluationRunner` accepts
+`ranker: PatchRanker | None = None` in its constructor. When `None`, the pipeline
+is identical to pre-Task-4 behavior. The `PatchRanker` ABC lives in
+`repair/ranking/base.py`; `WeightedCompositeRanker` is the single current
+implementation. `create_ranker("weighted", ...)` is the factory entry point for
+adding more strategies later.
+
+---
+
 ## Included evaluation artifact
 
 - This repository includes an example completed evaluation run at
@@ -701,9 +771,19 @@ python -m apr_framework bugsinpy setup
 | BugsInPy list projects/bugs | `bugsinpy list-projects`, `bugsinpy list-bugs` |
 | BugsInPy checkout | `bugsinpy checkout` |
 | BugsInPy prepare environment | Safe compilation via `bugsinpy-safe-compile` and internal evaluation setup |
+| BugsInPy run tests | `bugsinpy test` |
+| Structured test results | `TestRunResult` with counts and raw output |
+| FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
+| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard` |
+| Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
+| FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
+| FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
+| FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
 | CLI entry point | `python -m apr_framework` and `apr-framework` script |
 | Dummy repair component | `DummyRepairAlgorithm` |
 | Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` , `*.zip`|
+| Patch ranking | `WeightedCompositeRanker` via `--ranker weighted` (`--ranker-weights` to override) |
+| Rank of first correct patch | `rank_of_first_correct` in `repair_results.json` metrics block |
 
 
 ## Starting the application in clean ubuntu 24.04 Container 
@@ -744,17 +824,6 @@ python -m apr_framework bugsinpy test black 1
 python -m apr_framework bugsinpy evaluate-dummy --seed 123
 ````
 
-| BugsInPy run tests | `bugsinpy test` |
-| Structured test results | `TestRunResult` with counts and raw output |
-| FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
-| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard` |
-| Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
-| FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
-| FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
-| FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
-| CLI entry point | `python -m apr_framework` and `apr-framework` script |
-| Dummy repair component | `DummyRepairAlgorithm` |
-| Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` |
 ---
 
 ## 2 - Commands 

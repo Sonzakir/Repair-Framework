@@ -79,9 +79,22 @@ python -m apr_framework localize --project <project> --bug <bug_id> \
   [--sbfl-weight 0.5] [--mbfl-weight 0.5] [--top-n N]
 
 python -m apr_framework bugsinpy evaluate-dummy --seed 123
+
+# Template-based repair (Task 1–4)
+python -m apr_framework repair --project <project> --bug <bug_id> \
+  [--technique template] [--budget N] [--top-n N] \
+  [--operators arith,comp,obo,bool,negate,return] [--timeout N] \
+  [--stop-on-first] [--no-regression-check] \
+  [--fl-mode auto|perfect] [--fl-family sbfl|mbfl|hybrid] \
+  [--localization-metric ochiai] [--mbfl-metric metallaxis] \
+  [--skip-localize] [--granularity statement|function] \
+  [--ranker weighted|none] [--ranker-weights w1,w2,w3] \
+  [--runs-dir runs]
 ```
 
 `--test-target` is repeatable (`action="append"`); pass it once per pytest target. When `--metric` is omitted for SBFL/MBFL the family default applies; for hybrid runs use `--sbfl-metric`/`--mbfl-metric` instead.
+
+`--ranker none` is the default — no ranking, output identical to pre-Task-4 behavior. `--ranker weighted` opts in to ranking; `--ranker-weights` then overrides the three component weights (suspiciousness, simplicity, operator_priority) — only relative magnitudes matter, they are normalised internally. When ranking is off, `ranked_plausible_patches` is absent (`null`) from the JSON.
 
 ## Architecture
 
@@ -92,7 +105,7 @@ src/apr_framework/
   core/
     models.py        # shared dataclasses: BugIdentifier, CheckoutResult, TestRunResult,
                      # LocalizationResult, RankedLocation, PatchCandidate, RepairAttemptResult,
-                     # EvaluationResult, LocalizationConfig
+                     # EvaluationResult, LocalizationConfig, RepairRunMetrics (incl. rank_of_first_correct)
     exceptions.py    # APRFrameworkError, BenchmarkError, ConfigurationError
   benchmarks/
     base.py          # BenchmarkAdapter ABC (checkout / prepare_environment / run_tests / list_*)
@@ -100,18 +113,36 @@ src/apr_framework/
     registry.py      # create_bugsinpy_adapter(), list_benchmark_names()
   cli/
     parser.py        # argparse grammar (build_parser())
-    app.py           # command dispatch (main())
+    app.py           # command dispatch (main()), _build_ranker()
   localization/
     base.py          # FaultLocalizer ABC
     fauxpy.py        # FauxPyLocalizer, FauxPyConfig, FauxPyToolchain, parse_fauxpy_output,
                      # load_pytest_targets, extract_mbfl_tracking_metadata
     hybrid.py        # HybridFaultLocalizer — weighted normalized merge of SBFL + MBFL rankings
+    perfect.py       # PerfectFaultLocalizer — oracle locations from bug_patch.txt (Task 3)
   repair/
     base.py          # RepairAlgorithm ABC
     dummy.py         # DummyRepairAlgorithm (random ground-truth / no-op)
+    correctness.py   # is_correct_patch — diff-level comparison against developer fix
+    regression.py    # build_regression_context, parse_failing_test_ids — regression half of plausibility
+    run_loop.py      # run_validation_loop — shared budget loop used by runner and algorithm
+    ranking/
+      base.py        # PatchRanker ABC
+      weighted.py    # WeightedCompositeRanker — suspiciousness + simplicity + operator_priority
+      registry.py    # create_ranker() factory
+    template/
+      algorithm.py   # TemplateRepairAlgorithm
+      config.py      # TemplateRepairConfig
+      operators.py   # AST mutation operators (arith, comp, obo, bool, negate, return)
+      patch_generator.py  # generate_patches_for_location — builds PatchCandidate list
+      validator.py   # plausibility check (trigger + regression)
   evaluation/
     base.py          # EvaluationRunner ABC
     dummy_runner.py  # DummyEvaluationRunner — writes runs/run_NNN/{config,results,execution.log}
+    repair_runner.py # RepairEvaluationRunner — drives validation loop, correctness, ranking, JSON output
+    run_writer.py    # RunWriter — manages run_NNN directory, log, JSON writes
+    ground_truth.py  # ground-truth helpers for perfect FL
+    localization_runner.py  # LocalizationComparisonRunner for evaluate-localization
   reporting/
     base.py          # ReportGenerator ABC
     archive.py       # ArchiveReportGenerator — writes report.md summary + zips run artifacts
@@ -136,6 +167,12 @@ Both patches use `replace_once` helpers that are idempotent (safe to re-apply). 
 **`load_pytest_targets`** in `localization/fauxpy.py` converts BugsInPy `run_test.sh` scripts (pytest or `python -m unittest`) into pytest-compatible target strings. It raises `ConfigurationError` for `unittest discover`.
 
 **`FauxPyConfig` metric defaults.** When `--metric` is not supplied, the default is `ochiai` for SBFL and `metallaxis` for MBFL. Validation in `__post_init__` rejects unsupported family/granularity/mutation combinations before any subprocess runs.
+
+**Template-based repair.** `TemplateRepairAlgorithm` uses six AST mutation operators (`arith`, `comp`, `obo`, `bool`, `negate`, `return`) to generate syntactically valid variants at the top-N suspicious locations from FL. Validation applies each variant to the checkout, runs the test suite in the executor container, and restores the file unconditionally. The generate-and-validate loop lives in `run_loop.py` — not inside the algorithm — so it is shared with `RepairEvaluationRunner` and works unchanged with future backends.
+
+**Perfect fault localization.** `PerfectFaultLocalizer` (`localization/perfect.py`) implements `FaultLocalizer` by parsing the developer fix from `bug_patch.txt` instead of running tests. It produces a `LocalizationResult` with `backend="perfect-fl"` that flows into the same repair pipeline. Selected with `--fl-mode perfect`; the `--fl-family` flag is ignored in this mode.
+
+**Patch ranking is optional and non-destructive.** `RepairEvaluationRunner` accepts an optional `ranker: PatchRanker | None`. When provided, it reorders plausible results after the correctness check and writes both orderings into `repair_results.json`: `plausible_patches` (generation order, the baseline) and `ranked_plausible_patches` (ranked order). `rank_of_first_correct` (1-indexed) is stored in `RepairRunMetrics` and emitted at the top level of each bug's JSON payload. The `PatchRanker` ABC lives in `repair/ranking/base.py`; the only current implementation is `WeightedCompositeRanker` (`repair/ranking/weighted.py`), which combines a suspiciousness score, patch simplicity, and operator priority using a configurable weighted sum. Enabled by default with `--ranker weighted`; disabled with `--ranker none`.
 
 ### Directory conventions
 ```

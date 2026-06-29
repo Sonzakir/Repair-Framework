@@ -12,7 +12,7 @@ repair algorithm into a proper *patch-validation pipeline*:
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,7 @@ from apr_framework.core.models import (
     BugIdentifier,
     CheckoutResult,
     EvaluationResult,
+    LocalizationResult,
     RepairAttemptResult,
     RepairRunMetrics,
     RepairStatus,
@@ -32,6 +33,7 @@ from apr_framework.evaluation.run_writer import RunWriter
 from apr_framework.localization.base import FaultLocalizer
 from apr_framework.repair.base import RepairAlgorithm
 from apr_framework.repair.correctness import is_correct_patch
+from apr_framework.repair.ranking.base import PatchRanker
 from apr_framework.repair.run_loop import LoopOutcome, run_validation_loop
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ class _BugRunResult:
     status: RepairStatus
     started_at: datetime
     finished_at: datetime
+    ranked_plausible_results: list[RepairAttemptResult] = field(default_factory=list)
 
 
 class RepairEvaluationRunner(EvaluationRunner):
@@ -74,6 +77,8 @@ class RepairEvaluationRunner(EvaluationRunner):
         stop_on_first: bool = False,
         config_data: dict[str, Any] | None = None,
         writer: RunWriter | None = None,
+        ranker: PatchRanker | None = None,
+        localization_result: LocalizationResult | None = None,
     ) -> None:
         self._project_root = Path(project_root)
         self._runs_dir = self._resolve_runs_dir(runs_dir)
@@ -81,6 +86,8 @@ class RepairEvaluationRunner(EvaluationRunner):
         self._stop_on_first = stop_on_first
         self._config_data = config_data or {}
         self._writer = writer
+        self._ranker = ranker
+        self._localization_result = localization_result
         self._last_run_dir: Path | None = None
 
     @property
@@ -182,6 +189,20 @@ class RepairEvaluationRunner(EvaluationRunner):
                 result.validation_summary += " Matches the developer fix (correct)."
                 correct_count += 1
 
+        # Ranking — reorder plausible patches by the configured heuristic (Task 4).
+        if self._ranker is not None:
+            ranked_plausible_results = self._ranker.rank(
+                outcome.plausible_results, self._localization_result
+            )
+            rank_of_first_correct: int | None = None
+            for rank_position, attempt_result in enumerate(ranked_plausible_results, start=1):
+                if attempt_result.status == RepairStatus.CORRECT:
+                    rank_of_first_correct = rank_position
+                    break
+        else:
+            ranked_plausible_results = outcome.plausible_results
+            rank_of_first_correct = None
+
         metrics = RepairRunMetrics(
             total_candidates_generated=outcome.total_candidates_generated,
             candidates_validated=len(outcome.all_results),
@@ -189,6 +210,7 @@ class RepairEvaluationRunner(EvaluationRunner):
             correct_count=correct_count,
             time_to_first_plausible_seconds=outcome.time_to_first_plausible_seconds,
             total_wall_clock_seconds=outcome.total_wall_clock_seconds,
+            rank_of_first_correct=rank_of_first_correct,
         )
 
         # Overall bug status: correct > plausible > (failed/no_patch from the loop).
@@ -205,6 +227,7 @@ class RepairEvaluationRunner(EvaluationRunner):
             f"plausible={metrics.plausible_count}, correct={metrics.correct_count}, "
             f"ttfp={metrics.time_to_first_plausible_seconds}, "
             f"wall_clock={metrics.total_wall_clock_seconds:.1f}s"
+            + (f", rank_of_first_correct={rank_of_first_correct}" if self._ranker is not None else "")
         )
 
         return _BugRunResult(
@@ -214,6 +237,7 @@ class RepairEvaluationRunner(EvaluationRunner):
             status=status,
             started_at=started_at,
             finished_at=finished_at,
+            ranked_plausible_results=ranked_plausible_results,
         )
 
     # ------------------------------------------------------------------
@@ -237,6 +261,13 @@ class RepairEvaluationRunner(EvaluationRunner):
         plausible_results = bug_result.outcome.plausible_results
         self._write_patch_artifacts(writer, plausible_results)
 
+        ranked_plausible_patches = None
+        if self._ranker is not None:
+            ranked_plausible_patches = [
+                {**self._serialise_result(attempt_result), "rank_position": rank_position}
+                for rank_position, attempt_result in enumerate(bug_result.ranked_plausible_results, start=1)
+            ]
+
         return {
             "project": bug_result.bug.project,
             "bug_id": bug_result.bug.bug_id,
@@ -256,8 +287,11 @@ class RepairEvaluationRunner(EvaluationRunner):
                 "correct_count": bug_result.metrics.correct_count,
                 "time_to_first_plausible_seconds": bug_result.metrics.time_to_first_plausible_seconds,
                 "total_wall_clock_seconds": bug_result.metrics.total_wall_clock_seconds,
+                "rank_of_first_correct": bug_result.metrics.rank_of_first_correct,
             },
             "plausible_patches": [self._serialise_result(attempt_result) for attempt_result in plausible_results],
+            "ranked_plausible_patches": ranked_plausible_patches,
+            "rank_of_first_correct": bug_result.metrics.rank_of_first_correct,
             "all_results": [self._serialise_result(attempt_result) for attempt_result in bug_result.outcome.all_results],
         }
 

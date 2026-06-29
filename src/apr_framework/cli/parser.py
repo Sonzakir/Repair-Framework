@@ -269,5 +269,26 @@ def build_parser() -> argparse.ArgumentParser:
         default="runs",
         help="Directory for run output (default: runs)",
     )
+    repair_parser.add_argument(
+        "--ranker",
+        choices=["weighted", "none"],
+        default="none",
+        help=(
+            "Patch ranking strategy applied to plausible patches after validation. "
+            "'weighted' uses a composite score of suspiciousness, simplicity, and "
+            "operator priority; 'none' preserves generation order (default: none)"
+        ),
+    )
+    repair_parser.add_argument(
+        "--ranker-weights",
+        dest="ranker_weights",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated weights for the weighted ranker: "
+            "suspiciousness_weight,simplicity_weight,operator_priority_weight "
+            "(default: 0.6,0.25,0.15). Only used when --ranker weighted."
+        ),
+    )
 
     return parser
