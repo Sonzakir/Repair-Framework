@@ -435,28 +435,15 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     started_at = datetime.now(timezone.utc)
     writer.log(f"Started template repair for {canonical_project}#{bug_id}")
 
-    enabled_operators = [op.strip() for op in args.operators.split(",") if op.strip()]
-
-    config = TemplateRepairConfig(
-        budget=args.budget,
-        top_n_locations=args.top_n,
-        enabled_operators=enabled_operators,
-        timeout_per_test=args.timeout,
-        stop_on_first=args.stop_on_first,
-        regression_check=args.regression_check,
-    )
-
+    # Common config fields shared by all repair techniques
     config_data = {
-        "runner": "template-repair",
         "project": canonical_project,
         "bug_id": bug_id,
         "technique": args.technique,
-        "budget": config.budget,
-        "top_n_locations": config.top_n_locations,
-        "enabled_operators": config.enabled_operators,
-        "timeout_per_test": config.timeout_per_test,
-        "stop_on_first": config.stop_on_first,
-        "regression_check": config.regression_check,
+        "budget": args.budget,
+        "top_n_locations": args.top_n,
+        "stop_on_first": args.stop_on_first,
+        "regression_check": args.regression_check,
         "fl_mode": args.fl_mode,
         "fl_backend": "oracle" if args.fl_mode == "perfect" else args.fl_family,
         "fl_family": args.fl_family,
@@ -466,6 +453,34 @@ def handle_repair(args, adapter, project_root: Path) -> int:
         "skip_localize": args.skip_localize,
         "started_at": started_at.isoformat(),
     }
+
+    if args.technique == "template":
+        enabled_operators = [op.strip() for op in args.operators.split(",") if op.strip()]
+        template_repair_config = TemplateRepairConfig(
+            budget=args.budget,
+            top_n_locations=args.top_n,
+            enabled_operators=enabled_operators,
+            timeout_per_test=args.timeout,
+            stop_on_first=args.stop_on_first,
+            regression_check=args.regression_check,
+        )
+        config_data.update({
+            "runner": "template-repair",
+            "enabled_operators": template_repair_config.enabled_operators,
+            "timeout_per_test": template_repair_config.timeout_per_test,
+        })
+    elif args.technique == "llm":
+        config_data.update({
+            "runner": "llm-repair",
+            "model": args.model,
+            "temperature": args.temperature,
+            "max_candidates": args.max_candidates,
+            "llm_provider": args.llm_provider,
+            "timeout_seconds": args.timeout,
+        })
+    else:
+        raise ConfigurationError(f"Unknown repair technique: {args.technique!r}")
+
     writer.write_json("config.json", config_data)
 
     # -- Localization --
@@ -597,16 +612,25 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     # validation metrics, and writes repair_results.json + patch artifacts.
     from apr_framework.evaluation.repair_runner import RepairEvaluationRunner
 
-    algorithm = TemplateRepairAlgorithm(
-        localization_result=localization_result,
-        adapter=adapter,
-        config=config,
-    )
-
-    writer.log(
-        f"Repair started: budget={config.budget}, top_n={config.top_n_locations}, "
-        f"operators={config.enabled_operators}"
-    )
+    if args.technique == "template":
+        algorithm = TemplateRepairAlgorithm(
+            localization_result=localization_result,
+            adapter=adapter,
+            config=template_repair_config,
+        )
+        writer.log(
+            f"Repair started: budget={args.budget}, top_n={args.top_n}, "
+            f"operators={template_repair_config.enabled_operators}"
+        )
+    elif args.technique == "llm":
+        algorithm = _build_llm_algorithm(args, localization_result, adapter)
+        writer.log(
+            f"Repair started: budget={args.budget}, top_n={args.top_n}, "
+            f"model={args.model}, temperature={args.temperature}, "
+            f"max_candidates={args.max_candidates}"
+        )
+    else:
+        raise ConfigurationError(f"Unknown repair technique: {args.technique!r}")
 
     ranker = _build_ranker(args)
     if ranker is not None:
@@ -618,8 +642,8 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     runner = RepairEvaluationRunner(
         project_root=project_root,
         runs_dir=runs_dir,
-        budget=config.budget,
-        stop_on_first=config.stop_on_first,
+        budget=args.budget,
+        stop_on_first=args.stop_on_first,
         config_data=config_data,
         writer=writer,
         ranker=ranker,
@@ -680,6 +704,36 @@ def _build_ranker(args):
                 "--ranker-weights values must be numeric (e.g. 0.6,0.25,0.15)"
             )
     return create_ranker(args.ranker, **ranker_kwargs)
+
+
+def _build_llm_algorithm(args, localization_result, adapter):
+    """Construct an LLMRepairAlgorithm from CLI arguments."""
+    from apr_framework.repair.llm import (
+        LLMRepairAlgorithm,
+        LLMRepairConfig,
+        OpenAICompatibleClient,
+    )
+
+    repair_config = LLMRepairConfig(
+        model_name=args.model,
+        temperature=args.temperature,
+        max_patch_count=args.max_candidates,
+        top_n_locations=args.top_n,
+        llm_provider=args.llm_provider,
+        base_url=args.llm_base_url,
+        api_key_env_var=args.llm_api_key_env,
+        timeout_seconds=args.timeout,
+        budget=args.budget,
+        stop_on_first=args.stop_on_first,
+        regression_check=args.regression_check,
+    )
+    llm_client = OpenAICompatibleClient(repair_config)
+    return LLMRepairAlgorithm(
+        localization_result=localization_result,
+        adapter=adapter,
+        repair_config=repair_config,
+        llm_client=llm_client,
+    )
 
 
 def _run_evaluate_localization(args, project_root: Path, adapter) -> int:

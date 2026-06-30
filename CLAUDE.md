@@ -80,7 +80,7 @@ python -m apr_framework localize --project <project> --bug <bug_id> \
 
 python -m apr_framework bugsinpy evaluate-dummy --seed 123
 
-# Template-based repair (Task 1–4)
+# Template-based repair (Assignment 3)
 python -m apr_framework repair --project <project> --bug <bug_id> \
   [--technique template] [--budget N] [--top-n N] \
   [--operators arith,comp,obo,bool,negate,return] [--timeout N] \
@@ -88,6 +88,20 @@ python -m apr_framework repair --project <project> --bug <bug_id> \
   [--fl-mode auto|perfect] [--fl-family sbfl|mbfl|hybrid] \
   [--localization-metric ochiai] [--mbfl-metric metallaxis] \
   [--skip-localize] [--granularity statement|function] \
+  [--ranker weighted|none] [--ranker-weights w1,w2,w3] \
+  [--runs-dir runs]
+
+# LLM-based repair (Assignment 4)
+# Requires: export GPT_AT_RUB_API_KEY="<key>"
+python -m apr_framework repair --project <project> --bug <bug_id> \
+  --technique llm \
+  [--model codestral-22b] [--temperature 0.8] [--max-candidates 5] \
+  [--llm-provider openai-compatible] [--llm-base-url <url>] \
+  [--llm-api-key-env GPT_AT_RUB_API_KEY] \
+  [--budget N] [--top-n N] [--timeout N] \
+  [--stop-on-first] [--no-regression-check] \
+  [--fl-mode auto|perfect] [--fl-family sbfl|mbfl|hybrid] \
+  [--localization-metric ochiai] [--mbfl-metric metallaxis] \
   [--ranker weighted|none] [--ranker-weights w1,w2,w3] \
   [--runs-dir runs]
 
@@ -102,6 +116,8 @@ python -m apr_framework bugsinpy evaluate-repair \
 `--test-target` is repeatable (`action="append"`); pass it once per pytest target. When `--metric` is omitted for SBFL/MBFL the family default applies; for hybrid runs use `--sbfl-metric`/`--mbfl-metric` instead.
 
 `--ranker none` is the default — no ranking, output identical to pre-Task-4 behavior. `--ranker weighted` opts in to ranking; `--ranker-weights` then overrides the three component weights (suspiciousness, simplicity, operator_priority) — only relative magnitudes matter, they are normalised internally. When ranking is off, `ranked_plausible_patches` is absent (`null`) from the JSON.
+
+For `--technique llm`: `--operators` and `--skip-localize` are ignored (LLM backend generates free-form patches, not AST mutations). All other shared flags (`--budget`, `--top-n`, `--fl-mode`, `--fl-family`, `--ranker`, etc.) behave identically. LLM-specific flags (`--model`, `--temperature`, `--max-candidates`, `--llm-base-url`, `--llm-api-key-env`) are silently ignored when `--technique template` is selected.
 
 ## Architecture
 
@@ -143,6 +159,13 @@ src/apr_framework/
       operators.py   # AST mutation operators (arith, comp, obo, bool, negate, return)
       patch_generator.py  # generate_patches_for_location — builds PatchCandidate list
       validator.py   # plausibility check (trigger + regression)
+    llm/
+      algorithm.py   # LLMRepairAlgorithm — implements RepairAlgorithm ABC
+      client.py      # LLMClient ABC + OpenAICompatibleClient (GPT@RUB / OpenAI API)
+      config.py      # LLMRepairConfig — model, temperature, max_patch_count, top_n_locations, etc.
+      patch_extractor.py  # extract_patch_from_llm_response — fence extraction, syntax check, unified diff
+      prompt_builder.py   # build_repair_prompt, extract_function_source — system+user message construction
+    patch_applier.py # apply_patch_and_validate — shared try/finally helper used by LLM (and future) backends
   evaluation/
     base.py          # EvaluationRunner ABC
     dummy_runner.py  # DummyEvaluationRunner — writes runs/run_NNN/{config,results,execution.log}
@@ -183,6 +206,8 @@ Both patches use `replace_once` helpers that are idempotent (safe to re-apply). 
 **Patch ranking is optional and non-destructive.** `RepairEvaluationRunner` accepts an optional `ranker: PatchRanker | None`. When provided, it reorders plausible results after the correctness check and writes both orderings into `repair_results.json`: `plausible_patches` (generation order, the baseline) and `ranked_plausible_patches` (ranked order). `rank_of_first_correct` (1-indexed) is stored in `RepairRunMetrics` and emitted at the top level of each bug's JSON payload. The `PatchRanker` ABC lives in `repair/ranking/base.py`; the only current implementation is `WeightedCompositeRanker` (`repair/ranking/weighted.py`), which combines a suspiciousness score, patch simplicity, and operator priority using a configurable weighted sum. Enabled by default with `--ranker weighted`; disabled with `--ranker none`.
 
 **Repair evaluation matrix (Task 5).** `bugsinpy evaluate-repair` runs the full repair pipeline on a set of bugs under both `auto` and `perfect` FL with the ranker applied, then writes an aggregated `experiment_results/repair/{results.json,README.md}` (per-bug tables, aggregate, generated discussion). `RepairComparisonRunner` (`evaluation/repair_comparison_runner.py`) only orchestrates the matrix and aggregates — each (bug, FL mode) cell is executed by the existing `RepairEvaluationRunner` and gets its own `runs/run_NNN` directory (logs + patch diffs preserved as artifacts). A localization failure for one cell (e.g. FauxPy uninstallable on a bug's Python) is captured as an error cell rather than aborting the matrix. This mirrors the `evaluate-localization` / `LocalizationComparisonRunner` pattern.
+
+**LLM-based repair (Assignment 4).** `LLMRepairAlgorithm` (`repair/llm/algorithm.py`) implements the `RepairAlgorithm` ABC and plugs into the same `run_validation_loop` / `RepairEvaluationRunner` pipeline as the template backend. The algorithm iterates over the top-N FL locations, calls `extract_function_source` to isolate the enclosing function (with a ±25-line window fallback), builds a structured system + user prompt via `build_repair_prompt`, and samples up to `max_patch_count` candidate patches from the LLM. `extract_patch_from_llm_response` finds a fenced code block in the response, validates its syntax with `ast.parse`, splices the replacement into the original file lines, and produces a `unified_diff` with absolute paths as `fromfile`/`tofile`. Validation uses `subprocess.run(["patch", "-p0"], ...)` (absolute paths require `-p0`, not `-p1`) inside the shared `apply_patch_and_validate` helper (`repair/patch_applier.py`), which guarantees file restoration in a `try/finally` block regardless of test outcome. `OpenAICompatibleClient` (`repair/llm/client.py`) reads the API key from the environment at call time and uses `stream=False` (GPT@RUB does not support streaming). Selected via `--technique llm`; the client is constructed in `_build_llm_algorithm` in `cli/app.py`.
 
 ### Directory conventions
 ```

@@ -1,0 +1,65 @@
+"""Configuration dataclass for the LLM-based repair algorithm."""
+
+from dataclasses import dataclass
+
+from apr_framework.core.exceptions import ConfigurationError
+
+_VALID_LLM_PROVIDERS: frozenset[str] = frozenset({"openai-compatible"})
+
+
+@dataclass
+class LLMRepairConfig:
+    """Configuration for LLMRepairAlgorithm.
+
+    Fields:
+        model_name:       LLM model identifier sent to the API (e.g. "codestral-22b").
+        temperature:      Sampling temperature in [0.0, 2.0].
+        max_patch_count:  Number of LLM completion calls per suspicious location.
+        top_n_locations:  How many top-ranked FL locations to attempt repair on.
+        llm_provider:     Client implementation to use (currently "openai-compatible").
+        base_url:         API endpoint URL. None → use GPT_AT_RUB_DEFAULT_BASE_URL.
+        api_key_env_var:  Name of the environment variable holding the API key.
+        timeout_seconds:  Wall-clock seconds allowed per test-suite invocation.
+        iterative:        Task 3 hook — must stay False for Task 1 (loop not yet implemented).
+        max_iterations:   Max conversation turns for the iterative loop (Task 3).
+        budget:           Max patch validations before halting (mirrors TemplateRepairConfig).
+        stop_on_first:    Stop after first plausible patch.
+        regression_check: Whether to run the regression half of plausibility.
+    """
+
+    model_name: str
+    temperature: float = 0.8
+    max_patch_count: int = 5
+    top_n_locations: int = 3
+    llm_provider: str = "openai-compatible"
+    base_url: str | None = None
+    api_key_env_var: str = "GPT_AT_RUB_API_KEY"
+    timeout_seconds: int = 120
+    # Task 3 hook — overriding repair() for iterative mode is not implemented yet
+    iterative: bool = False
+    max_iterations: int = 5
+    # Repair-loop control (mirrors TemplateRepairConfig)
+    budget: int = 200
+    stop_on_first: bool = False
+    regression_check: bool = True
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.temperature <= 2.0):
+            raise ConfigurationError(
+                f"temperature must be in [0.0, 2.0], got {self.temperature}"
+            )
+        if self.max_patch_count < 1:
+            raise ConfigurationError(
+                f"max_patch_count must be >= 1, got {self.max_patch_count}"
+            )
+        if self.top_n_locations < 1:
+            raise ConfigurationError(
+                f"top_n_locations must be >= 1, got {self.top_n_locations}"
+            )
+        if self.llm_provider not in _VALID_LLM_PROVIDERS:
+            raise ConfigurationError(
+                f"Unknown llm_provider {self.llm_provider!r}. "
+                f"Valid options: {sorted(_VALID_LLM_PROVIDERS)}"
+            )
+        if self.budget < 1:
+            raise ConfigurationError(f"budget must be >= 1, got {self.budget}")

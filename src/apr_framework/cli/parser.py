@@ -244,9 +244,49 @@ def build_parser() -> argparse.ArgumentParser:
     repair_parser.add_argument("--bug", type=int, required=True, help="Bug ID")
     repair_parser.add_argument(
         "--technique",
-        choices=["template"],
+        choices=["template", "llm"],
         default="template",
-        help="Repair technique (default: template)",
+        help="Repair technique: 'template' for AST mutation, 'llm' for LLM-based repair (default: template)",
+    )
+    repair_parser.add_argument(
+        "--llm-provider",
+        dest="llm_provider",
+        type=str,
+        default="openai-compatible",
+        help="LLM client implementation to use (default: openai-compatible)",
+    )
+    repair_parser.add_argument(
+        "--model",
+        type=str,
+        default="codestral-22b",
+        help="LLM model name sent to the API (default: codestral-22b)",
+    )
+    repair_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.8,
+        help="LLM sampling temperature in [0.0, 2.0] (default: 0.8)",
+    )
+    repair_parser.add_argument(
+        "--max-candidates",
+        dest="max_candidates",
+        type=int,
+        default=5,
+        help="Max LLM patch candidates generated per suspicious location (default: 5)",
+    )
+    repair_parser.add_argument(
+        "--llm-base-url",
+        dest="llm_base_url",
+        type=str,
+        default=None,
+        help="Override the LLM API endpoint URL (default: GPT@RUB endpoint)",
+    )
+    repair_parser.add_argument(
+        "--llm-api-key-env",
+        dest="llm_api_key_env",
+        type=str,
+        default="GPT_AT_RUB_API_KEY",
+        help="Environment variable name holding the LLM API key (default: GPT_AT_RUB_API_KEY)",
     )
     repair_parser.add_argument(
         "--budget",

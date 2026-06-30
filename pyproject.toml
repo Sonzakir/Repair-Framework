@@ -15,7 +15,9 @@ classifiers = [
     "Development Status :: 3 - Alpha" ,
     "Programming Language :: Python"
 ]
-dependencies = []
+dependencies = [
+    "openai>=1.0.0",
+]
 
 [project.urls]
 Repository = "https://github.com/rub-sq-teaching-repair-2026/repair-framework-Sonzakir.git"

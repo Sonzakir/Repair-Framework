@@ -501,6 +501,190 @@ Ranked locations:
 
 
 
+## Template-Based Repair
+
+Apply AST mutation operators to the top-N suspicious locations identified by
+fault localization.
+
+### Perfect FL (oracle locations from developer fix)
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique template \
+  --fl-mode perfect \
+  --budget 200 --top-n 5
+```
+
+### Automated SBFL FL
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique template \
+  --fl-mode auto --fl-family sbfl --localization-metric ochiai \
+  --budget 200 --top-n 5
+```
+
+### Select mutation operators
+
+Pass a comma-separated subset of `arith,comp,obo,bool,negate,return`:
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique template \
+  --fl-mode perfect \
+  --operators comp,obo,negate \
+  --budget 100 --top-n 3
+```
+
+### Enable patch ranking
+
+Rank plausible patches by a composite score of suspiciousness, patch
+simplicity, and operator priority instead of preserving generation order:
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique template --fl-mode perfect \
+  --ranker weighted
+```
+
+Override component weights (suspiciousness : simplicity : operator_priority):
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique template --fl-mode perfect \
+  --ranker weighted --ranker-weights 0.7,0.2,0.1
+```
+
+### Stop on first plausible patch
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique template --fl-mode perfect \
+  --stop-on-first
+```
+
+Run artifacts are written to:
+
+```text
+runs/run_###/config.json
+runs/run_###/results.json
+runs/run_###/execution.log
+```
+
+## LLM-Based Repair
+
+Use an LLM to generate candidate patches for the top-N suspicious locations.
+The framework calls a GPT@RUB-compatible OpenAI API endpoint.
+
+### Prerequisites
+
+Export the API key before running any LLM repair command:
+
+```bash
+export GPT_AT_RUB_API_KEY="your-api-key-here"
+```
+
+The key is read at call time from the environment variable named by
+`--llm-api-key-env` (default: `GPT_AT_RUB_API_KEY`).
+
+### Perfect FL (oracle locations)
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm \
+  --fl-mode perfect \
+  --model codestral-22b \
+  --max-candidates 5 --top-n 3 --budget 200
+```
+
+### Automated SBFL FL
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm \
+  --fl-mode auto --fl-family sbfl --localization-metric ochiai \
+  --model codestral-22b \
+  --max-candidates 5 --top-n 5 --budget 200
+```
+
+### Adjust temperature
+
+Higher temperature increases output diversity; lower values make responses more
+deterministic. Valid range: `[0.0, 2.0]`.
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm --fl-mode perfect \
+  --temperature 1.0 --max-candidates 10
+```
+
+### Use a different model
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm --fl-mode perfect \
+  --model gpt-4o
+```
+
+### Override the API endpoint
+
+Point the client at any OpenAI-compatible endpoint:
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm --fl-mode perfect \
+  --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY
+```
+
+### LLM repair flag reference
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--technique llm` | — | Selects the LLM repair backend |
+| `--model` | `codestral-22b` | Model name sent to the API |
+| `--temperature` | `0.8` | Sampling temperature `[0.0, 2.0]` |
+| `--max-candidates` | `5` | Patch candidates generated per suspicious location |
+| `--llm-provider` | `openai-compatible` | Client implementation to use |
+| `--llm-base-url` | GPT@RUB endpoint | Override the API base URL |
+| `--llm-api-key-env` | `GPT_AT_RUB_API_KEY` | Env-var name holding the API key |
+
+Flags shared with template repair (`--budget`, `--top-n`, `--stop-on-first`,
+`--no-regression-check`, `--fl-mode`, `--fl-family`, `--localization-metric`,
+`--ranker`, `--runs-dir`) work identically for both techniques.
+
+### Typical end-to-end LLM repair flow
+
+```bash
+# 1. One-time setup (builds Docker images, starts executor container)
+python -m apr_framework bugsinpy setup
+
+# 2. Prepare the bug
+python -m apr_framework bugsinpy checkout black 1
+python -m apr_framework bugsinpy compile black 1
+
+# 3. Export API key
+export GPT_AT_RUB_API_KEY="your-api-key-here"
+
+# 4. Run LLM repair with perfect FL
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm \
+  --fl-mode perfect \
+  --model codestral-22b \
+  --max-candidates 5 --top-n 3 --budget 100
+
+# 5. Run LLM repair with automated SBFL FL
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm \
+  --fl-mode auto --fl-family sbfl --localization-metric ochiai \
+  --src black.py \
+  --model codestral-22b \
+  --max-candidates 5 --top-n 5 --budget 200
+```
+
+Run artifacts (config, patch diffs, results JSON, execution log) are written to
+`runs/run_###/` as with template repair.
+
 ## Hybrid SBFL + MBFL 
 - The typical command and the output looks as follows
 ```bash
