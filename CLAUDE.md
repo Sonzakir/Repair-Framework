@@ -151,22 +151,17 @@ src/apr_framework/
       validator.py   # plausibility check (trigger + regression)
   evaluation/
     base.py          # EvaluationRunner ABC
-    dummy_runner.py  # DummyEvaluationRunner — writes runs/run_NNN/{config,results,execution.log}
+    run_writer.py    # RunWriter — creates runs/run_NNN/, writes config.json/results.json/execution.log;
+                     # serialize_localization_result() converts LocalizationResult to JSON-safe dict
+    dummy_runner.py  # DummyEvaluationRunner — full APR pipeline with checkout/compile/repair/test
     repair_runner.py # RepairEvaluationRunner — drives validation loop, correctness, ranking, JSON output
-    run_writer.py    # RunWriter — manages run_NNN directory, log, JSON writes
-    ground_truth.py  # ground-truth helpers for perfect FL
-    localization_runner.py  # LocalizationComparisonRunner for evaluate-localization
-    repair_comparison_runner.py  # RepairComparisonRunner (Task 5) — drives bug x FL-mode repair matrix, aggregates results.json + README.md
-    base.py               # EvaluationRunner ABC
-    run_writer.py         # RunWriter — creates runs/run_NNN/, writes config.json/results.json/execution.log;
-                          # serialize_localization_result() converts LocalizationResult to JSON-safe dict
-    dummy_runner.py       # DummyEvaluationRunner — full APR pipeline with checkout/compile/repair/test
-    ground_truth.py       # GroundTruthLine, parse_bug_patch (parses bug_patch.txt diff → deleted lines),
-                          # find_faulty_rank (lowest rank of any ground-truth line in a ranking),
-                          # in_top_k, _files_match (flexible relative-path comparison)
+    ground_truth.py  # GroundTruthLine, parse_bug_patch (parses bug_patch.txt diff → deleted lines),
+                     # find_faulty_rank (lowest rank of any ground-truth line in a ranking),
+                     # in_top_k, _files_match (flexible relative-path comparison)
     localization_runner.py  # LocalizationComparisonRunner — runs N techniques × M bugs, scores each
                             # against ground truth, writes results.json + README.md;
                             # LocalizationTechniqueResult holds ranked_locations + top_k_hits per run
+    repair_comparison_runner.py  # RepairComparisonRunner (Task 5) — drives bug x FL-mode repair matrix, aggregates results.json + README.md
   reporting/
     base.py          # ReportGenerator ABC
     archive.py       # ArchiveReportGenerator — writes report.md summary + zips run artifacts
