@@ -74,12 +74,15 @@ class BenchmarkAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def run_tests(self, checkout: CheckoutResult) -> TestRunResult:
+    def run_tests(
+        self, checkout: CheckoutResult, timeout: float | None = None
+    ) -> TestRunResult:
         """
         Run tests for a checked-out bug and return structured results.
 
         Args:
             checkout: Prepared checkout to test.
+            timeout: Optional wall-clock limit (seconds) for the test command.
 
         Returns:
             Test results and raw command output for the checkout.
