@@ -2,8 +2,6 @@
 
 Comparison of SBFL (baseline), MBFL (baseline), and extension techniques (custom SBFL metrics: Jaccard, WSBI; Hybrid SBFL+MBFL) on BugsInPy bugs.
 
-Generated: 2026-06-27 19:42 UTC
-
 
 ## fastapi bug #3
 
