@@ -1,8 +1,6 @@
 # Failed Experiment Report: black:1, black:3, black:7
 
-**Status:** FAILED — Results are not scientifically meaningful; do not use as artifact.
-
-**Date:** 2026-06-27
+**Status:** FAILED — An example of the failed experiments on used bugs in dummy evaluation
 
 ---
 
@@ -12,7 +10,7 @@ Ran FauxPy 0.7.0 inside Docker for three BugsInPy bugs from the `black` Python f
 (`black:1`, `black:3`, `black:7`) to compare five SBFL metrics, two MBFL variants, and
 the Hybrid technique against ground-truth faulty lines.
 
-Results were real (produced by actual FauxPy runs inside Docker), but the bug selection
+Results were real (produced by actual FauxPy runs inside Docker(sibling)), but the bug selection
 was fatally wrong. See `results.json` and `README.md` for the raw data.
 
 ---
@@ -50,9 +48,6 @@ formula irrelevant.
 
 ### Root Cause 2: Mutation-Inadequate Test Suites (MBFL gives 0 rankings)
 
-FauxPy MBFL generates mutants for the covered statements and validates them by running
-the test suite on each mutant. A mutant is "killed" only when a test changes outcome
-(passing → failing, or failing → passing).
 
 For all three black bugs, **every generated mutant survived the test suite**:
 
@@ -85,78 +80,3 @@ test); line 397 was not among them. `faulty_rank = null`.
 
 ---
 
-## What a Correct Experiment Requires
-
-### SBFL: Multiple Failing Tests
-
-SBFL formulae only differentiate suspicion scores when statements are covered by
-**different subsets of the failing tests**. With a single failing test per bug:
-- `ef ∈ {0, 1}` for every statement
-- Ochiai and all other formulae reduce to a binary covered/not-covered indicator
-- All covered statements tie at the maximum score
-
-**Minimum requirement:** Bugs whose `run_test.sh` lists ≥ 2 failing tests that exercise
-different code paths within the faulty module.
-
-### MBFL: Mutation-Adequate Test Suites
-
-MBFL can only locate faults where mutations *change test outcomes*. The ideal fault:
-- Is in a **function called directly by the failing tests**
-- Involves arithmetic, comparison, or boolean logic that mutation operators can change
-- Has tests that **check the return value or observable side-effect** of the faulty call
-
-Bugs in string parsing with no direct value assertion, or bugs in decorator/class-level
-metadata, are generally mutation-inadequate.
-
-### Identified Replacement Candidates
-
-The following BugsInPy bugs meet both requirements:
-
-| Bug | # Failing tests | Fault type | Why MBFL should work |
-|---|---|---|---|
-| `fastapi:3` | 8 | Missing recursive serialization for nested lists/dicts | Tests directly check JSON response body; `exclude_unset`/`by_alias` conditions are mutation-eligible |
-| `fastapi:6` | 3 | `field.shape in sequence_shapes` missing `or field.type_ in sequence_types` | Boolean operator mutation (`or`→`and`) directly changes which fields are treated as sequences |
-| `fastapi:11` | 6 | `is_scalar_field` not checking `field.sub_fields` | Multiple tests cover Union body types; early-return condition is mutation-eligible |
-
-All three use Python 3.8.3 (compatible with FauxPy 0.7.0), pure pytest, and have no
-binary dependencies (unlike pandas/numpy or keras/tensorflow).
-
----
-
-## Command to Reproduce the Failed Results
-
-```bash
-# These commands reproduce the failed evaluation (real FauxPy results, wrong bug selection)
-docker compose build
-docker compose run --rm apr-framework python -m apr_framework bugsinpy setup
-python -m apr_framework bugsinpy compile black 1
-python -m apr_framework bugsinpy compile black 3
-python -m apr_framework bugsinpy compile black 7
-python -m apr_framework bugsinpy evaluate-localization \
-    --bugs "black:1,black:3,black:7" \
-    --budget 50 --traditional-budget 200 --seed 42 \
-    --granularity statement --output-dir experiment_results
-```
-
-The results in `results.json` and `README.md` were produced by exactly this sequence.
-
----
-
-## Lessons Learned
-
-1. **Check run_test.sh before selecting bugs.** Any bug with exactly one entry in
-   `run_test.sh` is a poor SBFL benchmark unless the full project test suite is also run
-   as `test_targets`, providing passing tests that share code with the faulty function.
-
-2. **Check the fault type before running MBFL.** Module-level faults (decorator args,
-   class attributes), string-content bugs, and infrastructure bugs (process spawning,
-   file locking) are unlikely to be mutation-adequate with standard mutation operators.
-
-3. **Avoid all-formatter-style projects.** Code formatters like `black` have large
-   monolithic files and test suites where each bug test is a single input/output check.
-   The high-level "format this code" assertion is insensitive to most mutations.
-
-4. **Prefer modular API projects.** Projects like fastapi, where each failing test
-   exercises a specific endpoint/response-model path, give SBFL real differentiation
-   (8 tests cover different response shapes) and MBFL real signal (mutations to the
-   serialization condition change response values that tests directly assert).

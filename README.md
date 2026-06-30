@@ -290,7 +290,7 @@ python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi --wsb
 ```
 
 Implementation note: FauxPy normally computes Tarantula, Ochiai, and DStar for
-SBFL. The framework adds Jaccard (a known literature metric) and WSBI (a custom
+SBFL. The framework adds Jaccard and WSBI (a custom
 weighted metric) by patching the installed FauxPy copy in the bug checkout's
 virtual environment before running localization. The patch adds `MetricJaccard`
 and `MetricWSBI` formulas, registers them with FauxPy's SBFL metric list,
@@ -377,81 +377,11 @@ only to the MBFL half of the hybrid run.
 - See `USAGE.md` for a compact command reference with the same runnable command
 examples.
 
-## Dummy repair evaluation
-
-- Currently the project support Dummy Repair components
-
-- `DummyRepairAlgorithm`
-- `DummyEvaluationRunner`
-- default bugs:
-  - `bugsinpy:black:1`
-  - `bugsinpy:black:3`
-  - `bugsinpy:black:23`
-
-- The dummy repair algorithm randomly chooses one of two outcomes for each
-supported bug:
-  - use the BugsInPy ground-truth patch from `bug_patch.txt`
-  - keep the original buggy code unchanged
-
-- Run the evaluation:
-  - The seed controls the dummy repair algorithm's randomness, making Python's random choices deterministic and reproducible.
-
-```bash
-python -m apr_framework bugsinpy evaluate-dummy --seed 123
-```
-
-- The runner creates the next available run directory:
-  - Example xxx'th evaluation 
-
-```text
-runs/
-  run_xxx/
-    config.json
-    results.json
-    execution.log
-```
-
-- `config.json` stores the runner, repair algorithm, benchmark, seed, timestamp,
-and selected bugs. 
-- `results.json` stores one structured entry per bug with
-baseline tests, final tests, selected patch metadata, patch-apply output, and
-status. 
-- `execution.log` records the step-by-step execution timeline.
-
-- After the run, the `ReportGenerator` implementation `ArchiveReportGenerator`
-(`src/apr_framework/reporting/archive.py`) renders a human-readable `report.md`
-summary into the run directory and bundles all run artifacts into a single
-`runs/run_xxx.zip` archive. The archive path is printed at the end of the run.
-
-## Included evaluation artifact
-
-- This repository includes an example completed evaluation run at
-`runs/run_004`.
-
-- Configuration:
-
-```text
-runner: dummy-evaluation-runner
-repair: dummy-repair
-benchmark: bugsinpy
-seed: 123
-bugs: black 1, black 3, black 23
-```
-
-Result summary:
-
-| Bug | Dummy choice | Baseline | Final | Status |
-| --- | --- | --- | --- | --- |
-| `black 1` | ground-truth patch | 0 passing, 1 failing | 1 passing, 0 failing | `correct` |
-| `black 3` | original unchanged | 0 passing, 1 failing | 0 passing, 1 failing | `no_patch` |
-| `black 23` | ground-truth patch | 0 passing, 1 failing | 1 passing, 0 failing | `correct` |
-
-The result demonstrates both branches required by the assignment: successful
-ground-truth repair and unchanged/no-patch behavior.
 
 
 
-## Experiment Results (Task 5 Evaluation)
+
+## Experiment Results (Evaluation)
 
 The framework was evaluated on three real BugsInPy bugs: **fastapi#3**, **fastapi#6**, and **luigi#33**. All 8 techniques were compared against the ground-truth faulty line from each bug's patch. Full results are in [`experiment_results/README.md`](experiment_results/README.md).
 
@@ -489,23 +419,7 @@ The framework was evaluated on three real BugsInPy bugs: **fastapi#3**, **fastap
 
 **WSBI degenerates on luigi#33** (rank 191, same as Tarantula). Luigi#33 has no passing tests — when `ep = 0`, WSBI and SBI both assign score `1.0` to every executed line with no differentiation. Ochiai (`sqrt(ef/F)`) preserves a gradient across the four failing tests and correctly ranks the faulty line at 11. This is an honest limitation of the WSBI metric and motivates future work on handling the zero-passing-test edge case.
 
-### Running the evaluation
 
-```bash
-# Checkout and compile the three bugs first
-for proj_bug in "fastapi 3" "fastapi 6" "luigi 33"; do
-  set -- $proj_bug
-  python -m apr_framework bugsinpy checkout $1 $2
-  python -m apr_framework bugsinpy compile $1 $2
-done
-
-# Run all 8 techniques, write to experiment_results/
-python -m apr_framework bugsinpy evaluate-localization \
-    --bugs "fastapi:3,fastapi:6,luigi:33" \
-    --budget 50 --seed 42 \
-    --granularity statement \
-    --output-dir experiment_results
-```
 
 ## Troubleshooting
 
