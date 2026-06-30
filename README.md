@@ -32,6 +32,12 @@
   - parsing all FauxPy metric tables for later reuse
 - Generalized FauxPy output parser that supports both `File | Line | Score`
 and `File | Function | Line | Score` table formats
+- **Custom SBFL metric extensions** (patched into FauxPy 0.7.0 at runtime):
+  - **Jaccard** — set-intersection scoring: `ef / (ef + ep + fn)`
+  - **WSBI (Weighted SBI)** — novel custom metric: `ef / (ef + alpha × ep)` with configurable `alpha` (default `0.5`). Reduces to plain SBI at `alpha=1`; smaller alpha makes the metric more aggressive by discounting passing-test coverage
+- **Hybrid SBFL+MBFL localizer** — min-max normalises and combines scores from both families with configurable weights; locations found by both backends receive a tiebreak bonus
+- **MBFL random-budget extension** — caps expensive mutant validation at `--budget N` mutants using random selection, making MBFL practical on large projects
+- **`evaluate-localization` command** — runs all 8 techniques (5 SBFL, 2 MBFL, 1 Hybrid) on a configurable set of BugsInPy bugs, ranks the ground-truth faulty line for each, and writes `experiment_results/results.json` and `experiment_results/README.md`
 - Dummy repair algorithm for three BugsInPy `black` bugs (1/3/23)
 - Dummy evaluation runner that creates structured run artifacts:
   - `config.json`
@@ -112,7 +118,7 @@ objects instead of parsing FauxPy output directly.
 - **FauxPy metrics are reusable.** The configured metric is used as the primary
 ranking shown by the CLI, and every metric table parsed from FauxPy output is
 stored in `metadata["all_metrics"]`. This keeps Tarantula, Ochiai, DStar,
-Jaccard, SBI, and other emitted tables available for later repair or reporting
+Jaccard, WSBI, and other emitted tables available for later repair or reporting
 components.
 
 ## Requirements
@@ -262,21 +268,49 @@ python -m apr_framework localize --project PySnooper --bug 1 --src pysnooper
 python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai
 ```
 
-Jaccard and SBI are available for SBFL runs through the framework's FauxPy 0.7.0
+Jaccard and WSBI are available for SBFL runs through the framework's FauxPy 0.7.0
 patch, which is applied inside the prepared checkout environment before localization:
 
 ```bash
 python -m apr_framework localize --project PySnooper --bug 1 --metric jaccard
-python -m apr_framework localize --project PySnooper --bug 1 --metric sbi
+python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi
+```
+
+- Use `--wsbi-alpha` to control the passing-test weight (default: `0.5`):
+
+```bash
+# Default alpha=0.5: passing tests count half as much as failing tests
+python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi
+
+# alpha=1.0 reduces to plain SBI (equal weight)
+python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi --wsbi-alpha 1.0
+
+# alpha=0.25 further discounts passing-test coverage
+python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi --wsbi-alpha 0.25
 ```
 
 Implementation note: FauxPy normally computes Tarantula, Ochiai, and DStar for
-SBFL. The framework adds Jaccard and SBI by patching the installed FauxPy copy
-in the bug checkout's virtual environment before running localization. The patch
-adds `MetricJaccard` and `MetricSBI` formulas, registers them with FauxPy's
-SBFL metric list, extends FauxPy's local SQLite score table, and lets the
-existing output parser select the emitted `Scores for Jaccard` or
-`Scores for SBI` tables with `--metric`.
+SBFL. The framework adds Jaccard and WSBI (a custom
+weighted metric) by patching the installed FauxPy copy in the bug checkout's
+virtual environment before running localization. The patch adds `MetricJaccard`
+and `MetricWSBI` formulas, registers them with FauxPy's SBFL metric list,
+extends FauxPy's local SQLite score table, and lets the existing output parser
+select the emitted `Scores for Jaccard` or `Scores for WSBI` tables with
+`--metric`.
+
+**WSBI — Weighted SBI (custom metric):** Unlike standard SBI (`ef / (ef + ep)`),
+the framework's WSBI uses a weighted denominator:
+
+```
+score = ef / (ef + alpha * ep)    where alpha ∈ (0, 1], default 0.5
+```
+
+The intuition is that a passing test covering a statement is weaker evidence
+of innocence than a failing test is evidence of guilt. With `alpha = 0.5`,
+passing tests count half as much as failing tests — making the metric more
+sensitive to failing-test coverage while still penalizing statements that are
+also covered by many passing tests. Setting `alpha = 1` recovers plain SBI;
+smaller values of alpha make the metric increasingly aggressive.
 
 - Limit the number of ranked locations printed:
 
@@ -343,51 +377,15 @@ only to the MBFL half of the hybrid run.
 - See `USAGE.md` for a compact command reference with the same runnable command
 examples.
 
-## Dummy repair evaluation
 
-- Currently the project support Dummy Repair components
 
-- `DummyRepairAlgorithm`
-- `DummyEvaluationRunner`
-- default bugs:
-  - `bugsinpy:black:1`
-  - `bugsinpy:black:3`
-  - `bugsinpy:black:23`
 
-- The dummy repair algorithm randomly chooses one of two outcomes for each
-supported bug:
-  - use the BugsInPy ground-truth patch from `bug_patch.txt`
-  - keep the original buggy code unchanged
 
-- Run the evaluation:
-  - The seed controls the dummy repair algorithm's randomness, making Python's random choices deterministic and reproducible.
+## Experiment Results (Evaluation)
 
-```bash
-python -m apr_framework bugsinpy evaluate-dummy --seed 123
-```
+The framework was evaluated on three real BugsInPy bugs: **fastapi#3**, **fastapi#6**, and **luigi#33**. All 8 techniques were compared against the ground-truth faulty line from each bug's patch. Full results are in [`experiment_results/README.md`](experiment_results/README.md).
 
-- The runner creates the next available run directory:
-  - Example xxx'th evaluation 
-
-```text
-runs/
-  run_xxx/
-    config.json
-    results.json
-    execution.log
-```
-
-- `config.json` stores the runner, repair algorithm, benchmark, seed, timestamp,
-and selected bugs. 
-- `results.json` stores one structured entry per bug with
-baseline tests, final tests, selected patch metadata, patch-apply output, and
-status. 
-- `execution.log` records the step-by-step execution timeline.
-
-- After the run, the `ReportGenerator` implementation `ArchiveReportGenerator`
-(`src/apr_framework/reporting/archive.py`) renders a human-readable `report.md`
-summary into the run directory and bundles all run artifacts into a single
-`runs/run_xxx.zip` archive. The archive path is printed at the end of the run.
+### Summary table
 
 ## Template-based APR repair (Assignment 3 — Task 1)
 
@@ -712,30 +710,37 @@ adding more strategies later.
 ---
 
 ## Included evaluation artifact
+| Bug | Technique | Type | Rank | Top-10 |
+|---|---|---|---|---|
+| fastapi#3 | SBFL-Ochiai | baseline | 8 | ✓ |
+| fastapi#3 | SBFL-Tarantula | baseline | 11 | ✗ |
+| fastapi#3 | SBFL-DStar | baseline | 8 | ✓ |
+| fastapi#3 | SBFL-Jaccard | **extension** | 8 | ✓ |
+| fastapi#3 | SBFL-WSBI | **extension** | 11 | ✗ |
+| fastapi#3 | MBFL-Metallaxis | baseline | 18 | ✗ |
+| fastapi#3 | MBFL-Metallaxis-Random | **extension** | 11 | ✗ |
+| fastapi#3 | Hybrid SBFL+MBFL | **extension** | 11 | ✗ |
+| fastapi#6 | SBFL-Ochiai | baseline | 82 | ✗ |
+| fastapi#6 | SBFL-DStar | baseline | 82 | ✗ |
+| fastapi#6 | SBFL-Jaccard | **extension** | 82 | ✗ |
+| fastapi#6 | MBFL-Metallaxis | baseline | 6 | ✓ |
+| fastapi#6 | MBFL-Metallaxis-Random | **extension** | — | ✗ |
+| fastapi#6 | **Hybrid SBFL+MBFL** | **extension** | **3** | **✓ (top-5)** |
+| luigi#33 | SBFL-Ochiai | baseline | 11 | ✗ |
+| luigi#33 | SBFL-Tarantula | baseline | 191 | ✗ |
+| luigi#33 | SBFL-DStar | baseline | 11 | ✗ |
+| luigi#33 | SBFL-Jaccard | **extension** | 11 | ✗ |
+| luigi#33 | SBFL-WSBI | **extension** | 191 | ✗ |
+| luigi#33 | MBFL-Metallaxis | baseline | — | ✗ |
+| luigi#33 | Hybrid SBFL+MBFL | **extension** | 26 | ✗ |
 
-- This repository includes an example completed evaluation run at
-`runs/run_004`.
+### Key findings
 
-- Configuration:
+**Jaccard (extension) matches the best SBFL baseline on fastapi#3.** Ochiai, D*, and Jaccard all rank the faulty line at position 8. Tarantula and WSBI fall to rank 11, showing that formula choice matters.
 
-```text
-runner: dummy-evaluation-runner
-repair: dummy-repair
-benchmark: bugsinpy
-seed: 123
-bugs: black 1, black 3, black 23
-```
+**Hybrid reaches rank 3 on fastapi#6** — the only technique to enter the top 5. SBFL alone is stuck at rank 82 for this bug; MBFL alone reaches rank 6. Combining both via the weighted hybrid further improves to rank 3, demonstrating the value of the extension.
 
-Result summary:
-
-| Bug | Dummy choice | Baseline | Final | Status |
-| --- | --- | --- | --- | --- |
-| `black 1` | ground-truth patch | 0 passing, 1 failing | 1 passing, 0 failing | `correct` |
-| `black 3` | original unchanged | 0 passing, 1 failing | 0 passing, 1 failing | `no_patch` |
-| `black 23` | ground-truth patch | 0 passing, 1 failing | 1 passing, 0 failing | `correct` |
-
-The result demonstrates both branches required by the assignment: successful
-ground-truth repair and unchanged/no-patch behavior.
+**WSBI degenerates on luigi#33** (rank 191, same as Tarantula). Luigi#33 has no passing tests — when `ep = 0`, WSBI and SBI both assign score `1.0` to every executed line with no differentiation. Ochiai (`sqrt(ef/F)`) preserves a gradient across the four failing tests and correctly ranks the faulty line at 11. This is an honest limitation of the WSBI metric and motivates future work on handling the zero-passing-test edge case.
 
 
 
@@ -824,7 +829,26 @@ python -m apr_framework bugsinpy test black 1
 python -m apr_framework bugsinpy evaluate-dummy --seed 123
 ````
 
----
+## Quick Reference Table
+
+| Feature | Implementation |
+| --- | --- |
+| BugsInPy run tests | `bugsinpy test` |
+| Structured test results | `TestRunResult` with counts and raw output |
+| FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
+| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard`, `localize --metric wsbi --wsbi-alpha 0.5` |
+| Custom SBFL metrics | Jaccard and WSBI (Weighted SBI) added via runtime patch to FauxPy 0.7.0 |
+| WSBI configurable alpha | `localize --metric wsbi --wsbi-alpha 0.5` (default); range (0, 1] |
+| Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
+| MBFL random-budget extension | `localize --mbfl --mutation-strategy random --budget 50` |
+| Multi-technique evaluation | `bugsinpy evaluate-localization --bugs "fastapi:3,fastapi:6,luigi:33"` |
+| Evaluation output | `experiment_results/results.json` and `experiment_results/README.md` |
+| FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
+| FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
+| FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
+| CLI entry point | `python -m apr_framework` and `apr-framework` script |
+| Dummy repair component | `DummyRepairAlgorithm` |
+| Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` |
 
 ## 2 - Commands 
 

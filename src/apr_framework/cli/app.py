@@ -169,13 +169,14 @@ def _run() -> int:
                 src=src,
                 test_targets=test_targets,
                 family=family,
-                granularity=args.granularity, 
+                granularity=args.granularity,
                 failing_tests=failing_tests,
                 top_n=args.top_n,
-                mutation_strategy = args.mutation_strategy, 
-                mutation_budget = args.mutation_budget , 
+                mutation_strategy=args.mutation_strategy,
+                mutation_budget=args.mutation_budget,
                 mutation_seed=args.seed,
-                metric = metric
+                metric=metric,
+                wsbi_alpha=args.wsbi_alpha,
             )
             localizer = FauxPyLocalizer(config, fauxpy_toolchain)
 
@@ -743,7 +744,29 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
             fauxpy_toolchain,
         )
 
+    def _make_mbfl_traditional(bug: BugIdentifier) -> FauxPyLocalizer:
+        """True stock FauxPy MBFL baseline —> exhaustive mutation, no budget cap.
+
+        No mutation_strategy or mutation_budget means FauxPy runs all generated
+        mutants, which is the stock behaviour of FauxPy 0.7.0
+        """
+        bug_dir = patch_dir(bug)
+        test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        test_ids = [t for t in test_targets if not t.startswith("-")]
+        return FauxPyLocalizer(
+            FauxPyConfig(
+                src=_src(bug),
+                test_targets=test_targets,
+                family="mbfl",
+                granularity=granularity,
+                failing_tests=test_ids,
+                metric="metallaxis",
+            ),
+            fauxpy_toolchain,
+        )
+
     def _make_mbfl(bug: BugIdentifier) -> FauxPyLocalizer:
+        """MBFL with random mutation-budget extension """
         bug_dir = patch_dir(bug)
         test_targets = load_pytest_targets(bug_dir / "run_test.sh")
         test_ids = [t for t in test_targets if not t.startswith("-")]
@@ -790,7 +813,7 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
             FauxPyLocalizer(mbfl_cfg, fauxpy_toolchain),
         )
 
-    techniques = _build_techniques(_make_sbfl, _make_mbfl, _make_hybrid)
+    techniques = _build_techniques(_make_sbfl, _make_mbfl_traditional, _make_mbfl, _make_hybrid)
 
     runner = LocalizationComparisonRunner(top_ks=top_ks)
 
@@ -1019,6 +1042,18 @@ def _print_repair_summary(cells) -> None:
 
 def _build_techniques(make_sbfl, make_mbfl, make_hybrid):
     """Return (name, per-bug-localizer) pairs for all techniques."""
+def _build_techniques(make_sbfl, make_mbfl_traditional, make_mbfl, make_hybrid):
+    """Return (name, per-bug-localizer) pairs for all techniques.
+
+    Baselines are stock FauxPy 0.7.0 behaviour:
+      - SBFL: Ochiai, Tarantula, D*
+      - MBFL: Metallaxis with traditional (exhaustive) mutation strategy
+
+    Extensions added by this framework:
+      - SBFL: Jaccard (literature), WSBI (custom weighted metric via in-place FauxPy patch)
+      - MBFL: Metallaxis with random mutation-budget selection (Task 3)
+      - Hybrid: normalised weighted merge of SBFL + MBFL scores (Task 4)
+    """
 
     class _BugLocalizer:
         def __init__(self, factory):
@@ -1028,13 +1063,14 @@ def _build_techniques(make_sbfl, make_mbfl, make_hybrid):
             return self._factory(bug).localize(bug, checkout, test_result)
 
     return [
-        ("SBFL-Ochiai (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "ochiai"))),
-        ("SBFL-Tarantula (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "tarantula"))),
-        ("SBFL-DStar (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "dstar"))),
-        ("SBFL-Jaccard (extension)", _BugLocalizer(lambda bug: make_sbfl(bug, "jaccard"))),
-        ("SBFL-SBI (extension)", _BugLocalizer(lambda bug: make_sbfl(bug, "sbi"))),
-        ("MBFL-Metallaxis (baseline)", _BugLocalizer(make_mbfl)),
-        ("Hybrid SBFL+MBFL (extension)", _BugLocalizer(make_hybrid)),
+        ("SBFL-Ochiai (baseline)",            _BugLocalizer(lambda bug: make_sbfl(bug, "ochiai"))),
+        ("SBFL-Tarantula (baseline)",          _BugLocalizer(lambda bug: make_sbfl(bug, "tarantula"))),
+        ("SBFL-DStar (baseline)",              _BugLocalizer(lambda bug: make_sbfl(bug, "dstar"))),
+        ("SBFL-Jaccard (extension)",           _BugLocalizer(lambda bug: make_sbfl(bug, "jaccard"))),
+        ("SBFL-WSBI (extension)",              _BugLocalizer(lambda bug: make_sbfl(bug, "wsbi"))),
+        ("MBFL-Metallaxis (baseline)",         _BugLocalizer(make_mbfl_traditional)),
+        ("MBFL-Metallaxis-Random (extension)", _BugLocalizer(make_mbfl)),
+        ("Hybrid SBFL+MBFL (extension)",       _BugLocalizer(make_hybrid)),
     ]
 
 
@@ -1101,9 +1137,13 @@ def _validate_localize_args(args, family: str) -> None:
 
 
 def _infer_fauxpy_src(worktree: Path, project: str) -> str:
+    """
+    Helper function to find --src (source code) of the project to give the FauxPy
+    """
+    # Convert project names to Python package style 
     package_name = project.replace("-", "_")
 
-    # Enumerate real names to handle case-sensitive filesystems inside Docker.
+    # Enumerate real names to handle case-sensitive filesystems inside Docker
     try:
         entries = {e.name: e for e in worktree.iterdir()}
     except OSError:
@@ -1151,5 +1191,3 @@ def _parse_fauxpy_test_targets_command(values: list[str] | None) -> list[str]:
     for value in values:
         targets.extend(item.strip() for item in value.split(",") if item.strip())
     return targets
-
-
