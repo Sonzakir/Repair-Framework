@@ -18,764 +18,13 @@ from apr_framework.localization.base import FaultLocalizer
 
 FAUXPY_INSTALL_REQUIREMENT = "fauxpy==0.7.0"
 
-_FAUXPY_SBFL_METRICS_PATCH_SCRIPT = r"""
-from importlib.util import find_spec
-from pathlib import Path
-
-spec = find_spec("fauxpy")
-if spec is None or spec.origin is None:
-    raise SystemExit("Cannot patch FauxPy because the fauxpy package is not importable.")
-
-package_root = Path(spec.origin).parent
-sbfl_root = package_root / "fault_localization" / "sbfl"
-
-
-def read(path):
-    return path.read_text(encoding="utf-8")
-
-
-def write(path, text):
-    path.write_text(text, encoding="utf-8")
-
-
-def replace_once(text, old, new, label, marker=None):
-    if (marker is not None and marker in text) or new in text:
-        return text
-    if old not in text:
-        raise SystemExit(f"Cannot apply FauxPy SBFL metric patch: expected {label} was not found.")
-    return text.replace(old, new, 1)
-
-
-metric_path = sbfl_root / "metric_jaccard.py"
-write(
-    metric_path,
-    '''class MetricJaccard:
-    def __init__(self, epsilon: float):
-        self._metric_name = \"Jaccard\"
-        self._epsilon = epsilon
-
-    def get_metric_name(self):
-        return self._metric_name
-
-    def compute(self, ef, ep, nf, np):
-        score = float(ef) / (ef + ep + nf + self._epsilon)
-        return score
-''',
-)
-
-metric_path = sbfl_root / "metric_sbi.py"
-write(
-    metric_path,
-    '''class MetricSBI:
-    def __init__(self, epsilon: float):
-        self._metric_name = \"SBI\"
-        self._epsilon = epsilon
-
-    def get_metric_name(self):
-        return self._metric_name
-
-    def compute(self, ef, ep, nf, np):
-        total = ef + ep
-        if total == 0:
-            return 0.0
-        score = float(ef) / total
-        return score
-''',
-)
-
-ranking_path = sbfl_root / "ranking_metric_manager.py"
-ranking_text = read(ranking_path)
-ranking_text = replace_once(
-    ranking_text,
-    "from fauxpy.fault_localization.sbfl.metric_dstar import MetricDstar\n",
-    "from fauxpy.fault_localization.sbfl.metric_dstar import MetricDstar\n"
-    "from fauxpy.fault_localization.sbfl.metric_jaccard import MetricJaccard\n",
-    "ranking metric imports",
-    "from fauxpy.fault_localization.sbfl.metric_jaccard import MetricJaccard\n",
-)
-ranking_text = replace_once(
-    ranking_text,
-    "from fauxpy.fault_localization.sbfl.metric_jaccard import MetricJaccard\n",
-    "from fauxpy.fault_localization.sbfl.metric_jaccard import MetricJaccard\n"
-    "from fauxpy.fault_localization.sbfl.metric_sbi import MetricSBI\n",
-    "ranking SBI metric import",
-)
-ranking_text = replace_once(
-    ranking_text,
-    "            MetricDstar(self.EPSILON),\n        ]",
-    "            MetricDstar(self.EPSILON),\n"
-    "            MetricJaccard(self.EPSILON),\n"
-    "        ]",
-    "ranking metric list",
-    "            MetricJaccard(self.EPSILON),\n",
-)
-ranking_text = replace_once(
-    ranking_text,
-    "            MetricJaccard(self.EPSILON),\n",
-    "            MetricJaccard(self.EPSILON),\n"
-    "            MetricSBI(self.EPSILON),\n",
-    "ranking SBI metric list",
-)
-write(ranking_path, ranking_text)
-
-db_path = sbfl_root / "db_manager.py"
-db_text = read(db_path)
-db_text = replace_once(
-    db_text,
-    '            f"Dstar REAL NOT NULL);"\n',
-    '            f"Dstar REAL NOT NULL, "\n'
-    '            f"Jaccard REAL NOT NULL);"\n',
-    "score table schema",
-    '            f"Jaccard REAL NOT NULL',
-)
-db_text = replace_once(
-    db_text,
-    '            f"Jaccard REAL NOT NULL);"\n',
-    '            f"Jaccard REAL NOT NULL, "\n'
-    '            f"SBI REAL NOT NULL);"\n',
-    "SBI score table schema",
-)
-db_text = replace_once(
-    db_text,
-    '        score_dstar_table_index_command = (\n'
-    '            f"CREATE INDEX index_Dstar ON {self._Score_table} (Dstar);"\n'
-    '        )\n',
-    '        score_dstar_table_index_command = (\n'
-    '            f"CREATE INDEX index_Dstar ON {self._Score_table} (Dstar);"\n'
-    '        )\n'
-    '\n'
-    '        score_jaccard_table_index_command = (\n'
-    '            f"CREATE INDEX index_Jaccard ON {self._Score_table} (Jaccard);"\n'
-    '        )\n',
-    "score indexes",
-    "score_jaccard_table_index_command",
-)
-db_text = replace_once(
-    db_text,
-    '        score_jaccard_table_index_command = (\n'
-    '            f"CREATE INDEX index_Jaccard ON {self._Score_table} (Jaccard);"\n'
-    '        )\n',
-    '        score_jaccard_table_index_command = (\n'
-    '            f"CREATE INDEX index_Jaccard ON {self._Score_table} (Jaccard);"\n'
-    '        )\n'
-    '\n'
-    '        score_sbi_table_index_command = (\n'
-    '            f"CREATE INDEX index_SBI ON {self._Score_table} (SBI);"\n'
-    '        )\n',
-    "SBI score index",
-)
-db_text = replace_once(
-    db_text,
-    "            score_dstar_table_index_command,\n"
-    "            view_create_command,\n",
-    "            score_dstar_table_index_command,\n"
-    "            score_jaccard_table_index_command,\n"
-    "            view_create_command,\n",
-    "schema command list",
-    "            score_jaccard_table_index_command,\n",
-)
-db_text = replace_once(
-    db_text,
-    "            score_jaccard_table_index_command,\n"
-    "            view_create_command,\n",
-    "            score_jaccard_table_index_command,\n"
-    "            score_sbi_table_index_command,\n"
-    "            view_create_command,\n",
-    "SBI schema command list",
-)
-db_text = replace_once(
-    db_text,
-    '            f"VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?)",\n',
-    '            f"VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",\n',
-    "score insert placeholders",
-    '            f"VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?',
-)
-db_text = replace_once(
-    db_text,
-    '            f"VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",\n',
-    '            f"VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",\n',
-    "SBI score insert placeholders",
-)
-db_text = replace_once(
-    db_text,
-    '                scores["Dstar"],\n'
-    "            ),\n",
-    '                scores["Dstar"],\n'
-    '                scores["Jaccard"],\n'
-    "            ),\n",
-    "score insert values",
-    '                scores["Jaccard"],\n',
-)
-db_text = replace_once(
-    db_text,
-    '                scores["Jaccard"],\n'
-    "            ),\n",
-    '                scores["Jaccard"],\n'
-    '                scores["SBI"],\n'
-    "            ),\n",
-    "SBI score insert values",
-)
-db_text = replace_once(
-    db_text,
-    '        cur.execute(\n'
-    '            f"SELECT Entity, Dstar FROM {self._Score_table} ORDER BY Dstar DESC LIMIT ?",\n'
-    '            (top_n,),\n'
-    '        )\n'
-    '        score_dstar = cur.fetchall()\n'
-    '\n'
-    '        ranked_entities = {\n'
-    '            "Tarantula": score_tarantula,\n'
-    '            "Ochiai": score_ochiai,\n'
-    '            "Dstar": score_dstar,\n'
-    '        }\n',
-    '        cur.execute(\n'
-    '            f"SELECT Entity, Dstar FROM {self._Score_table} ORDER BY Dstar DESC LIMIT ?",\n'
-    '            (top_n,),\n'
-    '        )\n'
-    '        score_dstar = cur.fetchall()\n'
-    '\n'
-    '        cur.execute(\n'
-    '            f"SELECT Entity, Jaccard FROM {self._Score_table} ORDER BY Jaccard DESC LIMIT ?",\n'
-    '            (top_n,),\n'
-    '        )\n'
-    '        score_jaccard = cur.fetchall()\n'
-    '\n'
-    '        ranked_entities = {\n'
-    '            "Tarantula": score_tarantula,\n'
-    '            "Ochiai": score_ochiai,\n'
-    '            "Dstar": score_dstar,\n'
-    '            "Jaccard": score_jaccard,\n'
-    '        }\n',
-    "top-n Jaccard query",
-    '            f"SELECT Entity, Jaccard FROM {self._Score_table} ORDER BY Jaccard DESC LIMIT ?",\n',
-)
-db_text = replace_once(
-    db_text,
-    '        cur.execute(\n'
-    '            f"SELECT Entity, Jaccard FROM {self._Score_table} ORDER BY Jaccard DESC LIMIT ?",\n'
-    '            (top_n,),\n'
-    '        )\n'
-    '        score_jaccard = cur.fetchall()\n'
-    '\n'
-    '        ranked_entities = {\n'
-    '            "Tarantula": score_tarantula,\n'
-    '            "Ochiai": score_ochiai,\n'
-    '            "Dstar": score_dstar,\n'
-    '            "Jaccard": score_jaccard,\n'
-    '        }\n',
-    '        cur.execute(\n'
-    '            f"SELECT Entity, Jaccard FROM {self._Score_table} ORDER BY Jaccard DESC LIMIT ?",\n'
-    '            (top_n,),\n'
-    '        )\n'
-    '        score_jaccard = cur.fetchall()\n'
-    '\n'
-    '        cur.execute(\n'
-    '            f"SELECT Entity, SBI FROM {self._Score_table} ORDER BY SBI DESC LIMIT ?",\n'
-    '            (top_n,),\n'
-    '        )\n'
-    '        score_sbi = cur.fetchall()\n'
-    '\n'
-    '        ranked_entities = {\n'
-    '            "Tarantula": score_tarantula,\n'
-    '            "Ochiai": score_ochiai,\n'
-    '            "Dstar": score_dstar,\n'
-    '            "Jaccard": score_jaccard,\n'
-    '            "SBI": score_sbi,\n'
-    '        }\n',
-    "top-n SBI query",
-)
-db_text = replace_once(
-    db_text,
-    '        cur.execute(\n'
-    '            f"SELECT Entity, Dstar FROM {self._Score_table} ORDER BY Dstar DESC"\n'
-    '        )\n'
-    '        score_dstar = cur.fetchall()\n'
-    '\n'
-    '        ranked_entities = {\n'
-    '            "Tarantula": score_tarantula,\n'
-    '            "Ochiai": score_ochiai,\n'
-    '            "Dstar": score_dstar,\n'
-    '        }\n',
-    '        cur.execute(\n'
-    '            f"SELECT Entity, Dstar FROM {self._Score_table} ORDER BY Dstar DESC"\n'
-    '        )\n'
-    '        score_dstar = cur.fetchall()\n'
-    '\n'
-    '        cur.execute(\n'
-    '            f"SELECT Entity, Jaccard FROM {self._Score_table} ORDER BY Jaccard DESC"\n'
-    '        )\n'
-    '        score_jaccard = cur.fetchall()\n'
-    '\n'
-    '        ranked_entities = {\n'
-    '            "Tarantula": score_tarantula,\n'
-    '            "Ochiai": score_ochiai,\n'
-    '            "Dstar": score_dstar,\n'
-    '            "Jaccard": score_jaccard,\n'
-    '        }\n',
-    "all-ranks Jaccard query",
-    '            f"SELECT Entity, Jaccard FROM {self._Score_table} ORDER BY Jaccard DESC"\n',
-)
-db_text = replace_once(
-    db_text,
-    '        cur.execute(\n'
-    '            f"SELECT Entity, Jaccard FROM {self._Score_table} ORDER BY Jaccard DESC"\n'
-    '        )\n'
-    '        score_jaccard = cur.fetchall()\n'
-    '\n'
-    '        ranked_entities = {\n'
-    '            "Tarantula": score_tarantula,\n'
-    '            "Ochiai": score_ochiai,\n'
-    '            "Dstar": score_dstar,\n'
-    '            "Jaccard": score_jaccard,\n'
-    '        }\n',
-    '        cur.execute(\n'
-    '            f"SELECT Entity, Jaccard FROM {self._Score_table} ORDER BY Jaccard DESC"\n'
-    '        )\n'
-    '        score_jaccard = cur.fetchall()\n'
-    '\n'
-    '        cur.execute(\n'
-    '            f"SELECT Entity, SBI FROM {self._Score_table} ORDER BY SBI DESC"\n'
-    '        )\n'
-    '        score_sbi = cur.fetchall()\n'
-    '\n'
-    '        ranked_entities = {\n'
-    '            "Tarantula": score_tarantula,\n'
-    '            "Ochiai": score_ochiai,\n'
-    '            "Dstar": score_dstar,\n'
-    '            "Jaccard": score_jaccard,\n'
-    '            "SBI": score_sbi,\n'
-    '        }\n',
-    "all-ranks SBI query",
-)
-write(db_path, db_text)
-print("FauxPy SBFL metric patch applied.")
-"""
-
-_FAUXPY_MBFL_SELECTION_PATCH_SCRIPT = r"""
-from importlib.util import find_spec
-from pathlib import Path
-
-spec = find_spec("fauxpy")
-if spec is None or spec.origin is None:
-    raise SystemExit("Cannot patch FauxPy because the fauxpy package is not importable.")
-
-package_root = Path(spec.origin).parent
-
-
-def read(path):
-    return path.read_text(encoding="utf-8")
-
-
-def write(path, text):
-    path.write_text(text, encoding="utf-8")
-
-
-def replace_once(text, old, new, label):
-    if new in text:
-        return text
-    if old not in text:
-        raise SystemExit(f"Cannot apply FauxPy MBFL selection patch: expected {label} was not found.")
-    return text.replace(old, new, 1)
-
-
-pytest_manager_path = package_root / "command_line" / "pytest_mode" / "pytest_option_manager.py"
-pytest_text = read(pytest_manager_path)
-pytest_text = replace_once(
-    pytest_text,
-    '''        group.addoption(
-            "--fauxpy-verbose",
-            action="store_true",
-            default=False,
-            help="Show detailed output from FauxPy plugin.",
-        )
-''',
-    '''        group.addoption(
-            "--fauxpy-verbose",
-            action="store_true",
-            default=False,
-            help="Show detailed output from FauxPy plugin.",
-        )
-        group.addoption(
-            "--mutation-selection",
-            default=None,
-            help="Select a framework-level MBFL mutation selection strategy.",
-        )
-        group.addoption(
-            "--mutation-budget",
-            default=None,
-            help="Maximum number of mutants to validate for selected MBFL strategies.",
-        )
-        group.addoption(
-            "--mutation-seed",
-            default="0",
-            help="Random seed used by framework-level MBFL mutation selection.",
-        )
-''',
-    "pytest MBFL selection options",
-)
-pytest_text = replace_once(
-    pytest_text,
-    '''        fauxpy_verbose_opt = pytest_config.getoption("--fauxpy-verbose")
-        file_or_dir = pytest_config.getoption("file_or_dir")
-''',
-    '''        fauxpy_verbose_opt = pytest_config.getoption("--fauxpy-verbose")
-        mutation_selection_opt = pytest_config.getoption("--mutation-selection")
-        mutation_budget_opt = pytest_config.getoption("--mutation-budget")
-        mutation_seed_opt = pytest_config.getoption("--mutation-seed")
-        file_or_dir = pytest_config.getoption("file_or_dir")
-''',
-    "pytest MBFL selection option reads",
-)
-pytest_text = replace_once(
-    pytest_text,
-    '''            fauxpy_verbose_opt,
-            file_or_dir,
-        )
-''',
-    '''            fauxpy_verbose_opt,
-            file_or_dir,
-            mutation_selection_opt,
-            mutation_budget_opt,
-            mutation_seed_opt,
-        )
-''',
-    "pytest MBFL selection constructor args",
-)
-write(pytest_manager_path, pytest_text)
-
-fl_option_manager_path = package_root / "command_line" / "pytest_mode" / "fl_option_manager.py"
-fl_text = read(fl_option_manager_path)
-fl_text = replace_once(
-    fl_text,
-    '''        fauxpy_verbose_opt: bool,
-        file_or_dir,
-    ):
-''',
-    '''        fauxpy_verbose_opt: bool,
-        file_or_dir,
-        mutation_selection_opt: str,
-        mutation_budget_opt: str,
-        mutation_seed_opt: str,
-    ):
-''',
-    "FlOptionManager MBFL selection signature",
-)
-fl_text = replace_once(
-    fl_text,
-    '''        self._file_or_dir_opt = file_or_dir
-        self._path_manager = FlPathManager(
-''',
-    '''        self._file_or_dir_opt = file_or_dir
-        self._mutation_selection = mutation_selection_opt
-        self._mutation_budget = mutation_budget_opt
-        self._mutation_seed = mutation_seed_opt
-        self._path_manager = FlPathManager(
-''',
-    "FlOptionManager MBFL selection fields",
-)
-fl_text = replace_once(
-    fl_text,
-    '''                self._file_or_dir_opt,
-                report_directory_path,
-                Path(self._project_working_directory.get_absolute()),
-            )
-''',
-    '''                self._file_or_dir_opt,
-                report_directory_path,
-                Path(self._project_working_directory.get_absolute()),
-                self._mutation_selection,
-                self._mutation_budget,
-                self._mutation_seed,
-            )
-''',
-    "MbflSession MBFL selection args",
-)
-write(fl_option_manager_path, fl_text)
-
-mbfl_session_path = package_root / "fault_localization" / "mbfl" / "session_lib.py"
-mbfl_session_text = read(mbfl_session_path)
-mbfl_session_text = replace_once(
-    mbfl_session_text,
-    '''        file_or_dir,
-        report_directory_path: Path,
-        project_working_directory: Path,
-    ):
-''',
-    '''        file_or_dir,
-        report_directory_path: Path,
-        project_working_directory: Path,
-        mutation_selection: str = None,
-        mutation_budget: str = None,
-        mutation_seed: str = "0",
-    ):
-''',
-    "MbflSession MBFL selection signature",
-)
-mbfl_session_text = replace_once(
-    mbfl_session_text,
-    '''        self._mutation_manager = MutationManager(self._db_manager, self._mutation_strategy)
-''',
-    '''        self._mutation_manager = MutationManager(
-            self._db_manager,
-            self._mutation_strategy,
-            mutation_selection,
-            mutation_budget,
-            mutation_seed,
-        )
-''',
-    "MutationManager MBFL selection args",
-)
-write(mbfl_session_path, mbfl_session_text)
-
-mutation_manager_path = package_root / "fault_localization" / "mbfl" / "mutation_manager.py"
-mutation_text = read(mutation_manager_path)
-mutation_text = replace_once(
-    mutation_text,
-    '''import logging
-from pathlib import Path
-''',
-    '''import logging
-import random
-import time
-from pathlib import Path
-''',
-    "MutationManager imports",
-)
-mutation_text = replace_once(
-    mutation_text,
-    '''    def __init__(
-            self,
-            db_manager: MbflDbManager,
-            mutation_strategy: MutationStrategy
-    ):
-''',
-    '''    def __init__(
-            self,
-            db_manager: MbflDbManager,
-            mutation_strategy: MutationStrategy,
-            mutation_selection: str = None,
-            mutation_budget: str = None,
-            mutation_seed: str = "0",
-    ):
-''',
-    "MutationManager signature",
-)
-mutation_text = replace_once(
-    mutation_text,
-    '''        self._db_manager = db_manager
-        self._mutation_strategy = mutation_strategy
-''',
-    '''        self._db_manager = db_manager
-        self._mutation_strategy = mutation_strategy
-        self._mutation_selection = mutation_selection
-        self._mutation_budget = int(mutation_budget) if mutation_budget not in [None, ""] else None
-        self._mutation_seed = int(mutation_seed or 0)
-''',
-    "MutationManager fields",
-)
-cosmic_ray_path = package_root / "fault_localization" / "mbfl" / "mutation_lib" / "cosmic_ray.py"
-cosmic_ray_text = read(cosmic_ray_path)
-cosmic_ray_text = replace_once(
-    cosmic_ray_text,
-    '''    def _get_all_mutant_list(
-        self, module_path: str, operator_names: List[str]
-    ) -> List[Mutant]:
-''',
-    '''    def _get_all_mutant_list(
-        self,
-        module_path: str,
-        operator_names: List[str],
-        line_numbers: Optional[List[int]] = None,
-    ) -> List[Mutant]:
-''',
-    "Cosmic Ray line-limited mutant list signature",
-)
-cosmic_ray_text = replace_once(
-    cosmic_ray_text,
-    '''            for occurrence, (start_pos, end_pos) in enumerate(positions):
-                original_code, mutated_code = self.produce_mutation(
-                    module_path, operator, occurrence
-                )
-''',
-    '''            for occurrence, (start_pos, end_pos) in enumerate(positions):
-                if (
-                    line_numbers is not None
-                    and start_pos[0] not in line_numbers
-                    and end_pos[0] not in line_numbers
-                ):
-                    continue
-
-                original_code, mutated_code = self.produce_mutation(
-                    module_path, operator, occurrence
-                )
-''',
-    "Cosmic Ray line-limited mutation production",
-)
-cosmic_ray_text = replace_once(
-    cosmic_ray_text,
-    '''        mutant_list = self._get_all_mutant_list(module_path, operator_names)
-''',
-    '''        mutant_list = self._get_all_mutant_list(module_path, operator_names, line_numbers)
-''',
-    "Cosmic Ray line-limited call",
-)
-write(cosmic_ray_path, cosmic_ray_text)
-old_get_all = '''    def get_all_mutants_for_failing_line_number_list(
-        self, failing_line_number_list
-    ) -> List:
-        \"\"\"
-         Generates mutants for the given statements. Each statement contains
-          information about the module and the line number the statement belongs to.
-
-         Args:
-             failing_line_number_list (List[str]): A list of statements to generate mutants for.
-
-         Returns:
-             List[Mutant]: A list of mutants corresponding to the given statements.
-         \"\"\"
-        mutant_list = []
-
-        for statement_name in failing_line_number_list:
-            path, line_number = naming_lib.convert_statement_name_to_components(
-                statement_name
-            )
-            self._db_manager.insert_failing_line_number_components(path, line_number)
-
-        failing_module_path_list = (
-            self._db_manager.select_distinct_failing_module_paths()
-        )
-        for module_path in failing_module_path_list:
-            line_number_list = self._db_manager.select_failing_line_numbers_for_module_path(
-                module_path
-            )
-
-            current_module_mutant_list = self._get_module_mutant_list(module_path, line_number_list)
-
-            mutant_list += current_module_mutant_list
-
-        self._set_mutant_ids(mutant_list)
-
-        return mutant_list
-'''
-new_get_all = '''    def get_all_mutants_for_failing_line_number_list(
-        self, failing_line_number_list
-    ) -> List:
-        \"\"\"
-         Generates mutants for the given statements. Each statement contains
-          information about the module and the line number the statement belongs to.
-
-         Args:
-             failing_line_number_list (List[str]): A list of statements to generate mutants for.
-
-         Returns:
-             List[Mutant]: A list of mutants corresponding to the given statements.
-         \"\"\"
-        candidate_statement_name_list = list(failing_line_number_list)
-        selected_statement_name_list = list(candidate_statement_name_list)
-
-        if self._mutation_selection == "random":
-            rng = random.Random(self._mutation_seed)
-            if (
-                    self._mutation_budget is not None
-                    and len(selected_statement_name_list) > self._mutation_budget
-            ):
-                selected_statement_name_list = rng.sample(
-                    selected_statement_name_list,
-                    self._mutation_budget,
-                )
-            else:
-                rng.shuffle(selected_statement_name_list)
-
-            fl_print.normal(f"Candidate mutation locations: {len(candidate_statement_name_list)}")
-            fl_print.normal(f"Selected mutation locations: {len(selected_statement_name_list)}")
-
-        generation_start = time.perf_counter()
-        mutant_list = []
-
-        for statement_name in selected_statement_name_list:
-            path, line_number = naming_lib.convert_statement_name_to_components(
-                statement_name
-            )
-            self._db_manager.insert_failing_line_number_components(path, line_number)
-
-        failing_module_path_list = (
-            self._db_manager.select_distinct_failing_module_paths()
-        )
-        for module_path in failing_module_path_list:
-            line_number_list = self._db_manager.select_failing_line_numbers_for_module_path(
-                module_path
-            )
-
-            current_module_mutant_list = self._get_module_mutant_list(module_path, line_number_list)
-
-            mutant_list += current_module_mutant_list
-
-        generated_mutant_count = len(mutant_list)
-        if (
-                self._mutation_selection == "random"
-                and self._mutation_budget is not None
-                and generated_mutant_count > self._mutation_budget
-        ):
-            rng = random.Random(self._mutation_seed)
-            mutant_list = rng.sample(mutant_list, self._mutation_budget)
-
-        self._set_mutant_ids(mutant_list)
-        generation_time = time.perf_counter() - generation_start
-
-        fl_print.normal(f"Total generated mutants: {generated_mutant_count}")
-        fl_print.normal(f"Mutants selected for validation: {len(mutant_list)}")
-        fl_print.normal(f"Mutation generation time: {generation_time:.4f}")
-
-        return mutant_list
-'''
-mutation_text = replace_once(
-    mutation_text,
-    old_get_all,
-    new_get_all,
-    "MutationManager selection implementation",
-)
-write(mutation_manager_path, mutation_text)
-
-mbfl_run_manager_path = package_root / "fault_localization" / "mbfl" / "mbfl_run_manager.py"
-run_text = read(mbfl_run_manager_path)
-run_text = replace_once(
-    run_text,
-    '''import shutil
-from enum import Enum
-''',
-    '''import shutil
-import time
-from enum import Enum
-''',
-    "MbflRunManager imports",
-)
-run_text = replace_once(
-    run_text,
-    '''        number_of_all_mutants = len(mutants)
-
-        fl_print.normal(f"Running {number_of_all_mutants} Mutants")
-''',
-    '''        number_of_all_mutants = len(mutants)
-        validation_start = time.perf_counter()
-
-        fl_print.normal(f"Running {number_of_all_mutants} Mutants")
-''',
-    "MbflRunManager validation timer start",
-)
-run_text = replace_once(
-    run_text,
-    '''        self._remove_temp_project(temp_project_path)
-''',
-    '''        validation_time = time.perf_counter() - validation_start
-        fl_print.normal(f"Mutant validation time: {validation_time:.4f}")
-        self._remove_temp_project(temp_project_path)
-''',
-    "MbflRunManager validation timer end",
-)
-write(mbfl_run_manager_path, run_text)
-
-print("FauxPy MBFL selection patch applied.")
-"""
+_SCRIPTS_DIR = Path(__file__).parent / "scripts"
+_FAUXPY_SBFL_METRICS_PATCH_SCRIPT = (
+    _SCRIPTS_DIR / "fauxpy_sbfl_metrics_patch.py"
+).read_text(encoding="utf-8")
+_FAUXPY_MBFL_SELECTION_PATCH_SCRIPT = (
+    _SCRIPTS_DIR / "fauxpy_mbfl_selection_patch.py"
+).read_text(encoding="utf-8")
 
 
 def _completed_output(completed: subprocess.CompletedProcess[str]) -> str:
@@ -919,6 +168,9 @@ def _translate_unittest_target(target: str) -> str:
 
 
 def _unittest_targets(parts: list[str]) -> list[str]:
+    """
+    Helper method to convert arguments from unit tests into test targets 
+    """
     targets: list[str] = []
     skip_next = False
     options_with_values = {"-k", "--pattern"}
@@ -955,6 +207,7 @@ def load_pytest_targets(run_test_script: Path) -> list[str]:
         raise ConfigurationError(f"No BugsInPy test script found at {run_test_script}")
 
     targets: list[str] = []
+    # In script some bugs has multiple tests (node IDs)
     for raw_line in run_test_script.read_text().splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -1019,6 +272,8 @@ class FauxPyConfig:
     mutation_seed: int = 0
     # Metric selection
     metric: str | None = None
+    # WSBI alpha — weight applied to passing-test coverage (0 < alpha <= 1)
+    wsbi_alpha: float = 0.5
 
     def __post_init__(self) -> None:
         """Validate FauxPy options and reject unsupported combinations early."""
@@ -1062,6 +317,8 @@ class FauxPyConfig:
             )
         elif not isinstance(self.metric, str) or not self.metric.strip():
             raise ConfigurationError("FauxPy metric must be a non-empty string.")
+        if not isinstance(self.wsbi_alpha, (int, float)) or self.wsbi_alpha <= 0:
+            raise ConfigurationError("wsbi_alpha must be a positive number.")
         if not isinstance(self.src, str) or not self.src.strip():
             raise ConfigurationError("FauxPy src must be a non-empty string.")
         if self.top_n is not None:
@@ -1099,7 +356,7 @@ class FauxPyToolchain:
     """
 
     def __init__(self, runner: DockerCommandRunner) -> None:
-        """Create a toolchain using ``runner`` for all subprocess execution."""
+        """Create a toolchain using runner for all subprocess execution"""
         self._runner = runner
 
     def localize(
@@ -1108,7 +365,7 @@ class FauxPyToolchain:
         """Run FauxPy for ``checkout`` and return ranked locations for ``config.metric``.
 
         The result metadata includes the raw command output, the selected score
-        formula, the FauxPy run options, and ``all_metrics`` containing every
+        formula, the FauxPy run options, and all_metrics containing every
         parsed metric table for later consumers.
         """
         # Use a relative interpreter path because BugsInPy creates the venv in
@@ -1122,7 +379,7 @@ class FauxPyToolchain:
                 f"{checkout.bug.project} {checkout.bug.bug_id}` first."
             )
 
-        self._ensure_patched_fauxpy_installed(python, checkout.worktree)
+        self._ensure_patched_fauxpy_installed(python, checkout.worktree, config.wsbi_alpha)
 
         fauxpy_command = self._build_fauxpy_command(python, config)
         before_report_dirs = _list_fauxpy_report_dirs(checkout.worktree)
@@ -1151,7 +408,7 @@ class FauxPyToolchain:
             raise ConfigurationError(
                 f"Metric '{config.metric}' was not emitted by FauxPy. "
                 f"Available metrics: {available_metrics}. "
-                "If you requested Jaccard or SBI, make sure the prepared checkout uses "
+                "If you requested Jaccard or WSBI, make sure the prepared checkout uses "
                 "the framework's patched FauxPy installation."
             )
 
@@ -1187,9 +444,9 @@ class FauxPyToolchain:
             metadata=metadata,
         )
 
-    def _ensure_patched_fauxpy_installed(self, python: Path, cwd: Path) -> None:
+    def _ensure_patched_fauxpy_installed(self, python: Path, cwd: Path, wsbi_alpha: float) -> None:
         self._ensure_fauxpy_installed(python, cwd)
-        self._apply_fauxpy_sbfl_metric_patch(python, cwd)
+        self._apply_fauxpy_sbfl_metric_patch(python, cwd, wsbi_alpha)
         self._apply_fauxpy_mbfl_selection_patch(python, cwd)
 
     def _ensure_fauxpy_installed(self, python: Path, cwd: Path) -> None:
@@ -1216,9 +473,11 @@ class FauxPyToolchain:
                 f"failed. {_completed_output(install)}".strip()
             )
 
-    def _apply_fauxpy_sbfl_metric_patch(self, python: Path, cwd: Path) -> None:
+    def _apply_fauxpy_sbfl_metric_patch(self, python: Path, cwd: Path, wsbi_alpha: float) -> None:
+        # Prepend the alpha value so the patch script can embed it in metric_wsbi.py.
+        script = f"_WSBI_ALPHA = {wsbi_alpha!r}\n" + _FAUXPY_SBFL_METRICS_PATCH_SCRIPT
         patch = self._runner.run_command(
-            [str(python), "-c", _FAUXPY_SBFL_METRICS_PATCH_SCRIPT],
+            [str(python), "-c", script],
             cwd=cwd,
             check=False,
             capture_output=True,
@@ -1327,7 +586,7 @@ class FauxPyLocalizer(FaultLocalizer):
         """
         return self._toolchain.localize(self._config, checkout)
 
-
+# TODO: 
 @overload
 def parse_fauxpy_output(
     raw_output: str,
@@ -1354,11 +613,11 @@ def parse_fauxpy_output(
 ) -> dict[str, list[RankedLocation]] | list[RankedLocation]:
     """Parse FauxPy metric tables from pytest output.
 
-    FauxPy emits one ASCII table per scoring metric. When ``metric_filter`` is
-    ``None``, this function returns every table as ``{metric_name: rows}``.
-    When ``metric_filter`` is set, it returns only that metric's ranked rows.
-    Statement rows use ``File | Line | Score`` and function rows use
-    ``File | Function | Line | Score``.
+    FauxPy emits one ASCII table per scoring metric. When metric_filter is
+    None, this function returns every table as {metric_name: rows}.
+    When metric_filter is set, it returns only that metric's ranked rows.
+    Statement rows use File | Line | Score and function rows use
+    File | Function | Line | Score.
     """
     metric_tables: dict[str, list[RankedLocation]] = {}
     current_metric: str | None = None

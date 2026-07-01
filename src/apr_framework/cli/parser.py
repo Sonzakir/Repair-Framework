@@ -74,6 +74,17 @@ def build_parser() -> argparse.ArgumentParser:
     localize_parser.add_argument("--mbfl-metric", type=str, default="metallaxis")
     localize_parser.add_argument("--sbfl-weight", type=float, default=0.5)
     localize_parser.add_argument("--mbfl-weight", type=float, default=0.5)
+    localize_parser.add_argument(
+        "--wsbi-alpha",
+        dest="wsbi_alpha",
+        type=float,
+        default=0.5,
+        help=(
+            "Passing-test weight for the WSBI metric: score = ef / (ef + alpha * ep). "
+            "Must be > 0. alpha=1 reduces to plain SBI; alpha=0.5 (default) halves "
+            "the influence of passing-test coverage."
+        ),
+    )
     localize_parser.add_argument("--runs-dir", default="runs")
 
     ### BugsInPy CLI commands
@@ -150,6 +161,18 @@ def build_parser() -> argparse.ArgumentParser:
             "Comma-separated list of project:bug_id pairs to evaluate "
             "(e.g. black:1,black:3,black:7). "
             "Defaults to black:1,black:3,black:7."
+        ),
+    )
+    eval_loc_parser.add_argument(
+        "--traditional-budget",
+        dest="traditional_budget",
+        type=int,
+        default=200,
+        help=(
+            "Mutation budget for the MBFL baseline technique (default: 200). "
+            "Stock FauxPy MBFL is exhaustive but impractical on large projects; "
+            "this caps the baseline at a larger budget than --budget (the extension) "
+            "so both complete in reasonable time while preserving the comparison."
         ),
     )
 

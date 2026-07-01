@@ -69,7 +69,7 @@ python -m apr_framework bugsinpy test <project> <bug_id>
 # SBFL localization (default family)
 python -m apr_framework localize --project <project> --bug <bug_id> \
   [--backend fauxpy] [--family sbfl] [--granularity statement|function] \
-  [--metric ochiai|tarantula|dstar|jaccard|sbi] [--top-n N] \
+  [--metric ochiai|tarantula|dstar|jaccard|wsbi] [--wsbi-alpha ALPHA] [--top-n N] \
   [--src <pkg>] [--failing_tests "test::id"] [--test-target "test::id"] \
   [--show-raw-output]
 
@@ -118,11 +118,17 @@ python -m apr_framework bugsinpy evaluate-repair \
   [--fl-family sbfl|mbfl|hybrid] [--localization-metric ochiai] \
   [--operators ...] [--budget N] [--top-n N] [--ranker weighted|none] \
   [--output-dir experiment_results/repair] [--runs-dir runs]
+# Multi-technique localization evaluation (compares SBFL/MBFL/Hybrid against ground truth)
+python -m apr_framework bugsinpy evaluate-localization \
+  [--bugs black:1,black:3,black:7] [--granularity statement|function] \
+  [--budget N] [--seed N] [--top-ks 1,5,10] \
+  [--output-dir experiment_results]
 ```
 
 `--test-target` is repeatable (`action="append"`); pass it once per pytest target. When `--metric` is omitted for SBFL/MBFL the family default applies; for hybrid runs use `--sbfl-metric`/`--mbfl-metric` instead.
 
 `--ranker none` is the default — no ranking, output identical to pre-Task-4 behavior. `--ranker weighted` opts in to ranking; `--ranker-weights` then overrides the three component weights (suspiciousness, simplicity, operator_priority) — only relative magnitudes matter, they are normalised internally. When ranking is off, `ranked_plausible_patches` is absent (`null`) from the JSON.
+`evaluate-localization` runs all 8 techniques (3 SBFL baselines, 2 SBFL extensions, 1 MBFL baseline, 1 MBFL-random extension, 1 Hybrid) on each specified bug and compares their rankings against the ground-truth faulty lines parsed from `bug_patch.txt`. All bugs must be checked out and compiled before running.
 
 For `--technique llm`: `--operators` and `--skip-localize` are ignored (LLM backend generates free-form patches, not AST mutations). All other shared flags (`--budget`, `--top-n`, `--fl-mode`, `--fl-family`, `--ranker`, etc.) behave identically. LLM-specific flags (`--model`, `--temperature`, `--max-candidates`, `--llm-base-url`, `--llm-api-key-env`) are silently ignored when `--technique template` is selected.
 
@@ -175,11 +181,16 @@ src/apr_framework/
     patch_applier.py # apply_patch_and_validate — shared try/finally helper used by LLM (and future) backends
   evaluation/
     base.py          # EvaluationRunner ABC
-    dummy_runner.py  # DummyEvaluationRunner — writes runs/run_NNN/{config,results,execution.log}
+    run_writer.py    # RunWriter — creates runs/run_NNN/, writes config.json/results.json/execution.log;
+                     # serialize_localization_result() converts LocalizationResult to JSON-safe dict
+    dummy_runner.py  # DummyEvaluationRunner — full APR pipeline with checkout/compile/repair/test
     repair_runner.py # RepairEvaluationRunner — drives validation loop, correctness, ranking, JSON output
-    run_writer.py    # RunWriter — manages run_NNN directory, log, JSON writes
-    ground_truth.py  # ground-truth helpers for perfect FL
-    localization_runner.py  # LocalizationComparisonRunner for evaluate-localization
+    ground_truth.py  # GroundTruthLine, parse_bug_patch (parses bug_patch.txt diff → deleted lines),
+                     # find_faulty_rank (lowest rank of any ground-truth line in a ranking),
+                     # in_top_k, _files_match (flexible relative-path comparison)
+    localization_runner.py  # LocalizationComparisonRunner — runs N techniques × M bugs, scores each
+                            # against ground truth, writes results.json + README.md;
+                            # LocalizationTechniqueResult holds ranked_locations + top_k_hits per run
     repair_comparison_runner.py  # RepairComparisonRunner (Task 5) — drives bug x FL-mode repair matrix, aggregates results.json + README.md
   reporting/
     base.py          # ReportGenerator ABC
@@ -195,7 +206,7 @@ src/apr_framework/
 **Shared domain models.** All components communicate through dataclasses from `core/models.py` — not raw strings or dicts. `LocalizationResult.metadata["all_metrics"]` stores every metric table parsed from FauxPy output so later stages (repair, reporting) can consume any metric without re-running FauxPy. For MBFL runs, `metadata` also stores cost-control fields from `extract_mbfl_tracking_metadata` (e.g. `mutants_generated`, `mutants_validated`, `mutation_generation_time_seconds`).
 
 **FauxPy isolation.** `FauxPyLocalizer` implements `FaultLocalizer`; `FauxPyToolchain` handles pinned FauxPy 0.7.0 installation and applies **two** in-place source patches before every localization run:
-- *SBFL metric patch* — adds `MetricJaccard` and `MetricSBI` to FauxPy's SQLite schema and ranking pipeline (these metrics are not in stock FauxPy 0.7.0).
+- *SBFL metric patch* — adds `MetricJaccard` (known literature metric) and `MetricWSBI` (custom **Weighted SBI**) to FauxPy's SQLite schema and ranking pipeline (these metrics are not in stock FauxPy 0.7.0). `MetricWSBI` computes `ef / (ef + alpha * ep)` where `alpha` is configurable via `--wsbi-alpha` (default 0.5). The `_WSBI_ALPHA` value is injected into the patch script at run time and baked into the written `metric_wsbi.py` file.
 - *MBFL selection patch* — injects `--mutation-selection`, `--mutation-budget`, and `--mutation-seed` pytest options so the framework can cap expensive mutant validation.
 
 Both patches use `replace_once` helpers that are idempotent (safe to re-apply). `parse_fauxpy_output` handles both statement rows (`File | Line | Score`) and function rows (`File | Function | Line | Score`); for function granularity it also captures the optional end line, populating `RankedLocation.line`, `.end_line`, and `.function`.
@@ -213,6 +224,7 @@ Both patches use `replace_once` helpers that are idempotent (safe to re-apply). 
 **Patch ranking is optional and non-destructive.** `RepairEvaluationRunner` accepts an optional `ranker: PatchRanker | None`. When provided, it reorders plausible results after the correctness check and writes both orderings into `repair_results.json`: `plausible_patches` (generation order, the baseline) and `ranked_plausible_patches` (ranked order). `rank_of_first_correct` (1-indexed) is stored in `RepairRunMetrics` and emitted at the top level of each bug's JSON payload. The `PatchRanker` ABC lives in `repair/ranking/base.py`; the only current implementation is `WeightedCompositeRanker` (`repair/ranking/weighted.py`), which combines a suspiciousness score, patch simplicity, and operator priority using a configurable weighted sum. Enabled by default with `--ranker weighted`; disabled with `--ranker none`.
 
 **Repair evaluation matrix (Task 5).** `bugsinpy evaluate-repair` runs the full repair pipeline on a set of bugs under both `auto` and `perfect` FL with the ranker applied, then writes an aggregated `experiment_results/repair/{results.json,README.md}` (per-bug tables, aggregate, generated discussion). `RepairComparisonRunner` (`evaluation/repair_comparison_runner.py`) only orchestrates the matrix and aggregates — each (bug, FL mode) cell is executed by the existing `RepairEvaluationRunner` and gets its own `runs/run_NNN` directory (logs + patch diffs preserved as artifacts). A localization failure for one cell (e.g. FauxPy uninstallable on a bug's Python) is captured as an error cell rather than aborting the matrix. This mirrors the `evaluate-localization` / `LocalizationComparisonRunner` pattern.
+**`LocalizationComparisonRunner`** (`evaluation/localization_runner.py`) runs the full 8-technique comparison matrix and emits a markdown report with per-bug tables, an aggregate Top-k accuracy table, and an auto-generated discussion section. The technique list is built in `app._build_techniques()` and covers: SBFL (Ochiai/Tarantula/D*/Jaccard/WSBI), MBFL-Metallaxis (exhaustive baseline), MBFL-Metallaxis-Random (budget-capped extension), and Hybrid. Ground-truth matching via `_files_match` is path-flexible — it handles FauxPy's short relative paths against git-diff absolute paths by comparing suffixes and, as a last resort, filenames.
 
 **LLM-based repair (Assignment 4).** `LLMRepairAlgorithm` (`repair/llm/algorithm.py`) implements the `RepairAlgorithm` ABC and plugs into the same `run_validation_loop` / `RepairEvaluationRunner` pipeline as the template backend. The algorithm iterates over the top-N FL locations, calls `extract_function_source` to isolate the enclosing function (with a ±25-line window fallback), builds a structured system + user prompt via `build_repair_prompt`, and samples up to `max_patch_count` candidate patches from the LLM. `extract_patch_from_llm_response` finds a fenced code block in the response, validates its syntax with `ast.parse`, splices the replacement into the original file lines, and produces a `unified_diff` with absolute paths as `fromfile`/`tofile`. Validation uses `subprocess.run(["patch", "-p0"], ...)` (absolute paths require `-p0`, not `-p1`) inside the shared `apply_patch_and_validate` helper (`repair/patch_applier.py`), which guarantees file restoration in a `try/finally` block regardless of test outcome. `OpenAICompatibleClient` (`repair/llm/client.py`) reads the API key from the environment at call time and uses `stream=False` (GPT@RUB does not support streaming). Selected via `--technique llm`; the client is constructed in `_build_llm_algorithm` in `cli/app.py`.
 
@@ -220,7 +232,8 @@ Both patches use `replace_once` helpers that are idempotent (safe to re-apply). 
 ```
 .tools/bugsinpy        # BugsInPy clone (git submodule managed by setup command)
 .workspace/bugsinpy/   # checked-out project worktrees (e.g. PySnooper_1/PySnooper/)
-runs/run_NNN/          # evaluation outputs: config.json, results.json, execution.log
+runs/run_NNN/          # single-localization run outputs: config.json, results.json, execution.log
+experiment_results/    # evaluate-localization outputs: results.json + README.md comparison report
 ```
 
 ## Naming conventions
@@ -288,5 +301,5 @@ These rules apply to every variable and method name written or modified in this 
 - On Windows: change line endings from CRLF to LF for shell scripts.
 - FauxPy localization requires a checked-out and compiled bug. Run `checkout` then `compile` (or `test`, which does both) before `localize`.
 - FauxPy currently requires `run_test.sh` to invoke pytest directly. Projects using only `unittest discover` are not supported.
-- If FauxPy reports a missing `Jaccard` or `SBI` metric, the framework's SBFL patch was not applied — check that the checkout's virtual environment is intact and re-run `compile`.
+- If FauxPy reports a missing `Jaccard` or `WSBI` metric, the framework's SBFL patch was not applied — check that the checkout's virtual environment is intact and re-run `compile`.
 - To do a full clean rebuild: `docker compose down --remove-orphans && docker rm -f apr-bugsinpy-executor 2>/dev/null; docker rmi apr-framework:local apr-bugsinpy:local 2>/dev/null; docker compose build --no-cache`.
