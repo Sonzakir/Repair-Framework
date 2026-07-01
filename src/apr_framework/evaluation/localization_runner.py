@@ -140,8 +140,7 @@ class LocalizationComparisonRunner:
                     "faulty_rank": r.faulty_rank,
                     "top_k_hits": {str(k): v for k, v in r.top_k_hits.items()},
                     "ground_truth_lines": [
-                        {"file": gt.file_path, "line": gt.line}
-                        for gt in r.ground_truth
+                        {"file": gt.file_path, "line": gt.line} for gt in r.ground_truth
                     ],
                     "total_ranked": len(r.ranked_locations),
                     "error": r.error,
@@ -175,7 +174,9 @@ class LocalizationComparisonRunner:
             "techniques (custom SBFL metrics: Jaccard, SBI; Hybrid SBFL+MBFL) "
             "on BugsInPy bugs.\n"
         )
-        lines.append(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n")
+        lines.append(
+            f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
+        )
 
         # --- Per-bug tables ---
         for bug in bugs:
@@ -185,8 +186,7 @@ class LocalizationComparisonRunner:
             sample = index.get((bug, techniques[0]))
             if sample and sample.ground_truth:
                 gt_summary = ", ".join(
-                    f"`{gt.file_path}:{gt.line}`"
-                    for gt in sample.ground_truth[:5]
+                    f"`{gt.file_path}:{gt.line}`" for gt in sample.ground_truth[:5]
                 )
                 if len(sample.ground_truth) > 5:
                     gt_summary += f" … ({len(sample.ground_truth)} lines total)"
@@ -194,7 +194,11 @@ class LocalizationComparisonRunner:
             else:
                 lines.append("**Ground-truth faulty lines:** *(not available)*\n")
 
-            header = "| Technique | Rank | " + " | ".join(f"Top-{k}" for k in top_ks) + " | Total ranked | Notes |"
+            header = (
+                "| Technique | Rank | "
+                + " | ".join(f"Top-{k}" for k in top_ks)
+                + " | Total ranked | Notes |"
+            )
             sep = "|---|---|" + "|".join("---" for _ in top_ks) + "|---|---|"
             lines.append(header)
             lines.append(sep)
@@ -209,7 +213,9 @@ class LocalizationComparisonRunner:
                 )
                 total = str(len(r.ranked_locations))
                 note = r.error or ""
-                lines.append(f"| {tech} | {rank_str} | {top_k_cols} | {total} | {note} |")
+                lines.append(
+                    f"| {tech} | {rank_str} | {top_k_cols} | {total} | {note} |"
+                )
 
         # --- Aggregate Top-k table ---
         lines.append("\n## Aggregate Top-k Accuracy\n")
@@ -217,7 +223,11 @@ class LocalizationComparisonRunner:
             "Fraction of bugs where the faulty line appeared within the top-k ranked locations.\n"
         )
         n_bugs = len(bugs)
-        header = "| Technique | " + " | ".join(f"Top-{k} ({n_bugs} bugs)" for k in top_ks) + " |"
+        header = (
+            "| Technique | "
+            + " | ".join(f"Top-{k} ({n_bugs} bugs)" for k in top_ks)
+            + " |"
+        )
         sep = "|---|" + "|".join("---" for _ in top_ks) + "|"
         lines.append(header)
         lines.append(sep)
@@ -252,9 +262,7 @@ def _build_discussion(
     top1_counts: dict[str, int] = {}
     for tech in techniques:
         top1_counts[tech] = sum(
-            1
-            for bug in bugs
-            if (r := index.get((bug, tech))) and r.top_k_hits.get(1)
+            1 for bug in bugs if (r := index.get((bug, tech))) and r.top_k_hits.get(1)
         )
     best_tech = max(top1_counts, key=lambda t: top1_counts[t])
     worst_tech = min(top1_counts, key=lambda t: top1_counts[t])

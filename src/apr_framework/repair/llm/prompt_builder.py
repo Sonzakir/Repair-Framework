@@ -1,9 +1,4 @@
-"""Prompt construction for LLM-based repair.
-
-Two public functions:
-  extract_function_source  — AST-based extraction of the enclosing function
-  build_repair_prompt      — assembles the OpenAI-style messages list
-"""
+"""Prompt construction for LLM-based repair."""
 
 import ast
 import logging
@@ -16,13 +11,34 @@ logger = logging.getLogger(__name__)
 
 _FALLBACK_WINDOW_LINES = 25
 
-_SYSTEM_MESSAGE = (
-    "You are an automated program repair tool. Your task is to fix a bug in a Python program.\n"
-    "You will be given the buggy code region and the fault location identified by a fault\n"
-    "localization tool. Return ONLY the corrected version of the provided function inside a\n"
-    "Python fenced code block (```python ... ```). Do not include any explanation, commentary,\n"
-    "or code outside the fenced block. Do not change the function signature."
-)
+_PROMPTS_DIRECTORY_PATH = Path(__file__).parent / "prompts"
+_DEFAULT_SYSTEM_PROMPT_NAME = "prompt1"
+
+
+def load_system_prompt(prompt_name: str) -> str:
+    """Load a system-prompt text file from repair/llm/prompts/ by name.
+
+    Args:
+        prompt_name: File stem (without ``.txt``) under the prompts/ directory,
+                     e.g. ``"prompt1"``.
+
+    Returns:
+        The file's contents with surrounding whitespace stripped.
+
+    Raises:
+        ConfigurationError: If no matching file exists.
+    """
+    prompt_file_path = _PROMPTS_DIRECTORY_PATH / f"{prompt_name}.txt"
+    if not prompt_file_path.is_file():
+        available_prompt_names = sorted(
+            candidate_path.stem
+            for candidate_path in _PROMPTS_DIRECTORY_PATH.glob("*.txt")
+        )
+        raise ConfigurationError(
+            f"System prompt {prompt_name!r} not found at {prompt_file_path}. "
+            f"Available prompts: {available_prompt_names}"
+        )
+    return prompt_file_path.read_text(encoding="utf-8").strip()
 
 
 def extract_function_source(
@@ -58,9 +74,7 @@ def extract_function_source(
     try:
         tree = ast.parse(source_text, filename=str(source_file_path))
     except SyntaxError as error:
-        raise ConfigurationError(
-            f"Cannot parse {source_file_path}: {error}"
-        ) from error
+        raise ConfigurationError(f"Cannot parse {source_file_path}: {error}") from error
 
     source_lines = source_text.splitlines(keepends=True)
 
@@ -105,6 +119,7 @@ def build_repair_prompt(
     function_source_text: str,
     function_start_line: int,
     *,
+    system_message_text: str | None = None,
     # Task 2 enrichment slots — present but no-op in Task 1
     failing_test_source: str | None = None,
     error_traceback: str | None = None,
@@ -128,6 +143,8 @@ def build_repair_prompt(
         function_source_text:  Source text of the enclosing function (or window).
         function_start_line:   1-indexed line number of the first line of
                                function_source_text inside the original file.
+        system_message_text:   System-prompt text (see prompts/*.txt). Defaults to
+                               the ``prompt1`` file when not supplied.
         failing_test_source:   (Task 2) Body of a relevant failing test.
         error_traceback:       (Task 2) Exception traceback from the failing run.
         fl_score_annotation:   (Task 2) Whether to annotate each line with its
@@ -136,14 +153,21 @@ def build_repair_prompt(
     Returns:
         Two-entry list: [system message dict, user message dict].
     """
-    user_content = "\n\n".join([
-        _build_fault_location_section(location),
-        _build_buggy_code_section(location, function_source_text, function_start_line),
-        _build_task_section(location),
-    ])
+    if system_message_text is None:
+        system_message_text = load_system_prompt(_DEFAULT_SYSTEM_PROMPT_NAME)
+
+    user_content = "\n\n".join(
+        [
+            _build_fault_location_section(location),
+            _build_buggy_code_section(
+                location, function_source_text, function_start_line
+            ),
+            _build_task_section(location),
+        ]
+    )
 
     return [
-        {"role": "system", "content": _SYSTEM_MESSAGE},
+        {"role": "system", "content": system_message_text},
         {"role": "user", "content": user_content},
     ]
 
@@ -151,6 +175,7 @@ def build_repair_prompt(
 # ---------------------------------------------------------------------------
 # Private section builders
 # ---------------------------------------------------------------------------
+
 
 def _build_fault_location_section(location: RankedLocation) -> str:
     score_str = f"{location.score:.4f}" if location.score is not None else "n/a"

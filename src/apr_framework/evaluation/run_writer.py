@@ -45,7 +45,9 @@ def serialize_localization_result(result) -> dict:
     return {
         "backend": result.backend,
         "bug": dataclasses.asdict(result.bug),
-        "ranked_locations": [dataclasses.asdict(loc) for loc in result.ranked_locations],
+        "ranked_locations": [
+            dataclasses.asdict(loc) for loc in result.ranked_locations
+        ],
         "metadata": _serialize_metadata(result.metadata),
     }
 

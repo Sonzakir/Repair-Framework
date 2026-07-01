@@ -124,9 +124,7 @@ class RepairEvaluationRunner(EvaluationRunner):
             writer = self._writer
         else:
             writer = RunWriter.create(self._runs_dir)
-            writer.write_json(
-                "config.json", {"runner": self.name, **self._config_data}
-            )
+            writer.write_json("config.json", {"runner": self.name, **self._config_data})
         self._last_run_dir = writer.run_dir
         writer.log(f"Started {self.name} for {len(bugs)} bug(s)")
 
@@ -195,7 +193,9 @@ class RepairEvaluationRunner(EvaluationRunner):
                 outcome.plausible_results, self._localization_result
             )
             rank_of_first_correct: int | None = None
-            for rank_position, attempt_result in enumerate(ranked_plausible_results, start=1):
+            for rank_position, attempt_result in enumerate(
+                ranked_plausible_results, start=1
+            ):
                 if attempt_result.status == RepairStatus.CORRECT:
                     rank_of_first_correct = rank_position
                     break
@@ -227,7 +227,11 @@ class RepairEvaluationRunner(EvaluationRunner):
             f"plausible={metrics.plausible_count}, correct={metrics.correct_count}, "
             f"ttfp={metrics.time_to_first_plausible_seconds}, "
             f"wall_clock={metrics.total_wall_clock_seconds:.1f}s"
-            + (f", rank_of_first_correct={rank_of_first_correct}" if self._ranker is not None else "")
+            + (
+                f", rank_of_first_correct={rank_of_first_correct}"
+                if self._ranker is not None
+                else ""
+            )
         )
 
         return _BugRunResult(
@@ -245,7 +249,9 @@ class RepairEvaluationRunner(EvaluationRunner):
     # ------------------------------------------------------------------
 
     def _persist(self, writer: RunWriter, results: list[_BugRunResult]) -> None:
-        bug_payloads = [self._serialise_bug(writer, bug_result) for bug_result in results]
+        bug_payloads = [
+            self._serialise_bug(writer, bug_result) for bug_result in results
+        ]
 
         # The repair CLI runs one bug at a time -> keep the long-standing single-bug
         # repair_results.json schema (consumed by ranking/evaluation in later
@@ -257,15 +263,22 @@ class RepairEvaluationRunner(EvaluationRunner):
 
         writer.write_json("repair_results.json", payload)
 
-    def _serialise_bug(self, writer: RunWriter, bug_result: _BugRunResult) -> dict[str, Any]:
+    def _serialise_bug(
+        self, writer: RunWriter, bug_result: _BugRunResult
+    ) -> dict[str, Any]:
         plausible_results = bug_result.outcome.plausible_results
         self._write_patch_artifacts(writer, plausible_results)
 
         ranked_plausible_patches = None
         if self._ranker is not None:
             ranked_plausible_patches = [
-                {**self._serialise_result(attempt_result), "rank_position": rank_position}
-                for rank_position, attempt_result in enumerate(bug_result.ranked_plausible_results, start=1)
+                {
+                    **self._serialise_result(attempt_result),
+                    "rank_position": rank_position,
+                }
+                for rank_position, attempt_result in enumerate(
+                    bug_result.ranked_plausible_results, start=1
+                )
             ]
 
         return {
@@ -289,10 +302,16 @@ class RepairEvaluationRunner(EvaluationRunner):
                 "total_wall_clock_seconds": bug_result.metrics.total_wall_clock_seconds,
                 "rank_of_first_correct": bug_result.metrics.rank_of_first_correct,
             },
-            "plausible_patches": [self._serialise_result(attempt_result) for attempt_result in plausible_results],
+            "plausible_patches": [
+                self._serialise_result(attempt_result)
+                for attempt_result in plausible_results
+            ],
             "ranked_plausible_patches": ranked_plausible_patches,
             "rank_of_first_correct": bug_result.metrics.rank_of_first_correct,
-            "all_results": [self._serialise_result(attempt_result) for attempt_result in bug_result.outcome.all_results],
+            "all_results": [
+                self._serialise_result(attempt_result)
+                for attempt_result in bug_result.outcome.all_results
+            ],
         }
 
     @staticmethod
@@ -367,16 +386,16 @@ class RepairEvaluationRunner(EvaluationRunner):
                 "first."
             )
         return CheckoutResult(
-            bug=BugIdentifier(benchmark="bugsinpy", project=canonical, bug_id=bug.bug_id),
+            bug=BugIdentifier(
+                benchmark="bugsinpy", project=canonical, bug_id=bug.bug_id
+            ),
             worktree=worktree,
             success=True,
             prepared=True,
         )
 
     @staticmethod
-    def _reference_patch(
-        benchmark: BenchmarkAdapter, bug: BugIdentifier
-    ) -> str | None:
+    def _reference_patch(benchmark: BenchmarkAdapter, bug: BugIdentifier) -> str | None:
         getter = getattr(benchmark, "get_reference_patch", None)
         if getter is None:
             return None

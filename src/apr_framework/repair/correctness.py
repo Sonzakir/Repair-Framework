@@ -72,7 +72,11 @@ def parse_unified_diff(diff_text: str) -> dict[str, ChangedLines]:
             name = Path(path.split(" ", 1)[0]).name
             current = by_file.setdefault(name, ChangedLines())
             continue
-        if raw.startswith("--- ") or raw.startswith("diff ") or raw.startswith("index "):
+        if (
+            raw.startswith("--- ")
+            or raw.startswith("diff ")
+            or raw.startswith("index ")
+        ):
             continue
         if raw.startswith("@@"):
             continue

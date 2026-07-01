@@ -135,7 +135,9 @@ class RepairComparisonRunner:
                     "fl_backend": localization_result.backend,
                     "ranker": self._ranker.name if self._ranker else "none",
                 }
-                writer.write_json("config.json", {"runner": "repair-comparison", **cell_config_data})
+                writer.write_json(
+                    "config.json", {"runner": "repair-comparison", **cell_config_data}
+                )
                 writer.log(
                     f"Repair comparison cell: {bug.project}#{bug.bug_id} fl_mode={fl_mode} "
                     f"backend={localization_result.backend}"
@@ -187,7 +189,9 @@ class RepairComparisonRunner:
         fl_backend: str,
         run_dir: Path,
     ) -> RepairCellResult:
-        payload = json.loads((run_dir / "repair_results.json").read_text(encoding="utf-8"))
+        payload = json.loads(
+            (run_dir / "repair_results.json").read_text(encoding="utf-8")
+        )
         metrics = payload.get("metrics", {})
         plausible_patches = payload.get("plausible_patches", []) or []
 
@@ -208,7 +212,9 @@ class RepairComparisonRunner:
             candidates_validated=metrics.get("candidates_validated", 0),
             plausible_count=metrics.get("plausible_count", 0),
             correct_count=metrics.get("correct_count", 0),
-            time_to_first_plausible_seconds=metrics.get("time_to_first_plausible_seconds"),
+            time_to_first_plausible_seconds=metrics.get(
+                "time_to_first_plausible_seconds"
+            ),
             total_wall_clock_seconds=metrics.get("total_wall_clock_seconds", 0.0),
             generation_rank_of_first_correct=generation_rank_of_first_correct,
             ranked_rank_of_first_correct=metrics.get("rank_of_first_correct"),
@@ -320,10 +326,14 @@ class RepairComparisonRunner:
         for fl_mode in fl_modes:
             mode_cells = [index.get((bug, fl_mode)) for bug in bugs]
             mode_cells = [cell for cell in mode_cells if cell is not None]
-            generated_total = sum(cell.total_candidates_generated for cell in mode_cells)
+            generated_total = sum(
+                cell.total_candidates_generated for cell in mode_cells
+            )
             plausible_total = sum(cell.plausible_count for cell in mode_cells)
             correct_total = sum(cell.correct_count for cell in mode_cells)
-            bugs_with_plausible = sum(1 for cell in mode_cells if cell.plausible_count > 0)
+            bugs_with_plausible = sum(
+                1 for cell in mode_cells if cell.plausible_count > 0
+            )
             bugs_repaired = sum(1 for cell in mode_cells if cell.correct_count > 0)
             lines.append(
                 f"| {fl_mode} | {len(mode_cells)} | {generated_total} | {plausible_total} "
@@ -346,11 +356,13 @@ class RepairComparisonRunner:
         paras: list[str] = []
 
         repaired_perfect = [
-            bug for bug in bugs
+            bug
+            for bug in bugs
             if (cell := index.get((bug, "perfect"))) and cell.correct_count > 0
         ]
         repaired_auto = [
-            bug for bug in bugs
+            bug
+            for bug in bugs
             if (cell := index.get((bug, "auto"))) and cell.correct_count > 0
         ]
 
@@ -397,10 +409,13 @@ class RepairComparisonRunner:
             for cell in cells
             if cell.generation_rank_of_first_correct is not None
             and cell.ranked_rank_of_first_correct is not None
-            and cell.ranked_rank_of_first_correct < cell.generation_rank_of_first_correct
+            and cell.ranked_rank_of_first_correct
+            < cell.generation_rank_of_first_correct
         ]
         correct_cells = [cell for cell in cells if cell.correct_count > 0]
-        multi_plausible_correct = [cell for cell in correct_cells if cell.plausible_count > 1]
+        multi_plausible_correct = [
+            cell for cell in correct_cells if cell.plausible_count > 1
+        ]
         if moved_forward:
             paras.append(
                 "**Did the ranker surface correct patches earlier?**  "
@@ -458,7 +473,9 @@ def _summarize_error(error_text: str, limit: int = 160) -> str:
     human-readable cell note, so newlines and pipes (which would break the
     markdown table) are stripped and the text is capped.
     """
-    collapsed = " ".join(part.strip() for part in error_text.splitlines() if part.strip())
+    collapsed = " ".join(
+        part.strip() for part in error_text.splitlines() if part.strip()
+    )
     collapsed = collapsed.replace("|", "/")
     # Prefer the first sentence (often the wrapped exception message) when it is
     # self-contained and short enough; otherwise fall back to a hard truncation.

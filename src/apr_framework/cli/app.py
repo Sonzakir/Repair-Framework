@@ -1,9 +1,11 @@
+import argparse
 import getpass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+from apr_framework.benchmarks.base import BenchmarkAdapter
 from apr_framework.benchmarks.registry import (
     create_bugsinpy_adapter,
     list_benchmark_names,
@@ -14,19 +16,31 @@ from apr_framework.core.exceptions import (
     BenchmarkError,
     ConfigurationError,
 )
-from apr_framework.core.models import BugIdentifier, CheckoutResult
+from apr_framework.core.models import (
+    BugIdentifier,
+    CheckoutResult,
+    EvaluationResult,
+    LocalizationResult,
+)
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
-from apr_framework.evaluation.run_writer import RunWriter, serialize_localization_result
 from apr_framework.evaluation.localization_runner import LocalizationComparisonRunner
+from apr_framework.evaluation.run_writer import RunWriter, serialize_localization_result
 from apr_framework.localization import (
+    FaultLocalizer,
     FauxPyConfig,
     FauxPyLocalizer,
     FauxPyToolchain,
     HybridFaultLocalizer,
 )
-from apr_framework.localization.fauxpy import load_pytest_targets
-from apr_framework.core.models import EvaluationResult
-from apr_framework.repair import DummyRepairAlgorithm, TemplateRepairAlgorithm, TemplateRepairConfig
+from apr_framework.localization.fauxpy import (
+    extract_pytest_node_ids,
+    load_pytest_targets,
+)
+from apr_framework.repair import (
+    DummyRepairAlgorithm,
+    TemplateRepairAlgorithm,
+    TemplateRepairConfig,
+)
 from apr_framework.reporting import ArchiveReportGenerator
 
 
@@ -45,23 +59,16 @@ def main() -> int:
 
 
 def _run() -> int:
-    parser = build_parser()
-    args = parser.parse_args()
-    project_root = Path.cwd()
-    load_dotenv(project_root / ".env")
+
+    args, project_root = _parse_args_and_resolve_project_root()
 
     # List Integrated Benchmarks in the Framework
     if args.command == "list-benchmarks":
-        for name in list_benchmark_names():
-            print(name)
-        return 0
+        return _get_benchmark_names()
 
     # Interactively store an LLM API key in the local .env file
     if args.command == "configure":
-        api_key = getpass.getpass(f"Enter value for {args.llm_api_key_env}: ")
-        _write_env_var(project_root / ".env", args.llm_api_key_env, api_key)
-        print(f"Saved {args.llm_api_key_env} to {project_root / '.env'}")
-        return 0
+        return _prompt_and_save_llm_api_key(args, project_root)
 
     # -- FauxPy --
     if args.command == "localize":
@@ -69,39 +76,19 @@ def _run() -> int:
         _validate_localize_args(args, family)
 
         # Currently we are running FauxPy only inside the BugsInPy projects
-        adapter = create_bugsinpy_adapter(project_root)
-        adapter.toolchain.ensure_installed()
-
-        projects_dir = adapter.toolchain.repo_dir / "projects"
-        project_dir = projects_dir / args.project
-        if not project_dir.is_dir():
-            raise BenchmarkError(f"No such BugsInPy project: {args.project}")
-
-        bug_dir = project_dir / "bugs" / str(args.bug)
-        if not bug_dir.is_dir():
-            raise BenchmarkError(
-                f"No such bug {args.bug} for BugsInPy project {args.project}"
-            )
-
-        destination = (
-            project_root
-            / ".workspace"
-            / "bugsinpy"
-            / f"{args.project}_{args.bug}"
+        adapter, worktree, bug_dir = _create_adapter_and_resolve_checked_out_bug(
+            args, project_root
         )
-        worktree = destination / args.project
-        if not worktree.exists():
-            raise BenchmarkError(
-                f"No checkout found at {worktree}. "
-                f"Run `python -m apr_framework bugsinpy checkout {args.project} {args.bug}` first."
-            )
 
         src = args.src or _infer_fauxpy_src(worktree, args.project)
         bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
-        # Strip pytest flags (e.g. -q, -s) so only node IDs go into --failing-list.
-        bug_test_ids = [t for t in bug_test_targets if not t.startswith("-")]
-        test_targets = _parse_fauxpy_test_targets_command(args.test_target) or bug_test_targets
-        failing_tests = _parse_fauxpy_failing_tests_command(args.failing_tests) or bug_test_ids
+        bug_test_ids = extract_pytest_node_ids(bug_test_targets)
+        test_targets = (
+            _parse_fauxpy_test_targets_command(args.test_target) or bug_test_targets
+        )
+        failing_tests = (
+            _parse_fauxpy_failing_tests_command(args.failing_tests) or bug_test_ids
+        )
         checkout = CheckoutResult(
             bug=BugIdentifier(
                 benchmark="bugsinpy",
@@ -115,148 +102,57 @@ def _run() -> int:
 
         fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
 
-        runs_dir = Path(args.runs_dir)
-        if not runs_dir.is_absolute():
-            runs_dir = project_root / runs_dir
-        writer = RunWriter.create(runs_dir)
-        started_at = datetime.now(timezone.utc)
+        writer, started_at = _build_run_writer(args, project_root)
 
         writer.log(f"Started fauxpy localization for {args.project}#{args.bug}")
-        effective_metric = args.metric or ("metallaxis" if family == "mbfl" else "ochiai")
-        config_data: dict = {
-            "runner": "fauxpy-localizer",
-            "backend": args.backend,
-            "project": args.project,
-            "bug_id": args.bug,
-            "family": family,
-            "granularity": args.granularity,
-            "top_n": args.top_n,
-            "mutation_strategy": args.mutation_strategy,
-            "mutation_budget": args.mutation_budget,
-            "mutation_seed": args.seed,
-            "started_at": started_at.isoformat(),
-        }
-        if family == "hybrid":
-            config_data["sbfl_metric"] = args.sbfl_metric
-            config_data["mbfl_metric"] = args.mbfl_metric
-            config_data["sbfl_weight"] = args.sbfl_weight
-            config_data["mbfl_weight"] = args.mbfl_weight
-        else:
-            config_data["metric"] = effective_metric
-        writer.write_json("config.json", config_data)
 
+        effective_metric = resolve_effective_metric(args, family)
+        config_data = build_localize_config_data(
+            args, family, effective_metric, started_at
+        )
+        writer.write_json("config.json", config_data)
+        
         if family == "hybrid":
-            sbfl_config = FauxPyConfig(
-                src=src,
-                test_targets=test_targets,
-                family="sbfl",
-                granularity=args.granularity,
-                failing_tests=failing_tests,
-                top_n=None,
-                metric=args.sbfl_metric,
-            )
-            mbfl_config = FauxPyConfig(
-                src=src,
-                test_targets=test_targets,
-                family="mbfl",
-                granularity=args.granularity,
-                failing_tests=failing_tests,
-                top_n=None,
-                mutation_strategy=args.mutation_strategy,
-                mutation_budget=args.mutation_budget,
-                mutation_seed=args.seed,
-                metric=args.mbfl_metric,
-            )
-            localizer = HybridFaultLocalizer(
-                FauxPyLocalizer(sbfl_config, fauxpy_toolchain),
-                FauxPyLocalizer(mbfl_config, fauxpy_toolchain),
-                sbfl_weight=args.sbfl_weight,
-                mbfl_weight=args.mbfl_weight,
-                top_n=args.top_n,
+            localizer = _build_hybrid_localizer(
+                src, test_targets, failing_tests, args, fauxpy_toolchain
             )
         else:
-            metric = args.metric or ("metallaxis" if family == "mbfl" else "ochiai")
+            # SBFL - MBFL
+            metric = resolve_effective_metric(args, family)
             config = FauxPyConfig(
                 src=src,
                 test_targets=test_targets,
                 family=family,
-                granularity=args.granularity, 
+                granularity=args.granularity,
                 failing_tests=failing_tests,
                 top_n=args.top_n,
-                mutation_strategy = args.mutation_strategy, 
-                mutation_budget = args.mutation_budget , 
+                mutation_strategy=args.mutation_strategy,
+                mutation_budget=args.mutation_budget,
                 mutation_seed=args.seed,
-                metric = metric
+                metric=metric,
             )
             localizer = FauxPyLocalizer(config, fauxpy_toolchain)
 
         writer.log("Running localization")
-        run_status = "completed"
-        result = None
+       
+       
+
         try:
-            result = localizer.localize(checkout.bug, checkout)
-            writer.log(f"Localization completed: {len(result.ranked_locations)} ranked locations")
+            result = run_localization(localizer, checkout, writer)
         except Exception as exc:
-            run_status = "error"
-            writer.log(f"ERROR: {exc}")
-            writer.write_json(
-                "results.json",
-                {
-                    "run_id": writer.run_dir.name,
-                    "status": run_status,
-                    "started_at": started_at.isoformat(),
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
-                    "error": f"{type(exc).__name__}: {exc}",
-                },
-            )
-            writer.log(f"Finished run with status {run_status}")
-            print(f"Run directory: {writer.run_dir}")
+            write_localize_error_results_and_log(exc, writer, started_at)
             raise
 
         finished_at = datetime.now(timezone.utc)
-        writer.write_json(
-            "results.json",
-            {
-                "run_id": writer.run_dir.name,
-                "status": run_status,
-                "started_at": started_at.isoformat(),
-                "finished_at": finished_at.isoformat(),
-                **serialize_localization_result(result),
-            },
-        )
-        writer.log(f"Finished run with status {run_status}")
+        write_localize_success_results(result, writer, started_at, finished_at)
 
-        archive_path = ArchiveReportGenerator().write_summary(
-            [EvaluationResult(bug=result.bug, status=run_status, started_at=started_at, finished_at=finished_at)],
-            writer.run_dir,
+        archive_path = write_localize_report_archive(
+            result, writer, started_at, finished_at
         )
-        print(f"Run directory: {writer.run_dir}")
-        print(f"Report archive: {archive_path}")
-        print(f"Project: {result.bug.project}")
-        print(f"Bug ID: {result.bug.bug_id}")
-        print(f"Backend: {result.backend}")
-        if result.metadata.get("score_formula"):
-            print(f"Score formula: {result.metadata['score_formula']}")
-        print("Ranked locations:")
-        for location in result.ranked_locations:
-            score = "" if location.score is None else f"{location.score:.4f}"
-            print(f"{location.rank}. {location.file_path}:{location.line} {score}".rstrip())
-
-        if args.show_raw_output and result.metadata.get("raw_output"):
-            print("\nRaw FauxPy output:")
-            print(result.metadata["raw_output"])
-        elif args.show_raw_output and result.backend == "hybrid-fauxpy":
-            sbfl_raw_output = result.metadata.get("sbfl_metadata", {}).get("raw_output")
-            mbfl_raw_output = result.metadata.get("mbfl_metadata", {}).get("raw_output")
-            if sbfl_raw_output:
-                print("\nRaw FauxPy SBFL output:")
-                print(sbfl_raw_output)
-            if mbfl_raw_output:
-                print("\nRaw FauxPy MBFL output:")
-                print(mbfl_raw_output)
+        print_localize_run_summary(result, writer, archive_path)
+        print_localize_raw_output_if_requested(args, result)
 
         return 0
-    
 
     # --  BugsInPy --
     if args.command == "bugsinpy":
@@ -373,9 +269,7 @@ def _run() -> int:
                 print(f"Report archive: {archive_path}")
 
             for result in results:
-                print(
-                    f"{result.bug.project} {result.bug.bug_id}: {result.status}"
-                )
+                print(f"{result.bug.project} {result.bug.bug_id}: {result.status}")
 
             return 0
 
@@ -385,11 +279,10 @@ def _run() -> int:
         if args.bugsinpy_command == "evaluate-repair":
             return _run_evaluate_repair(args, project_root, adapter)
 
-
-    # -- Repair -- 
+    # -- Repair --
 
     if args.command == "repair":
-        # Currently repair components are working on the BugsInPy Projects 
+        # Currently repair components are working on the BugsInPy Projects
         adapter = create_bugsinpy_adapter(project_root)
         return handle_repair(args, adapter, project_root)
 
@@ -410,18 +303,24 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     """
     import json
 
-    from apr_framework.localization import FauxPyConfig, FauxPyLocalizer, FauxPyToolchain
+    from apr_framework.localization import (
+        FauxPyConfig,
+        FauxPyLocalizer,
+        FauxPyToolchain,
+    )
 
     project_root = Path(project_root)
     project = args.project
     bug_id = args.bug
 
-    # -- Resolve worktree 
+    # -- Resolve worktree
     adapter.toolchain.ensure_installed()
     canonical_project = adapter.resolve_project(project)
     bug = BugIdentifier(benchmark="bugsinpy", project=canonical_project, bug_id=bug_id)
 
-    destination = project_root / ".workspace" / "bugsinpy" / f"{canonical_project}_{bug_id}"
+    destination = (
+        project_root / ".workspace" / "bugsinpy" / f"{canonical_project}_{bug_id}"
+    )
     worktree = destination / canonical_project
     if not worktree.exists():
         raise BenchmarkError(
@@ -438,6 +337,7 @@ def handle_repair(args, adapter, project_root: Path) -> int:
 
     # -- Set up run writer --
     from apr_framework.evaluation.run_writer import RunWriter
+
     runs_dir = Path(args.runs_dir)
     if not runs_dir.is_absolute():
         runs_dir = project_root / runs_dir
@@ -466,7 +366,9 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     }
 
     if args.technique == "template":
-        enabled_operators = [op.strip() for op in args.operators.split(",") if op.strip()]
+        enabled_operators = [
+            op.strip() for op in args.operators.split(",") if op.strip()
+        ]
         template_repair_config = TemplateRepairConfig(
             budget=args.budget,
             top_n_locations=args.top_n,
@@ -475,20 +377,25 @@ def handle_repair(args, adapter, project_root: Path) -> int:
             stop_on_first=args.stop_on_first,
             regression_check=args.regression_check,
         )
-        config_data.update({
-            "runner": "template-repair",
-            "enabled_operators": template_repair_config.enabled_operators,
-            "timeout_per_test": template_repair_config.timeout_per_test,
-        })
+        config_data.update(
+            {
+                "runner": "template-repair",
+                "enabled_operators": template_repair_config.enabled_operators,
+                "timeout_per_test": template_repair_config.timeout_per_test,
+            }
+        )
     elif args.technique == "llm":
-        config_data.update({
-            "runner": "llm-repair",
-            "model": args.model,
-            "temperature": args.temperature,
-            "max_candidates": args.max_candidates,
-            "llm_provider": args.llm_provider,
-            "timeout_seconds": args.timeout,
-        })
+        config_data.update(
+            {
+                "runner": "llm-repair",
+                "model": args.model,
+                "temperature": args.temperature,
+                "max_candidates": args.max_candidates,
+                "llm_provider": args.llm_provider,
+                "system_prompt": args.system_prompt,
+                "timeout_seconds": args.timeout,
+            }
+        )
     else:
         raise ConfigurationError(f"Unknown repair technique: {args.technique!r}")
 
@@ -524,12 +431,19 @@ def handle_repair(args, adapter, project_root: Path) -> int:
                     and cached_bug.get("project") == canonical_project
                     and cached_bug.get("bug_id") == bug_id
                 ):
-                    from apr_framework.core.models import LocalizationResult, RankedLocation
+                    from apr_framework.core.models import (
+                        LocalizationResult,
+                        RankedLocation,
+                    )
+
                     ranked = [
-                        RankedLocation(**{
-                            k: v for k, v in loc.items()
-                            if k in RankedLocation.__dataclass_fields__
-                        })
+                        RankedLocation(
+                            **{
+                                k: v
+                                for k, v in loc.items()
+                                if k in RankedLocation.__dataclass_fields__
+                            }
+                        )
                         for loc in cached["ranked_locations"]
                     ]
                     localization_result = LocalizationResult(
@@ -538,7 +452,9 @@ def handle_repair(args, adapter, project_root: Path) -> int:
                         ranked_locations=ranked,
                         metadata=cached.get("metadata", {}),
                     )
-                    writer.log(f"Loaded cached localization from {rf} ({len(ranked)} locations)")
+                    writer.log(
+                        f"Loaded cached localization from {rf} ({len(ranked)} locations)"
+                    )
                     break
             except Exception as exc:
                 writer.log(f"Could not load cached result from {rf}: {exc}")
@@ -556,7 +472,7 @@ def handle_repair(args, adapter, project_root: Path) -> int:
 
         src = _infer_fauxpy_src(worktree, canonical_project)
         bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
-        bug_test_ids = [t for t in bug_test_targets if not t.startswith("-")]
+        bug_test_ids = extract_pytest_node_ids(bug_test_targets)
 
         fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
 
@@ -684,7 +600,11 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     print(f"1st plausible: {ttfp_str}")
     print(f"Total time:    {metrics.total_wall_clock_seconds:.1f}s")
     if ranker is not None:
-        rank_str = str(metrics.rank_of_first_correct) if metrics.rank_of_first_correct is not None else "n/a"
+        rank_str = (
+            str(metrics.rank_of_first_correct)
+            if metrics.rank_of_first_correct is not None
+            else "n/a"
+        )
         print(f"Rank of 1st correct (ranked): {rank_str}")
 
     return 0
@@ -717,6 +637,167 @@ def _build_ranker(args):
     return create_ranker(args.ranker, **ranker_kwargs)
 
 
+def _build_run_writer(
+    args: argparse.Namespace, project_root: Path
+) -> tuple[RunWriter, datetime]:
+
+    runs_dir = Path(args.runs_dir)
+    if not runs_dir.is_absolute():
+        runs_dir = project_root / runs_dir
+    writer = RunWriter.create(runs_dir)
+    started_at = datetime.now(timezone.utc)
+
+    return writer, started_at
+
+
+def _build_hybrid_localizer(
+    source_package: str,
+    test_targets: list[str],
+    failing_tests: list[str],
+    args: argparse.Namespace,
+    fauxpy_toolchain: FauxPyToolchain,
+) -> HybridFaultLocalizer:
+    sbfl_config = FauxPyConfig(
+        src=source_package,
+        test_targets=test_targets,
+        family="sbfl",
+        granularity=args.granularity,
+        failing_tests=failing_tests,
+        top_n=None,
+        metric=args.sbfl_metric,
+    )
+    mbfl_config = FauxPyConfig(
+        src=source_package,
+        test_targets=test_targets,
+        family="mbfl",
+        granularity=args.granularity,
+        failing_tests=failing_tests,
+        top_n=None,
+        mutation_strategy=args.mutation_strategy,
+        mutation_budget=args.mutation_budget,
+        mutation_seed=args.seed,
+        metric=args.mbfl_metric,
+    )
+    return HybridFaultLocalizer(
+        FauxPyLocalizer(sbfl_config, fauxpy_toolchain),
+        FauxPyLocalizer(mbfl_config, fauxpy_toolchain),
+        sbfl_weight=args.sbfl_weight,
+        mbfl_weight=args.mbfl_weight,
+        top_n=args.top_n,
+    )
+
+
+def run_localization(
+    localizer: FaultLocalizer, checkout: CheckoutResult, writer: RunWriter
+) -> LocalizationResult:
+    """Run the localizer and log the ranked-location count; exceptions propagate to the caller."""
+    localization_result = localizer.localize(checkout.bug, checkout, None)
+    writer.log(
+        f"Localization completed: {len(localization_result.ranked_locations)} ranked locations"
+    )
+    return localization_result
+
+
+def write_localize_error_results_and_log(
+    exc: Exception, writer: RunWriter, started_at: datetime
+) -> None:
+    """Persist an error results.json, log the failure, and print the run directory."""
+    writer.log(f"ERROR: {exc}")
+    writer.write_json(
+        "results.json",
+        {
+            "run_id": writer.run_dir.name,
+            "status": "error",
+            "started_at": started_at.isoformat(),
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "error": f"{type(exc).__name__}: {exc}",
+        },
+    )
+    writer.log("Finished run with status error")
+    print(f"Run directory: {writer.run_dir}")
+
+
+def write_localize_success_results(
+    localization_result: LocalizationResult,
+    writer: RunWriter,
+    started_at: datetime,
+    finished_at: datetime,
+) -> None:
+    """Persist results.json for a completed localization run and log completion."""
+    writer.write_json(
+        "results.json",
+        {
+            "run_id": writer.run_dir.name,
+            "status": "completed",
+            "started_at": started_at.isoformat(),
+            "finished_at": finished_at.isoformat(),
+            **serialize_localization_result(localization_result),
+        },
+    )
+    writer.log("Finished run with status completed")
+
+
+def write_localize_report_archive(
+    localization_result: LocalizationResult,
+    writer: RunWriter,
+    started_at: datetime,
+    finished_at: datetime,
+) -> Path:
+    """Write the archived run summary report and return its path."""
+    return ArchiveReportGenerator().write_summary(
+        [
+            EvaluationResult(
+                bug=localization_result.bug,
+                status="completed",
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        ],
+        writer.run_dir,
+    )
+
+
+def print_localize_run_summary(
+    localization_result: LocalizationResult, writer: RunWriter, archive_path: Path
+) -> None:
+    """Print the run directory, report archive path, bug identity, and ranked locations."""
+    print(f"Run directory: {writer.run_dir}")
+    print(f"Report archive: {archive_path}")
+    print(f"Project: {localization_result.bug.project}")
+    print(f"Bug ID: {localization_result.bug.bug_id}")
+    print(f"Backend: {localization_result.backend}")
+    if localization_result.metadata.get("score_formula"):
+        print(f"Score formula: {localization_result.metadata['score_formula']}")
+    print("Ranked locations:")
+    for ranked_location in localization_result.ranked_locations:
+        score_str = "" if ranked_location.score is None else f"{ranked_location.score:.4f}"
+        print(
+            f"{ranked_location.rank}. {ranked_location.file_path}:{ranked_location.line} {score_str}".rstrip()
+        )
+
+
+def print_localize_raw_output_if_requested(
+    args: argparse.Namespace, localization_result: LocalizationResult
+) -> None:
+    """Print FauxPy raw output when --show-raw-output was passed, handling hybrid's two backends."""
+    if args.show_raw_output and localization_result.metadata.get("raw_output"):
+        print("\nRaw FauxPy output:")
+        print(localization_result.metadata["raw_output"])
+    elif args.show_raw_output and localization_result.backend == "hybrid-fauxpy":
+        sbfl_raw_output = localization_result.metadata.get("sbfl_metadata", {}).get(
+            "raw_output"
+        )
+        mbfl_raw_output = localization_result.metadata.get("mbfl_metadata", {}).get(
+            "raw_output"
+        )
+        if sbfl_raw_output:
+            print("\nRaw FauxPy SBFL output:")
+            print(sbfl_raw_output)
+        if mbfl_raw_output:
+            print("\nRaw FauxPy MBFL output:")
+            print(mbfl_raw_output)
+
+
 def _build_llm_algorithm(args, localization_result, adapter):
     """Construct an LLMRepairAlgorithm from CLI arguments."""
     from apr_framework.repair.llm import (
@@ -733,6 +814,7 @@ def _build_llm_algorithm(args, localization_result, adapter):
         llm_provider=args.llm_provider,
         base_url=args.llm_base_url,
         api_key_env_var=args.llm_api_key_env,
+        system_prompt_name=args.system_prompt,
         timeout_seconds=args.timeout,
         budget=args.budget,
         stop_on_first=args.stop_on_first,
@@ -768,7 +850,12 @@ def _write_env_var(env_file_path: Path, key_name: str, value: str) -> None:
 def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
     """Run the localization comparison evaluation and write results."""
     from apr_framework.core.models import CheckoutResult
-    from apr_framework.localization import FauxPyConfig, FauxPyLocalizer, FauxPyToolchain, HybridFaultLocalizer
+    from apr_framework.localization import (
+        FauxPyConfig,
+        FauxPyLocalizer,
+        FauxPyToolchain,
+        HybridFaultLocalizer,
+    )
 
     bugs = _parse_bug_list(args.bugs or "black:1,black:3,black:7")
     top_ks = tuple(int(k.strip()) for k in args.top_ks.split(",") if k.strip())
@@ -813,7 +900,7 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
     def _make_sbfl(bug: BugIdentifier, metric: str) -> FauxPyLocalizer:
         bug_dir = patch_dir(bug)
         test_targets = load_pytest_targets(bug_dir / "run_test.sh")
-        test_ids = [t for t in test_targets if not t.startswith("-")]
+        test_ids = extract_pytest_node_ids(test_targets)
         return FauxPyLocalizer(
             FauxPyConfig(
                 src=_src(bug),
@@ -829,7 +916,7 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
     def _make_mbfl(bug: BugIdentifier) -> FauxPyLocalizer:
         bug_dir = patch_dir(bug)
         test_targets = load_pytest_targets(bug_dir / "run_test.sh")
-        test_ids = [t for t in test_targets if not t.startswith("-")]
+        test_ids = extract_pytest_node_ids(test_targets)
         return FauxPyLocalizer(
             FauxPyConfig(
                 src=_src(bug),
@@ -848,7 +935,7 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
     def _make_hybrid(bug: BugIdentifier) -> HybridFaultLocalizer:
         bug_dir = patch_dir(bug)
         test_targets = load_pytest_targets(bug_dir / "run_test.sh")
-        test_ids = [t for t in test_targets if not t.startswith("-")]
+        test_ids = extract_pytest_node_ids(test_targets)
         sbfl_cfg = FauxPyConfig(
             src=_src(bug),
             test_targets=test_targets,
@@ -955,9 +1042,11 @@ def _run_evaluate_repair(args, project_root: Path, adapter) -> int:
     def _auto_localizer(canonical_bug: BugIdentifier):
         worktree = checkouts[canonical_bug].worktree
         source_package = _infer_fauxpy_src(worktree, canonical_bug.project)
-        bug_dir = projects_dir / canonical_bug.project / "bugs" / str(canonical_bug.bug_id)
+        bug_dir = (
+            projects_dir / canonical_bug.project / "bugs" / str(canonical_bug.bug_id)
+        )
         bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
-        bug_test_ids = [target for target in bug_test_targets if not target.startswith("-")]
+        bug_test_ids = extract_pytest_node_ids(bug_test_targets)
 
         def _make_sbfl() -> FauxPyLocalizer:
             return FauxPyLocalizer(
@@ -1065,6 +1154,63 @@ def _run_evaluate_repair(args, project_root: Path, adapter) -> int:
     return 0
 
 
+def _parse_args_and_resolve_project_root():
+    "Parse CLI arguments and resolve the project root, loading .env before any command runs"
+
+    parser = build_parser()
+    args = parser.parse_args()
+    project_root = Path.cwd()
+    load_dotenv(project_root / ".env")
+    return args, project_root
+
+
+def _get_benchmark_names():
+    for name in list_benchmark_names():
+        print(name)
+    return 0
+
+
+def _prompt_and_save_llm_api_key(args: argparse.Namespace, project_root: Path):
+    api_key = getpass.getpass(f"Enter value for {args.llm_api_key_env}: ")
+    _write_env_var(project_root / ".env", args.llm_api_key_env, api_key)
+    print(f"Saved {args.llm_api_key_env} to {project_root / '.env'}")
+    return 0
+
+
+def _create_adapter_and_resolve_checked_out_bug(
+    args: argparse.Namespace, project_root: Path
+) -> tuple[BenchmarkAdapter, Path, Path]:
+
+    adapter = create_bugsinpy_adapter(project_root)
+    adapter.toolchain.ensure_installed()
+
+    adapter = create_bugsinpy_adapter(project_root)
+    adapter.toolchain.ensure_installed()
+
+    projects_dir = adapter.toolchain.repo_dir / "projects"
+    project_dir = projects_dir / args.project
+    if not project_dir.is_dir():
+        raise BenchmarkError(f"No such BugsInPy project: {args.project}")
+
+    bug_dir = project_dir / "bugs" / str(args.bug)
+    if not bug_dir.is_dir():
+        raise BenchmarkError(
+            f"No such bug {args.bug} for BugsInPy project {args.project}"
+        )
+
+    destination = (
+        project_root / ".workspace" / "bugsinpy" / f"{args.project}_{args.bug}"
+    )
+    worktree = destination / args.project
+    if not worktree.exists():
+        raise BenchmarkError(
+            f"No checkout found at {worktree}. "
+            f"Run `python -m apr_framework bugsinpy checkout {args.project} {args.bug}` first."
+        )
+
+    return adapter, worktree, bug_dir
+
+
 def _print_repair_summary(cells) -> None:
     print("\n=== Repair comparison summary ===")
     header = (
@@ -1112,9 +1258,15 @@ def _build_techniques(make_sbfl, make_mbfl, make_hybrid):
 
     return [
         ("SBFL-Ochiai (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "ochiai"))),
-        ("SBFL-Tarantula (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "tarantula"))),
+        (
+            "SBFL-Tarantula (baseline)",
+            _BugLocalizer(lambda bug: make_sbfl(bug, "tarantula")),
+        ),
         ("SBFL-DStar (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "dstar"))),
-        ("SBFL-Jaccard (extension)", _BugLocalizer(lambda bug: make_sbfl(bug, "jaccard"))),
+        (
+            "SBFL-Jaccard (extension)",
+            _BugLocalizer(lambda bug: make_sbfl(bug, "jaccard")),
+        ),
         ("SBFL-SBI (extension)", _BugLocalizer(lambda bug: make_sbfl(bug, "sbi"))),
         ("MBFL-Metallaxis (baseline)", _BugLocalizer(make_mbfl)),
         ("Hybrid SBFL+MBFL (extension)", _BugLocalizer(make_hybrid)),
@@ -1168,6 +1320,41 @@ def _resolve_localize_family(args) -> str:
     return "mbfl" if args.mbfl else args.family
 
 
+def resolve_effective_metric(args: argparse.Namespace, family: str) -> str:
+    """Return the metric to use, falling back to the family's default when --metric is unset."""
+    return args.metric or ("metallaxis" if family == "mbfl" else "ochiai")
+
+
+def build_localize_config_data(
+    args: argparse.Namespace,
+    family: str,
+    effective_metric: str,
+    started_at: datetime,
+) -> dict:
+    """Build the config.json payload for a `localize` run."""
+    config_data: dict = {
+        "runner": "fauxpy-localizer",
+        "backend": args.backend,
+        "project": args.project,
+        "bug_id": args.bug,
+        "family": family,
+        "granularity": args.granularity,
+        "top_n": args.top_n,
+        "mutation_strategy": args.mutation_strategy,
+        "mutation_budget": args.mutation_budget,
+        "mutation_seed": args.seed,
+        "started_at": started_at.isoformat(),
+    }
+    if family == "hybrid":
+        config_data["sbfl_metric"] = args.sbfl_metric
+        config_data["mbfl_metric"] = args.mbfl_metric
+        config_data["sbfl_weight"] = args.sbfl_weight
+        config_data["mbfl_weight"] = args.mbfl_weight
+    else:
+        config_data["metric"] = effective_metric
+    return config_data
+
+
 def _validate_localize_args(args, family: str) -> None:
     if family == "hybrid" and args.metric is not None:
         raise ConfigurationError(
@@ -1209,21 +1396,17 @@ def _infer_fauxpy_src(worktree: Path, project: str) -> str:
     return "."
 
 
-def _parse_fauxpy_failing_tests_command(value:str | None) -> list[str]:
+def _parse_fauxpy_failing_tests_command(value: str | None) -> list[str]:
     if value is None:
         return []
-    
+
     stripped = value.strip()
     if not stripped:
         return []
     if stripped.startswith("[") and stripped.endswith("]"):
         stripped = stripped[1:-1]
 
-    return [
-        item.strip()
-        for item in stripped.split(",")
-        if item.strip()
-    ]
+    return [item.strip() for item in stripped.split(",") if item.strip()]
 
 
 def _parse_fauxpy_test_targets_command(values: list[str] | None) -> list[str]:
@@ -1234,5 +1417,3 @@ def _parse_fauxpy_test_targets_command(values: list[str] | None) -> list[str]:
     for value in values:
         targets.extend(item.strip() for item in value.split(",") if item.strip())
     return targets
-
-

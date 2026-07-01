@@ -185,7 +185,9 @@ class DummyEvaluationRunner(EvaluationRunner):
             }
 
         patch = patches[0]
-        writer.log(f"Selected patch {patch.patch_id} for {self._bug_label(checkout.bug)}")
+        writer.log(
+            f"Selected patch {patch.patch_id} for {self._bug_label(checkout.bug)}"
+        )
 
         patch_apply = None
         if patch.diff_text:
@@ -205,7 +207,9 @@ class DummyEvaluationRunner(EvaluationRunner):
                     "patch_apply": patch_apply,
                 }
 
-            writer.log(f"Preparing patched environment for {self._bug_label(checkout.bug)}")
+            writer.log(
+                f"Preparing patched environment for {self._bug_label(checkout.bug)}"
+            )
             benchmark.prepare_environment(checkout)
         else:
             writer.log(f"No-op patch selected for {self._bug_label(checkout.bug)}")
@@ -239,7 +243,9 @@ class DummyEvaluationRunner(EvaluationRunner):
             "stderr": completed.stderr,
         }
 
-    def _status_for_patch(self, patch: PatchCandidate, final_tests: TestRunResult) -> str:
+    def _status_for_patch(
+        self, patch: PatchCandidate, final_tests: TestRunResult
+    ) -> str:
         if patch.metadata.get("is_noop"):
             return "no_patch"
         if final_tests.failed_count == 0 and final_tests.error_count == 0:

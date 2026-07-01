@@ -148,23 +148,23 @@ class RankedLocation:
     """
 
     rank: int
-    file_path: str 
+    file_path: str
     location: str
-    score: float | None = None 
+    score: float | None = None
     line: int | None = None
-    # for function-level granularity 
+    # for function-level granularity
     end_line: int | None = None
     function: str | None = None
-    raw_location: str = "" 
+    raw_location: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
-    
+
 
 @dataclass
 class LocalizationResult:
     """Structured result of fault localization, containing the ranked suspicious code locations for a specific bug and optional metadata"""
 
     bug: BugIdentifier
-    backend: str 
+    backend: str
     ranked_locations: list[RankedLocation]
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -244,13 +244,12 @@ class EvaluationResult:
     run_dir: str | None = None
 
 
-
 @dataclass(frozen=True)
 class LocalizationConfig:
-    backend: str ="fauxpy"
+    backend: str = "fauxpy"
     family: str = "sbfl"
-    granularity: str ="statement"
-    top_n: int | None = None 
+    granularity: str = "statement"
+    top_n: int | None = None
     src: str = "."
     exclude: list[str] = field(default_factory=list)
-    mutation: str | None = None 
+    mutation: str | None = None

@@ -65,9 +65,8 @@ def extract_patch_from_llm_response(
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _extract_code_block(
-    llm_response_text: str, source_file_path: Path
-) -> str | None:
+
+def _extract_code_block(llm_response_text: str, source_file_path: Path) -> str | None:
     """Return the content of the first fenced code block, or None."""
     match = _PYTHON_FENCE_RE.search(llm_response_text)
     if match is None:

@@ -95,7 +95,7 @@ class OpenAICompatibleClient(LLMClient):
         api_key = os.environ.get(self._repair_config.api_key_env_var)
         if not api_key:
             raise ConfigurationError(
-                f"LLM API key not found. Set the environment variable "
+                f"API key not found. Set the environment variable "
                 f"{self._repair_config.api_key_env_var!r} before running."
             )
 

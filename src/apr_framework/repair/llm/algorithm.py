@@ -22,6 +22,7 @@ from apr_framework.repair.llm.patch_extractor import extract_patch_from_llm_resp
 from apr_framework.repair.llm.prompt_builder import (
     build_repair_prompt,
     extract_function_source,
+    load_system_prompt,
 )
 from apr_framework.repair.patch_applier import apply_patch_and_validate
 from apr_framework.repair.regression import RegressionContext, build_regression_context
@@ -57,6 +58,7 @@ class LLMRepairAlgorithm(RepairAlgorithm):
         self._adapter = adapter
         self._repair_config = repair_config
         self._llm_client = llm_client
+        self._system_message_text = load_system_prompt(repair_config.system_prompt_name)
         # Regression baseline is established once, lazily, on the first
         # validate_patch call; reused for every subsequent candidate.
         self._regression: RegressionContext | None = None
@@ -288,7 +290,12 @@ class LLMRepairAlgorithm(RepairAlgorithm):
             )
             return []
 
-        messages = build_repair_prompt(location, function_source_text, function_start_line)
+        messages = build_repair_prompt(
+            location,
+            function_source_text,
+            function_start_line,
+            system_message_text=self._system_message_text,
+        )
 
         logger.info(
             "Querying LLM for %s:%d (rank %d, score %s) — up to %d attempt(s)",
@@ -396,9 +403,7 @@ class LLMRepairAlgorithm(RepairAlgorithm):
             stripped_file_path = (
                 Path(*parts[1:]) if len(parts) > 1 else Path(file_path_str)
             )
-            worktree_stripped_path = (
-                checkout.worktree / stripped_file_path
-            ).resolve()
+            worktree_stripped_path = (checkout.worktree / stripped_file_path).resolve()
             if worktree_stripped_path.exists():
                 return worktree_stripped_path
 

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from apr_framework.core.exceptions import ConfigurationError
+from apr_framework.repair.llm.prompt_builder import load_system_prompt
 
 _VALID_LLM_PROVIDERS: frozenset[str] = frozenset({"openai-compatible"})
 
@@ -19,9 +20,11 @@ class LLMRepairConfig:
         llm_provider:     Client implementation to use (currently "openai-compatible").
         base_url:         API endpoint URL. None → use GPT_AT_RUB_DEFAULT_BASE_URL.
         api_key_env_var:  Name of the environment variable holding the API key.
+        system_prompt_name: File stem under repair/llm/prompts/ (e.g. "prompt1")
+                            supplying the system message sent with every request.
         timeout_seconds:  Wall-clock seconds allowed per test-suite invocation.
-        iterative:        Task 3 hook — must stay False for Task 1 (loop not yet implemented).
-        max_iterations:   Max conversation turns for the iterative loop (Task 3).
+        iterative:        For loops
+        max_iterations:   Max conversation turns for the iterative loop
         budget:           Max patch validations before halting (mirrors TemplateRepairConfig).
         stop_on_first:    Stop after first plausible patch.
         regression_check: Whether to run the regression half of plausibility.
@@ -34,6 +37,7 @@ class LLMRepairConfig:
     llm_provider: str = "openai-compatible"
     base_url: str | None = None
     api_key_env_var: str = "GPT_AT_RUB_API_KEY"
+    system_prompt_name: str = "prompt1"
     timeout_seconds: int = 120
     # Task 3 hook — overriding repair() for iterative mode is not implemented yet
     iterative: bool = False
@@ -63,3 +67,5 @@ class LLMRepairConfig:
             )
         if self.budget < 1:
             raise ConfigurationError(f"budget must be >= 1, got {self.budget}")
+        # Fail fast if the named prompt file does not exist, rather than at first LLM call.
+        load_system_prompt(self.system_prompt_name)

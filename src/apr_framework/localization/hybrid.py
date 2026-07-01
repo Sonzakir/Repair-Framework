@@ -32,7 +32,9 @@ class HybridFaultLocalizer(FaultLocalizer):
     ) -> None:
         _validate_weights(sbfl_weight, mbfl_weight)
         if top_n is not None and top_n <= 0:
-            raise ConfigurationError("Hybrid localization top_n must be positive or None.")
+            raise ConfigurationError(
+                "Hybrid localization top_n must be positive or None."
+            )
 
         total_weight = sbfl_weight + mbfl_weight
         self._sbfl_localizer = sbfl_localizer
@@ -102,7 +104,9 @@ class HybridFaultLocalizer(FaultLocalizer):
     ) -> list[RankedLocation]:
         _validate_weights(sbfl_weight, mbfl_weight)
         if top_n is not None and top_n <= 0:
-            raise ConfigurationError("Hybrid localization top_n must be positive or None.")
+            raise ConfigurationError(
+                "Hybrid localization top_n must be positive or None."
+            )
 
         total_weight = sbfl_weight + mbfl_weight
         normalized_sbfl_weight = sbfl_weight / total_weight

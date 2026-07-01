@@ -52,7 +52,11 @@ class LoopOutcome:
 
     @property
     def plausible_results(self) -> list[RepairAttemptResult]:
-        return [attempt_result for attempt_result in self.all_results if attempt_result.status in (RepairStatus.PLAUSIBLE, RepairStatus.CORRECT)]
+        return [
+            attempt_result
+            for attempt_result in self.all_results
+            if attempt_result.status in (RepairStatus.PLAUSIBLE, RepairStatus.CORRECT)
+        ]
 
 
 def run_validation_loop(
@@ -77,7 +81,7 @@ def run_validation_loop(
     """
     started_at = time.monotonic()
 
-    # Generate all candidate patches 
+    # Generate all candidate patches
     candidates = repair.generate_patches(bug, checkout)
     total_generated = len(candidates)
     logger.info("Total candidates generated: %d", total_generated)
@@ -99,7 +103,6 @@ def run_validation_loop(
             time_to_first_plausible_seconds=None,
             total_wall_clock_seconds=elapsed,
         )
-
 
     budget_remaining = budget
     all_results: list[RepairAttemptResult] = []
@@ -145,12 +148,16 @@ def run_validation_loop(
                 result.patch.patch_id if result.patch else "?",
             )
             if stop_on_first:
-                logger.info("stop_on_first=True — stopping after first plausible patch.")
+                logger.info(
+                    "stop_on_first=True — stopping after first plausible patch."
+                )
                 break
 
     elapsed = time.monotonic() - started_at
     validated_count = len(all_results)
-    plausible_results = [result for result in all_results if result.status == RepairStatus.PLAUSIBLE]
+    plausible_results = [
+        result for result in all_results if result.status == RepairStatus.PLAUSIBLE
+    ]
 
     logger.info(
         "Repair loop finished in %.1fs: %d validated, %d plausible",

@@ -279,7 +279,9 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
         # Try stripping a leading "./" component that FauxPy sometimes emits.
         parts = file_path.parts
         if parts and parts[0] in (".", "./"):
-            stripped_file_path = Path(*parts[1:]) if len(parts) > 1 else Path(file_path_str)
+            stripped_file_path = (
+                Path(*parts[1:]) if len(parts) > 1 else Path(file_path_str)
+            )
             worktree_stripped_path = (checkout.worktree / stripped_file_path).resolve()
             if worktree_stripped_path.exists():
                 return worktree_stripped_path

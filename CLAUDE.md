@@ -22,6 +22,13 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
+### Lint / format
+```bash
+pip install -e ".[dev]"
+ruff format .
+ruff check .
+```
+
 ### Run tests
 ```bash
 pytest tests/
@@ -256,6 +263,10 @@ These rules apply to every variable and method name written or modified in this 
 
 **Private helpers** (single leading underscore) follow the same rules. The leading underscore does not relax the clarity requirement.
 
+**A name must let the reader understand the method by reading only the name — not the body.** If a method does two or more distinct things (e.g. parses CLI args *and* resolves a path), name all of them rather than reaching for an umbrella noun. Reject vague wrapper nouns like `context`, `state`, `setup`, `env`, `handler` unless the surrounding type already disambiguates what they hold:
+- `_build_cli_context()` (parses args, resolves project root, loads `.env`) → `parse_args_and_resolve_project_root()`
+- `_setup_run()` → name every step it performs, or split it into the steps and give the caller a short sequence of clearly named calls instead of one opaque one.
+
 ### Concrete examples from this codebase
 
 | Was | Now | Rule violated |
@@ -268,6 +279,7 @@ These rules apply to every variable and method name written or modified in this 
 | `cls` (holds a class type) | `operator_class` | vague abbreviation in the explicit banned list |
 | `raw` (file-path string) | `file_path_str` | no `_str` suffix for path string |
 | `stripped` (a `Path`) | `stripped_file_path` | no `_path` suffix for `Path` object |
+| `_build_cli_context()` (returns args + project root) | `parse_args_and_resolve_project_root()` | vague umbrella noun (`context`) hid what the method actually returns |
 
 ## Troubleshooting
 

@@ -7,6 +7,7 @@ from apr_framework.core.models import (
     TestRunResult,
 )
 
+
 class FaultLocalizer(ABC):
     """
     Interface for components that rank suspicious source locations for a bug.
@@ -22,7 +23,10 @@ class FaultLocalizer(ABC):
 
     @abstractmethod
     def localize(
-        self, bug: BugIdentifier, checkout: CheckoutResult, test_result: TestRunResult
+        self,
+        bug: BugIdentifier,
+        checkout: CheckoutResult,
+        test_result: TestRunResult | None = None,
     ) -> LocalizationResult:
         """
         Analyze a checked-out buggy program and rank suspicious code locations.

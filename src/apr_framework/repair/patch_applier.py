@@ -117,9 +117,7 @@ def apply_patch_and_validate(
                 new_failures = sorted(
                     patched_suite_failing_tests - regression_context.baseline_failing
                 )
-                logger.debug(
-                    "Regression check failed — new failures: %s", new_failures
-                )
+                logger.debug("Regression check failed — new failures: %s", new_failures)
 
         return trigger_passed and regression_ok, trigger_test_run_result
 

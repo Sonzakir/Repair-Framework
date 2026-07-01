@@ -106,9 +106,7 @@ class BugsInPyDockerExecutor:
         self._config = config
         self._docker = environ.get("DOCKER", "docker")
         self._image = environ.get("BUGSINPY_IMAGE", DEFAULT_BUGSINPY_IMAGE)
-        self._container = environ.get(
-            "BUGSINPY_CONTAINER", DEFAULT_BUGSINPY_CONTAINER
-        )
+        self._container = environ.get("BUGSINPY_CONTAINER", DEFAULT_BUGSINPY_CONTAINER)
 
     @property
     def image(self) -> str:
@@ -397,9 +395,7 @@ class BugsInPyDockerExecutor:
             return False
 
         destinations = {
-            mount.get("Destination")
-            for mount in mounts
-            if isinstance(mount, dict)
+            mount.get("Destination") for mount in mounts if isinstance(mount, dict)
         }
         return {
             "/home/bugsinpy/framework",
@@ -436,7 +432,9 @@ class BugsInPyDockerExecutor:
 
         try:
             relative = resolved.relative_to(self._config.workspace_dir.resolve())
-            return str(BUGSINPY_CONTAINER_WORKSPACE / PurePosixPath(relative.as_posix()))
+            return str(
+                BUGSINPY_CONTAINER_WORKSPACE / PurePosixPath(relative.as_posix())
+            )
         except ValueError:
             pass
 
@@ -910,7 +908,8 @@ class BugsInPyAdapter(BenchmarkAdapter):
             r"passed|failed|error|skipped|xfailed|xpassed|deselected|warning"
         )
         PYTEST_SUMMARY_PATTERN = re.compile(
-            r"^=+\s+(?P<summary>.*?\d+\s+(?:" + PYTEST_RESULT_KEYWORDS
+            r"^=+\s+(?P<summary>.*?\d+\s+(?:"
+            + PYTEST_RESULT_KEYWORDS
             + r")s?\b.*?)\s+=+\s*$",
             re.MULTILINE,
         )

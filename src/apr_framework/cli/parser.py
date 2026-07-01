@@ -39,10 +39,17 @@ def build_parser() -> argparse.ArgumentParser:
     localize_parser.add_argument("--project", required=True)
     localize_parser.add_argument("--bug", type=int, required=True)
     localize_parser.add_argument("--src", default=None)
-    localize_parser.add_argument("--family" , type=str , choices=["sbfl", "mbfl", "hybrid"] ,default="sbfl")
+    localize_parser.add_argument(
+        "--family", type=str, choices=["sbfl", "mbfl", "hybrid"], default="sbfl"
+    )
     localize_parser.add_argument("--mbfl", action="store_true")
-    localize_parser.add_argument("--granularity" , type=str, default="statement" , choices=["statement" , "function"])
-    localize_parser.add_argument("--failing_tests" , type=str , default=None)
+    localize_parser.add_argument(
+        "--granularity",
+        type=str,
+        default="statement",
+        choices=["statement", "function"],
+    )
+    localize_parser.add_argument("--failing_tests", type=str, default=None)
     localize_parser.add_argument("--test-target", action="append", default=None)
     localize_parser.add_argument("--top-n", type=int, default=None)
     localize_parser.add_argument("--show-raw-output", action="store_true")
@@ -68,9 +75,6 @@ def build_parser() -> argparse.ArgumentParser:
     localize_parser.add_argument("--sbfl-weight", type=float, default=0.5)
     localize_parser.add_argument("--mbfl-weight", type=float, default=0.5)
     localize_parser.add_argument("--runs-dir", default="runs")
-
-
-    
 
     ### BugsInPy CLI commands
     bugsinpy_parser = subparsers.add_parser("bugsinpy")
@@ -208,43 +212,64 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated enabled mutation operators (default: all).",
     )
     eval_repair_parser.add_argument(
-        "--budget", type=int, default=200, help="Max patch validations per cell (default: 200)."
+        "--budget",
+        type=int,
+        default=200,
+        help="Max patch validations per cell (default: 200).",
     )
     eval_repair_parser.add_argument(
-        "--top-n", dest="top_n", type=int, default=5,
+        "--top-n",
+        dest="top_n",
+        type=int,
+        default=5,
         help="Top-N suspicious locations to attempt (default: 5).",
     )
     eval_repair_parser.add_argument(
-        "--granularity", choices=["statement", "function"], default="statement",
+        "--granularity",
+        choices=["statement", "function"],
+        default="statement",
         help="Localization granularity for automated FL (default: statement).",
     )
     eval_repair_parser.add_argument(
-        "--timeout", type=int, default=120,
+        "--timeout",
+        type=int,
+        default=120,
         help="Seconds allowed per test-suite invocation (default: 120).",
     )
     eval_repair_parser.add_argument(
-        "--stop-on-first", dest="stop_on_first", action="store_true",
+        "--stop-on-first",
+        dest="stop_on_first",
+        action="store_true",
         help="Stop validating a cell after the first plausible patch.",
     )
     eval_repair_parser.add_argument(
-        "--no-regression-check", dest="regression_check", action="store_false",
+        "--no-regression-check",
+        dest="regression_check",
+        action="store_false",
         help="Skip the regression half of plausibility (faster).",
     )
     eval_repair_parser.set_defaults(regression_check=True)
     eval_repair_parser.add_argument(
-        "--ranker", choices=["weighted", "none"], default="weighted",
+        "--ranker",
+        choices=["weighted", "none"],
+        default="weighted",
         help="Patch ranking strategy applied to plausible patches (default: weighted).",
     )
     eval_repair_parser.add_argument(
-        "--ranker-weights", dest="ranker_weights", default=None,
+        "--ranker-weights",
+        dest="ranker_weights",
+        default=None,
         help="Comma-separated weights for the weighted ranker (default: 0.6,0.25,0.15).",
     )
     eval_repair_parser.add_argument(
-        "--output-dir", default="experiment_results/repair",
+        "--output-dir",
+        default="experiment_results/repair",
         help="Directory for results.json and README.md (default: experiment_results/repair).",
     )
     eval_repair_parser.add_argument(
-        "--runs-dir", dest="runs_dir", default="runs",
+        "--runs-dir",
+        dest="runs_dir",
+        default="runs",
         help="Directory for per-cell run artifacts (default: runs).",
     )
 
@@ -286,6 +311,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=5,
         help="Max LLM patch candidates generated per suspicious location (default: 5)",
+    )
+    repair_parser.add_argument(
+        "--system-prompt",
+        dest="system_prompt",
+        type=str,
+        default="prompt1",
+        help=(
+            "Name (file stem) of the system prompt under "
+            "repair/llm/prompts/ used for LLM-based repair (default: prompt1)"
+        ),
     )
     repair_parser.add_argument(
         "--llm-base-url",
