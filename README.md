@@ -923,7 +923,18 @@ again:
 docker rm -f apr-bugsinpy-executor
 python -m apr_framework bugsinpy setup
 ```
-- For windows machines Change the end of the line sequence: CRLF -> LF 
+- For windows machines Change the end of the line sequence: CRLF -> LF
+
+- **GPT@RUB API is only reachable from within the RUB network/VPN.** If `--technique llm`
+  fails with a connection error/timeout, connect to the RUB VPN before running the command
+  (the container inherits the host's network path). Generate the access token in your
+  GPT@RUB account settings and export it via `--llm-api-key-env` (default `GPT_AT_RUB_API_KEY`).
+
+- **GPT@RUB caps external-API calls at 60 requests/minute.** `OpenAICompatibleClient`
+  (`repair/llm/client.py`) tracks its own request timestamps in a sliding 60-second window
+  and sleeps as needed before each call to stay under the cap, so large `--max-candidates`
+  / `--top-n` runs won't get rejected by the server for exceeding the rate limit.
+
 ## Summary
 
 | Content | Implementation |

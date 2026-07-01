@@ -1,5 +1,8 @@
+import getpass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 from apr_framework.benchmarks.registry import (
     create_bugsinpy_adapter,
@@ -45,11 +48,19 @@ def _run() -> int:
     parser = build_parser()
     args = parser.parse_args()
     project_root = Path.cwd()
+    load_dotenv(project_root / ".env")
 
     # List Integrated Benchmarks in the Framework
     if args.command == "list-benchmarks":
         for name in list_benchmark_names():
             print(name)
+        return 0
+
+    # Interactively store an LLM API key in the local .env file
+    if args.command == "configure":
+        api_key = getpass.getpass(f"Enter value for {args.llm_api_key_env}: ")
+        _write_env_var(project_root / ".env", args.llm_api_key_env, api_key)
+        print(f"Saved {args.llm_api_key_env} to {project_root / '.env'}")
         return 0
 
     # -- FauxPy --
@@ -734,6 +745,24 @@ def _build_llm_algorithm(args, localization_result, adapter):
         repair_config=repair_config,
         llm_client=llm_client,
     )
+
+
+def _write_env_var(env_file_path: Path, key_name: str, value: str) -> None:
+    """Set `key_name=value` in the given .env file, replacing an existing entry or appending a new one."""
+    existing_lines = (
+        env_file_path.read_text().splitlines() if env_file_path.exists() else []
+    )
+    updated_lines = []
+    key_written = False
+    for line in existing_lines:
+        if line.startswith(f"{key_name}="):
+            updated_lines.append(f"{key_name}={value}")
+            key_written = True
+        else:
+            updated_lines.append(line)
+    if not key_written:
+        updated_lines.append(f"{key_name}={value}")
+    env_file_path.write_text("\n".join(updated_lines) + "\n")
 
 
 def _run_evaluate_localization(args, project_root: Path, adapter) -> int:

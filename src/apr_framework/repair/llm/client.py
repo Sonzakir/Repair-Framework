@@ -2,14 +2,22 @@
 
 import logging
 import os
+import time
 from abc import ABC, abstractmethod
+from collections import deque
 
 from apr_framework.core.exceptions import APRFrameworkError, ConfigurationError
 from apr_framework.repair.llm.config import LLMRepairConfig
 
 logger = logging.getLogger(__name__)
 
-GPT_AT_RUB_DEFAULT_BASE_URL = "https://gpt.ruhr-uni-bochum.de/api"
+GPT_AT_RUB_DEFAULT_BASE_URL = "https://gpt.ruhr-uni-bochum.de/external/v1"
+
+# GPT@RUB caps external-API requests at 60 per minute (see the "BETA: External API
+# Endpoint" documentation). The client throttles itself to that limit rather than
+# relying on the server to reject overflow requests.
+GPT_AT_RUB_RATE_LIMIT_REQUESTS_PER_MINUTE = 60
+GPT_AT_RUB_RATE_LIMIT_WINDOW_SECONDS = 60.0
 
 
 class LLMClient(ABC):
@@ -39,6 +47,35 @@ class OpenAICompatibleClient(LLMClient):
     def __init__(self, repair_config: LLMRepairConfig) -> None:
         self._repair_config = repair_config
         self._endpoint_url = repair_config.base_url or GPT_AT_RUB_DEFAULT_BASE_URL
+        self._recent_request_timestamps: deque[float] = deque()
+
+    def _wait_for_rate_limit_slot(self) -> None:
+        """Block until issuing another request would stay within the per-minute cap."""
+        while True:
+            now = time.monotonic()
+            while (
+                self._recent_request_timestamps
+                and now - self._recent_request_timestamps[0]
+                >= GPT_AT_RUB_RATE_LIMIT_WINDOW_SECONDS
+            ):
+                self._recent_request_timestamps.popleft()
+
+            if (
+                len(self._recent_request_timestamps)
+                < GPT_AT_RUB_RATE_LIMIT_REQUESTS_PER_MINUTE
+            ):
+                self._recent_request_timestamps.append(now)
+                return
+
+            sleep_seconds = GPT_AT_RUB_RATE_LIMIT_WINDOW_SECONDS - (
+                now - self._recent_request_timestamps[0]
+            )
+            logger.info(
+                "GPT@RUB rate limit (%d req/min) reached; sleeping %.1fs",
+                GPT_AT_RUB_RATE_LIMIT_REQUESTS_PER_MINUTE,
+                sleep_seconds,
+            )
+            time.sleep(sleep_seconds)
 
     def complete(self, messages: list[dict[str, str]]) -> str:
         """Call the OpenAI-compatible chat completions endpoint.
@@ -73,6 +110,8 @@ class OpenAICompatibleClient(LLMClient):
             self._repair_config.model_name,
             self._repair_config.temperature,
         )
+
+        self._wait_for_rate_limit_slot()
 
         try:
             response = openai_client.chat.completions.create(

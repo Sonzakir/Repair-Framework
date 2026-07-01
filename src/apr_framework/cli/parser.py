@@ -20,7 +20,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("list-benchmarks")
 
-    # FauxPy CLI commands 
+    ## configure — interactively store an LLM API key in the local .env file
+    configure_parser = subparsers.add_parser(
+        "configure",
+        help="Interactively store an LLM API key in the local .env file.",
+    )
+    configure_parser.add_argument(
+        "--llm-api-key-env",
+        dest="llm_api_key_env",
+        type=str,
+        default="GPT_AT_RUB_API_KEY",
+        help="Environment variable name to store the key under (default: GPT_AT_RUB_API_KEY)",
+    )
+
+    # FauxPy CLI commands
     localize_parser = subparsers.add_parser("localize")
     localize_parser.add_argument("--backend", choices=["fauxpy"], default="fauxpy")
     localize_parser.add_argument("--project", required=True)
