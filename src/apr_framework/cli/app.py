@@ -589,32 +589,12 @@ def _run_repair_evaluation_and_write_results(
     from apr_framework.evaluation.repair_runner import RepairEvaluationRunner
 
     if args.technique == "template":
-        enabled_operators = [
-            operator.strip() for operator in args.operators.split(",") if operator.strip()
-        ]
-        template_repair_config = TemplateRepairConfig(
-            budget=args.budget,
-            top_n_locations=args.top_n,
-            enabled_operators=enabled_operators,
-            timeout_per_test=args.timeout,
-            stop_on_first=args.stop_on_first,
-            regression_check=args.regression_check,
-        )
-        algorithm = TemplateRepairAlgorithm(
-            localization_result=localization_result,
-            adapter=adapter,
-            config=template_repair_config,
-        )
-        writer.log(
-            f"Repair started: budget={args.budget}, top_n={args.top_n}, "
-            f"operators={template_repair_config.enabled_operators}"
+        algorithm = _build_template_algorithm_and_log_start(
+            args, localization_result, adapter, writer
         )
     elif args.technique == "llm":
-        algorithm = _build_llm_algorithm(args, localization_result, adapter)
-        writer.log(
-            f"Repair started: budget={args.budget}, top_n={args.top_n}, "
-            f"model={args.model}, temperature={args.temperature}, "
-            f"max_candidates={args.max_candidates}"
+        algorithm = _build_llm_algorithm_and_log_start(
+            args, localization_result, adapter, writer
         )
     else:
         raise ConfigurationError(f"Unknown repair technique: {args.technique!r}")
@@ -861,8 +841,33 @@ def print_localize_raw_output_if_requested(
             print(mbfl_raw_output)
 
 
-def _build_llm_algorithm(args, localization_result, adapter):
-    """Construct an LLMRepairAlgorithm from CLI arguments."""
+def _build_template_algorithm_and_log_start(args, localization_result, adapter, writer):
+    """Construct a TemplateRepairAlgorithm from CLI arguments and log the repair start line."""
+    enabled_operators = [
+        operator.strip() for operator in args.operators.split(",") if operator.strip()
+    ]
+    template_repair_config = TemplateRepairConfig(
+        budget=args.budget,
+        top_n_locations=args.top_n,
+        enabled_operators=enabled_operators,
+        timeout_per_test=args.timeout,
+        stop_on_first=args.stop_on_first,
+        regression_check=args.regression_check,
+    )
+    algorithm = TemplateRepairAlgorithm(
+        localization_result=localization_result,
+        adapter=adapter,
+        config=template_repair_config,
+    )
+    writer.log(
+        f"Repair started: budget={args.budget}, top_n={args.top_n}, "
+        f"operators={template_repair_config.enabled_operators}"
+    )
+    return algorithm
+
+
+def _build_llm_algorithm_and_log_start(args, localization_result, adapter, writer):
+    """Construct an LLMRepairAlgorithm from CLI arguments and log the repair start line."""
     from apr_framework.repair.llm import (
         LLMRepairAlgorithm,
         LLMRepairConfig,
@@ -884,12 +889,18 @@ def _build_llm_algorithm(args, localization_result, adapter):
         regression_check=args.regression_check,
     )
     llm_client = OpenAICompatibleClient(repair_config)
-    return LLMRepairAlgorithm(
+    algorithm = LLMRepairAlgorithm(
         localization_result=localization_result,
         adapter=adapter,
         repair_config=repair_config,
         llm_client=llm_client,
     )
+    writer.log(
+        f"Repair started: budget={args.budget}, top_n={args.top_n}, "
+        f"model={args.model}, temperature={args.temperature}, "
+        f"max_candidates={args.max_candidates}"
+    )
+    return algorithm
 
 
 def _write_env_var(env_file_path: Path, key_name: str, value: str) -> None:
