@@ -203,13 +203,14 @@ class BugsInPyDockerExecutor:
         cwd: Path | None = None,
         check: bool = True,
         capture_output: bool = False,
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """
         Core plumbing for all docker exec calls into the BugsInPy container.
 
         Ensures the container is running, resolves the working directory, translates
         any host paths in args to their container equivalents, then delegates to
-        _run_docker.
+        _run_docker. An optional wall-clock timeout is forwarded to _run_docker.
         """
         self._ensure_docker_available()
         if not self._container_exists():
@@ -232,6 +233,7 @@ class BugsInPyDockerExecutor:
             ["exec", "-w", container_cwd, self.container, *translated_args],
             check=check,
             capture_output=capture_output,
+            timeout=timeout,
         )
 
     def _ensure_docker_available(self) -> None:
