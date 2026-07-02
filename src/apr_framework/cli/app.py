@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 import argparse
 import getpass
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
-from apr_framework.benchmarks.base import BenchmarkAdapter
+from apr_framework.benchmarks.bugsinpy import BugsInPyAdapter
 from apr_framework.benchmarks.registry import (
     create_bugsinpy_adapter,
     list_benchmark_names,
@@ -21,6 +25,7 @@ from apr_framework.core.models import (
     CheckoutResult,
     EvaluationResult,
     LocalizationResult,
+    TestRunResult,
 )
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
 from apr_framework.evaluation.localization_runner import LocalizationComparisonRunner
@@ -42,6 +47,14 @@ from apr_framework.repair import (
     TemplateRepairConfig,
 )
 from apr_framework.reporting import ArchiveReportGenerator
+
+if TYPE_CHECKING:
+    from apr_framework.evaluation.localization_runner import (
+        LocalizationTechniqueResult,
+    )
+    from apr_framework.evaluation.repair_comparison_runner import RepairCellResult
+    from apr_framework.repair.base import RepairAlgorithm
+    from apr_framework.repair.ranking.base import PatchRanker
 
 
 def main() -> int:
@@ -290,7 +303,9 @@ def _run() -> int:
     return 1
 
 
-def handle_repair(args, adapter, project_root: Path) -> int:
+def handle_repair(
+    args: argparse.Namespace, adapter: BugsInPyAdapter, project_root: Path
+) -> int:
     """Orchestrate a repair run (template or LLM technique) from CLI arguments.
 
     Steps:
@@ -322,7 +337,9 @@ def handle_repair(args, adapter, project_root: Path) -> int:
     return 0
 
 
-def _resolve_repair_checkout_or_fail(args, adapter, project_root: Path) -> CheckoutResult:
+def _resolve_repair_checkout_or_fail(
+    args: argparse.Namespace, adapter: BugsInPyAdapter, project_root: Path
+) -> CheckoutResult:
     """Resolve the canonical bug and its checked-out worktree, raising if absent."""
     adapter.toolchain.ensure_installed()
     canonical_project = adapter.resolve_project(args.project)
@@ -348,7 +365,9 @@ def _resolve_repair_checkout_or_fail(args, adapter, project_root: Path) -> Check
     )
 
 
-def _create_run_writer_and_log_repair_start(args, project_root: Path, bug: BugIdentifier):
+def _create_run_writer_and_log_repair_start(
+    args: argparse.Namespace, project_root: Path, bug: BugIdentifier
+) -> tuple[RunWriter, Path, datetime]:
     """Create the run_NNN writer, capture the start timestamp, and log the run start."""
     runs_dir = Path(args.runs_dir)
     if not runs_dir.is_absolute():
@@ -360,7 +379,9 @@ def _create_run_writer_and_log_repair_start(args, project_root: Path, bug: BugId
     return writer, runs_dir, started_at
 
 
-def _build_repair_config_data(args, bug: BugIdentifier, started_at) -> dict:
+def _build_repair_config_data(
+    args: argparse.Namespace, bug: BugIdentifier, started_at: datetime
+) -> dict:
     """Build the config.json payload describing this repair run, branching on technique."""
     config_data = {
         "project": bug.project,
@@ -409,7 +430,13 @@ def _build_repair_config_data(args, bug: BugIdentifier, started_at) -> dict:
     return config_data
 
 
-def _localize_for_repair(args, adapter, checkout: CheckoutResult, writer, runs_dir: Path):
+def _localize_for_repair(
+    args: argparse.Namespace,
+    adapter: BugsInPyAdapter,
+    checkout: CheckoutResult,
+    writer: RunWriter,
+    runs_dir: Path,
+) -> LocalizationResult:
     """Produce the fault-localization result feeding repair.
 
     Tries perfect (oracle) FL, then a cached result under --skip-localize, then
@@ -437,7 +464,9 @@ def _localize_for_repair(args, adapter, checkout: CheckoutResult, writer, runs_d
     return localization_result
 
 
-def _run_perfect_localization_from_developer_fix(adapter, checkout: CheckoutResult, writer):
+def _run_perfect_localization_from_developer_fix(
+    adapter: BugsInPyAdapter, checkout: CheckoutResult, writer: RunWriter
+) -> LocalizationResult:
     """Localize using the BugsInPy developer fix as the oracle fault location."""
     from apr_framework.localization import PerfectFaultLocalizer
 
@@ -451,7 +480,9 @@ def _run_perfect_localization_from_developer_fix(adapter, checkout: CheckoutResu
     return localization_result
 
 
-def _load_cached_localization_for_bug(bug: BugIdentifier, runs_dir: Path, writer):
+def _load_cached_localization_for_bug(
+    bug: BugIdentifier, runs_dir: Path, writer: RunWriter
+) -> LocalizationResult | None:
     """Return the most recent cached localization for this exact bug, or None.
 
     Scans run_*/results.json newest-first and filters on project and bug_id so a
@@ -491,7 +522,12 @@ def _load_cached_localization_for_bug(bug: BugIdentifier, runs_dir: Path, writer
     return None
 
 
-def _run_fresh_fauxpy_localization(args, adapter, checkout: CheckoutResult, writer):
+def _run_fresh_fauxpy_localization(
+    args: argparse.Namespace,
+    adapter: BugsInPyAdapter,
+    checkout: CheckoutResult,
+    writer: RunWriter,
+) -> LocalizationResult:
     """Run a fresh FauxPy SBFL/MBFL/hybrid localization for the bug."""
     from apr_framework.localization import FauxPyConfig, FauxPyLocalizer, FauxPyToolchain
 
@@ -574,10 +610,15 @@ def _run_fresh_fauxpy_localization(args, adapter, checkout: CheckoutResult, writ
 
 
 def _run_repair_evaluation_and_write_results(
-    args, adapter, project_root: Path, runs_dir: Path,
-    config_data: dict, writer,
-    checkout: CheckoutResult, localization_result,
-):
+    args: argparse.Namespace,
+    adapter: BugsInPyAdapter,
+    project_root: Path,
+    runs_dir: Path,
+    config_data: dict,
+    writer: RunWriter,
+    checkout: CheckoutResult,
+    localization_result: LocalizationResult,
+) -> tuple[EvaluationResult, PatchRanker | None]:
     """Build the technique-specific repair algorithm and persist evaluation results.
 
     Builds either a TemplateRepairAlgorithm or an LLMRepairAlgorithm depending on
@@ -619,6 +660,7 @@ def _run_repair_evaluation_and_write_results(
     eval_results = runner.run([checkout.bug], adapter, algorithm)
     repair_result = eval_results[0]
     metrics = repair_result.metrics
+    assert metrics is not None  # RepairEvaluationRunner always populates metrics
 
     writer.log(
         f"Repair finished: status={repair_result.status}, "
@@ -629,9 +671,15 @@ def _run_repair_evaluation_and_write_results(
     return repair_result, ranker
 
 
-def _print_repair_summary_for_bug(bug: BugIdentifier, writer, repair_result, ranker) -> None:
+def _print_repair_summary_for_bug(
+    bug: BugIdentifier,
+    writer: RunWriter,
+    repair_result: EvaluationResult,
+    ranker: PatchRanker | None,
+) -> None:
     """Print the human-readable repair summary for a single bug."""
     metrics = repair_result.metrics
+    assert metrics is not None  # RepairEvaluationRunner always populates metrics
     ttfp = metrics.time_to_first_plausible_seconds
     ttfp_str = f"{ttfp:.1f}s" if ttfp is not None else "n/a"
     print(f"\nRun directory: {writer.run_dir}")
@@ -653,7 +701,7 @@ def _print_repair_summary_for_bug(bug: BugIdentifier, writer, repair_result, ran
         print(f"Rank of 1st correct (ranked): {rank_str}")
 
 
-def _build_ranker(args):
+def _build_ranker(args: argparse.Namespace) -> PatchRanker | None:
     """Construct a PatchRanker from CLI args, or return None if ranking is disabled."""
     if args.ranker == "none":
         return None
@@ -841,7 +889,12 @@ def print_localize_raw_output_if_requested(
             print(mbfl_raw_output)
 
 
-def _build_template_algorithm_and_log_start(args, localization_result, adapter, writer):
+def _build_template_algorithm_and_log_start(
+    args: argparse.Namespace,
+    localization_result: LocalizationResult,
+    adapter: BugsInPyAdapter,
+    writer: RunWriter,
+) -> RepairAlgorithm:
     """Construct a TemplateRepairAlgorithm from CLI arguments and log the repair start line."""
     enabled_operators = [
         operator.strip() for operator in args.operators.split(",") if operator.strip()
@@ -866,7 +919,12 @@ def _build_template_algorithm_and_log_start(args, localization_result, adapter, 
     return algorithm
 
 
-def _build_llm_algorithm_and_log_start(args, localization_result, adapter, writer):
+def _build_llm_algorithm_and_log_start(
+    args: argparse.Namespace,
+    localization_result: LocalizationResult,
+    adapter: BugsInPyAdapter,
+    writer: RunWriter,
+) -> RepairAlgorithm:
     """Construct an LLMRepairAlgorithm from CLI arguments and log the repair start line."""
     from apr_framework.repair.llm import (
         LLMRepairAlgorithm,
@@ -921,7 +979,9 @@ def _write_env_var(env_file_path: Path, key_name: str, value: str) -> None:
     env_file_path.write_text("\n".join(updated_lines) + "\n")
 
 
-def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
+def _run_evaluate_localization(
+    args: argparse.Namespace, project_root: Path, adapter: BugsInPyAdapter
+) -> int:
     """Run the localization comparison evaluation and write results."""
     from apr_framework.core.models import CheckoutResult
     from apr_framework.localization import (
@@ -1077,8 +1137,10 @@ def _run_evaluate_localization(args, project_root: Path, adapter) -> int:
     return 0
 
 
-def _run_evaluate_repair(args, project_root: Path, adapter) -> int:
-    """Run the Task-5 repair comparison: each bug under both FL modes + ranker."""
+def _run_evaluate_repair(
+    args: argparse.Namespace, project_root: Path, adapter: BugsInPyAdapter
+) -> int:
+    """Run the T-5 repair comparison: each bug under both FL modes + ranker."""
     from apr_framework.core.models import CheckoutResult
     from apr_framework.evaluation.repair_comparison_runner import RepairComparisonRunner
     from apr_framework.localization import (
@@ -1135,7 +1197,7 @@ def _run_evaluate_repair(args, project_root: Path, adapter) -> int:
             bug=canonical_bug, worktree=worktree, success=True, prepared=True
         )
 
-    def _auto_localizer(canonical_bug: BugIdentifier):
+    def _auto_localizer(canonical_bug: BugIdentifier) -> FaultLocalizer:
         worktree = checkouts[canonical_bug].worktree
         source_package = _infer_fauxpy_src(worktree, canonical_bug.project)
         bug_dir = (
@@ -1181,7 +1243,9 @@ def _run_evaluate_repair(args, project_root: Path, adapter) -> int:
 
     perfect_localizer = PerfectFaultLocalizer(adapter)
 
-    def localization_provider(canonical_bug: BugIdentifier, fl_mode: str):
+    def localization_provider(
+        canonical_bug: BugIdentifier, fl_mode: str
+    ) -> LocalizationResult:
         checkout = checkouts[canonical_bug]
         if fl_mode == "perfect":
             return perfect_localizer.localize(canonical_bug, checkout)
@@ -1201,7 +1265,9 @@ def _run_evaluate_repair(args, project_root: Path, adapter) -> int:
         regression_check=args.regression_check,
     )
 
-    def repair_algorithm_factory(localization_result):
+    def repair_algorithm_factory(
+        localization_result: LocalizationResult,
+    ) -> RepairAlgorithm:
         return TemplateRepairAlgorithm(
             localization_result=localization_result,
             adapter=adapter,
@@ -1250,7 +1316,7 @@ def _run_evaluate_repair(args, project_root: Path, adapter) -> int:
     return 0
 
 
-def _parse_args_and_resolve_project_root():
+def _parse_args_and_resolve_project_root() -> tuple[argparse.Namespace, Path]:
     "Parse CLI arguments and resolve the project root, loading .env before any command runs"
 
     parser = build_parser()
@@ -1260,13 +1326,13 @@ def _parse_args_and_resolve_project_root():
     return args, project_root
 
 
-def _get_benchmark_names():
+def _get_benchmark_names() -> int:
     for name in list_benchmark_names():
         print(name)
     return 0
 
 
-def _prompt_and_save_llm_api_key(args: argparse.Namespace, project_root: Path):
+def _prompt_and_save_llm_api_key(args: argparse.Namespace, project_root: Path) -> int:
     api_key = getpass.getpass(f"Enter value for {args.llm_api_key_env}: ")
     _write_env_var(project_root / ".env", args.llm_api_key_env, api_key)
     print(f"Saved {args.llm_api_key_env} to {project_root / '.env'}")
@@ -1275,10 +1341,7 @@ def _prompt_and_save_llm_api_key(args: argparse.Namespace, project_root: Path):
 
 def _create_adapter_and_resolve_checked_out_bug(
     args: argparse.Namespace, project_root: Path
-) -> tuple[BenchmarkAdapter, Path, Path]:
-
-    adapter = create_bugsinpy_adapter(project_root)
-    adapter.toolchain.ensure_installed()
+) -> tuple[BugsInPyAdapter, Path, Path]:
 
     adapter = create_bugsinpy_adapter(project_root)
     adapter.toolchain.ensure_installed()
@@ -1307,7 +1370,7 @@ def _create_adapter_and_resolve_checked_out_bug(
     return adapter, worktree, bug_dir
 
 
-def _print_repair_summary(cells) -> None:
+def _print_repair_summary(cells: list[RepairCellResult]) -> None:
     print("\n=== Repair comparison summary ===")
     header = (
         f"{'Bug':<16} {'FL':<8} {'Gen':>4} {'Plaus':>6} {'Corr':>5} "
@@ -1342,7 +1405,12 @@ def _print_repair_summary(cells) -> None:
         )
 
 
-def _build_techniques(make_sbfl, make_mbfl_traditional, make_mbfl, make_hybrid):
+def _build_techniques(
+    make_sbfl: Callable[[BugIdentifier, str], FauxPyLocalizer],
+    make_mbfl_traditional: Callable[[BugIdentifier], FauxPyLocalizer],
+    make_mbfl: Callable[[BugIdentifier], FauxPyLocalizer],
+    make_hybrid: Callable[[BugIdentifier], HybridFaultLocalizer],
+) -> list[tuple[str, FaultLocalizer]]:
     """Return (name, per-bug-localizer) pairs for all techniques.
 
     Baselines are stock FauxPy 0.7.0 behaviour:
@@ -1355,11 +1423,20 @@ def _build_techniques(make_sbfl, make_mbfl_traditional, make_mbfl, make_hybrid):
       - Hybrid: normalised weighted merge of SBFL + MBFL scores (Task 4)
     """
 
-    class _BugLocalizer:
-        def __init__(self, factory):
+    class _BugLocalizer(FaultLocalizer):
+        def __init__(self, factory: Callable[[BugIdentifier], FaultLocalizer]) -> None:
             self._factory = factory
 
-        def localize(self, bug, checkout, test_result=None):
+        @property
+        def name(self) -> str:
+            return "per-bug-localizer"
+
+        def localize(
+            self,
+            bug: BugIdentifier,
+            checkout: CheckoutResult,
+            test_result: TestRunResult | None = None,
+        ) -> LocalizationResult:
             return self._factory(bug).localize(bug, checkout, test_result)
 
     return [
@@ -1398,7 +1475,7 @@ def _parse_bug_list(spec: str) -> list[BugIdentifier]:
 
 
 def _print_summary(
-    results,
+    results: list[LocalizationTechniqueResult],
     top_ks: tuple[int, ...],
 ) -> None:
     print("\n=== Summary ===")
@@ -1417,7 +1494,7 @@ def _print_summary(
         print(f"{bug_label:<20} {r.technique:<30} {rank_str:>6}  {top_k_str}{note}")
 
 
-def _resolve_localize_family(args) -> str:
+def _resolve_localize_family(args: argparse.Namespace) -> str:
     return "mbfl" if args.mbfl else args.family
 
 
@@ -1456,7 +1533,7 @@ def build_localize_config_data(
     return config_data
 
 
-def _validate_localize_args(args, family: str) -> None:
+def _validate_localize_args(args: argparse.Namespace, family: str) -> None:
     if family == "hybrid" and args.metric is not None:
         raise ConfigurationError(
             "Use --sbfl-metric and --mbfl-metric for hybrid localization; "

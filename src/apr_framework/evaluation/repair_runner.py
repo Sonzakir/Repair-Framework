@@ -129,6 +129,8 @@ class RepairEvaluationRunner(EvaluationRunner):
         writer.log(f"Started {self.name} for {len(bugs)} bug(s)")
 
         bug_run_results: list[_BugRunResult] = []
+        
+        # Run each bug in the `bugs` and store the BugRunResult's 
         for bug in bugs:
             writer.log(f"Repairing {bug.project}#{bug.bug_id}")
             bug_run_results.append(self._run_one_bug(writer, bug, benchmark, repair))
