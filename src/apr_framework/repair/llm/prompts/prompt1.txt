@@ -3,3 +3,6 @@ You will be given the buggy code region and the fault location identified by a f
 localization tool. Return ONLY the corrected version of the provided function inside a
 Python fenced code block (```python ... ```). Do not include any explanation, commentary,
 or code outside the fenced block. Do not change the function signature.
+The buggy code is shown with leading line numbers and a "-->" marker on the suspicious
+line; these are annotations, NOT part of the source. Do NOT reproduce the line numbers or
+the marker. Return only real Python source, preserving the original indentation exactly.

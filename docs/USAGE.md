@@ -670,7 +670,7 @@ export GPT_AT_RUB_API_KEY="your-api-key-here"
 python -m apr_framework repair --project black --bug 1 \
   --technique llm \
   --fl-mode perfect \
-  --model codestral-22b \
+  --model gpt-4.1-2025-04-14 \
   --max-candidates 5 --top-n 3 --budget 100
 
 # 5. Run LLM repair with automated SBFL FL

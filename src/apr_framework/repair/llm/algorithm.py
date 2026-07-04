@@ -162,9 +162,12 @@ class LLMRepairAlgorithm(RepairAlgorithm):
         diff_text = patch_candidate.diff_text
 
         def apply_fn() -> None:
-            # Diffs use absolute paths so -p0 is correct (no path-component stripping).
+            # Diffs carry absolute header paths, but GNU patch (>=2.8) refuses to
+            # derive a target from an absolute name ("Ignoring potentially
+            # dangerous file name"). Pass the resolved file explicitly so patch
+            # applies to it directly; -p0 keeps the header untouched otherwise.
             proc = subprocess.run(
-                ["patch", "-p0"],
+                ["patch", "-p0", str(source_file_path)],
                 input=diff_text,
                 capture_output=True,
                 text=True,

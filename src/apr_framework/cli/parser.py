@@ -319,8 +319,14 @@ def build_parser() -> argparse.ArgumentParser:
     repair_parser.add_argument(
         "--model",
         type=str,
-        default="codestral-22b",
-        help="LLM model name sent to the API (default: codestral-22b)",
+        default="gpt-4o-2024-05-13",
+        help=(
+            "LLM model name sent to the API (default: gpt-4o-2024-05-13). "
+            "Must be a model your GPT@RUB account exposes via /models — "
+            "e.g. gpt-4o-2024-05-13, gpt-4.1-2025-04-14, "
+            "mistral-small-3-2-24b-instruct-2506, its-sl-ai-gpt-5. "
+            "An unavailable model (e.g. codestral-22b) returns HTTP 400."
+        ),
     )
     repair_parser.add_argument(
         "--temperature",

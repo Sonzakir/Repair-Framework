@@ -14,6 +14,7 @@ import ast
 import difflib
 import logging
 import re
+import textwrap
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -47,16 +48,27 @@ def extract_patch_from_llm_response(
     if extracted_code is None:
         return None
 
-    if not _has_valid_syntax(extracted_code, source_file_path):
-        return None
-
     original_lines = _read_source_lines(source_file_path)
     if original_lines is None:
         return None
 
-    patched_lines = _splice_replacement(
-        original_lines, extracted_code, function_start_line, function_end_line
+    # Models frequently return the function with different leading indentation
+    # than the original (e.g. an extra level, nudged by the numbered prompt).
+    # Re-indent the replacement to the original function's base indentation so it
+    # splices cleanly into the surrounding scope.
+    reindented_code = _match_base_indentation(
+        extracted_code, original_lines, function_start_line
     )
+
+    patched_lines = _splice_replacement(
+        original_lines, reindented_code, function_start_line, function_end_line
+    )
+
+    # Parse the whole spliced file rather than the isolated replacement: an
+    # indented method body is not valid at module level, so only the full-file
+    # parse can tell whether the result is genuinely well-formed Python.
+    if not _patched_file_parses(patched_lines, source_file_path):
+        return None
 
     return _compute_diff(original_lines, patched_lines, source_file_path)
 
@@ -92,6 +104,36 @@ def _has_valid_syntax(code_text: str, source_file_path: Path) -> bool:
         )
         return False
     return True
+
+
+def _match_base_indentation(
+    extracted_code: str,
+    original_lines: list[str],
+    function_start_line: int,
+) -> str:
+    """Re-indent extracted_code to the leading indentation of the original region.
+
+    The model's reply is first dedented (removing whatever common leading
+    whitespace it chose), then every non-blank line is prefixed with the
+    original region's base indentation so the replacement parses on its own and
+    lines up with the surrounding scope when spliced back in.
+    """
+    original_first_line = original_lines[function_start_line - 1]
+    base_indent = original_first_line[
+        : len(original_first_line) - len(original_first_line.lstrip())
+    ]
+
+    dedented_code = textwrap.dedent(extracted_code)
+    reindented_lines = [
+        base_indent + code_line if code_line.strip() else code_line
+        for code_line in dedented_code.splitlines(keepends=True)
+    ]
+    return "".join(reindented_lines)
+
+
+def _patched_file_parses(patched_lines: list[str], source_file_path: Path) -> bool:
+    """Return True if the fully-spliced file is still valid Python."""
+    return _has_valid_syntax("".join(patched_lines), source_file_path)
 
 
 def _read_source_lines(source_file_path: Path) -> list[str] | None:
