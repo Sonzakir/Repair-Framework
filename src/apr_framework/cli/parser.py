@@ -352,6 +352,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     repair_parser.add_argument(
+        "--context-enrichment",
+        dest="context_enrichment",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Enrich each LLM repair prompt with the failing test's source and "
+            "traceback (default: enabled). Use --no-context-enrichment for the "
+            "original prompt containing only the buggy function. LLM technique only."
+        ),
+    )
+    repair_parser.add_argument(
         "--llm-base-url",
         dest="llm_base_url",
         type=str,

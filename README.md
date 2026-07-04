@@ -731,10 +731,15 @@ The prompt is structured as a two-message OpenAI-style conversation.
 ```
 You are an automated program repair tool. Your task is to fix a bug in a Python program.
 You will be given the buggy code region and the fault location identified by a fault
-localization tool. Return ONLY the corrected version of the provided function inside a
+localization tool. You may also be given the failing test and the traceback it produces
+on the current code; when present, use them to infer the behaviour the fix must satisfy
+and the concrete failure to eliminate. Return ONLY the corrected version of the provided function inside a
 Python fenced code block (```python ... ```). Do not include any explanation, commentary,
 or code outside the fenced block. Do not change the function signature.
 ```
+
+> The last two sentences of the "may also be given …" clause are exercised by the Task 2
+> context-enrichment step below; without it the prompt behaves exactly as in Task 1.
 
 **User message** (assembled per location, three sections):
 
@@ -767,9 +772,10 @@ code block. Keep the fix minimal — change as few lines as necessary.
 | Structured `##`-headed sections | Clear separation makes it easy to extend the prompt in Task 2 (context enrichment) by inserting new sections without changing the existing ones. |
 
 The optional kwargs `failing_test_source`, `error_traceback`, and `fl_score_annotation`
-are already present in `build_repair_prompt`'s signature as Task 2 enrichment slots.
-They are accepted but no-op in Task 1, so Task 2 only passes values through without
-changing the signature.
+are present in `build_repair_prompt`'s signature as enrichment slots. In Task 1 they are
+accepted but unused, so the rendered prompt contains only the three sections above.
+`failing_test_source` and `error_traceback` are wired up in Task 2 (see the next section);
+`fl_score_annotation` remains reserved.
 
 ### Example invocations
 
@@ -825,6 +831,7 @@ export GPT_AT_RUB_API_KEY="<your-key>"
 | `--llm-provider` | `openai-compatible` | Client implementation; only `openai-compatible` currently |
 | `--llm-base-url` | *(GPT@RUB endpoint)* | Override the API endpoint URL |
 | `--llm-api-key-env` | `GPT_AT_RUB_API_KEY` | Environment variable name holding the API key |
+| `--context-enrichment` / `--no-context-enrichment` | *enabled* | Include the failing test's source + traceback in each prompt (Task 2); disable for the Task-1 prompt |
 
 All existing flags (`--fl-mode`, `--fl-family`, `--budget`, `--top-n`, `--timeout`,
 `--stop-on-first`, `--no-regression-check`, `--ranker`, etc.) work identically for
@@ -837,6 +844,7 @@ repair/llm/
     config.py          # LLMRepairConfig dataclass (model, temperature, budget, …)
     client.py          # LLMClient ABC + OpenAICompatibleClient (GPT@RUB / OpenAI)
     prompt_builder.py  # extract_function_source + build_repair_prompt
+    context_enricher.py# failing-test source + traceback gathering (Task 2)
     patch_extractor.py # extract_patch_from_llm_response → unified diff or None
     algorithm.py       # LLMRepairAlgorithm (implements RepairAlgorithm ABC)
 repair/
@@ -871,6 +879,93 @@ than constructed internally, so tests can substitute a stub without touching the
 `TemplateRepairAlgorithm.repair()`. When Task 3 (iterative repair) is implemented, only
 `repair()` needs to be overridden; `generate_patches` and `validate_patch` remain
 untouched.
+
+---
+
+## Context enrichment (Assignment 4 — Task 2)
+
+### Why this was needed
+
+The Task-1 prompt shows the model only the **buggy function** and a `-->` marker on the
+suspicious line. It never states *what is actually failing*. For any bug whose fix cannot
+be inferred from otherwise clean-looking code, this leaves the model guessing.
+
+This is not hypothetical — it is exactly what we observed on **black#1** under perfect FL.
+The developer fix wraps a call in a `try/except OSError` and falls back to a mono-process
+executor:
+
+```python
+try:
+    executor = ProcessPoolExecutor(max_workers=worker_count)
+except OSError:
+    executor = None          # system has no multiprocessing (e.g. AWS Lambda)
+```
+
+The failing test (`test_works_in_mono_process_only_environment`) forces that `OSError`. But
+nothing in the buggy function *looks* wrong without knowing the failure mode, so across a
+full run of 15 candidates the model produced only cosmetic edits (`os.cpu_count() or 1`,
+making a parameter `Optional`) — **not one** candidate contained the `except OSError`
+fallback. The pipeline worked end-to-end; the model simply could not know what to fix.
+
+The root cause was diagnostic, not mechanical: **the prompt withheld the failure**. Task 2
+closes that gap by making the failure observable to the model.
+
+### What was added
+
+Two new prompt sections, rendered only when their data is available:
+
+| Section | Content | Why it helps |
+|---|---|---|
+| `## Failing Test` | Source of the bug-triggering test function | Shows the *behaviour the fix must satisfy* — the contract the model is repairing against |
+| `## Failure Traceback` | The traceback that test produces on the **unpatched** checkout | Shows the *concrete failure mode* (e.g. `OSError` from `ProcessPoolExecutor`) so the model targets the real defect |
+
+Both are gathered by a new isolated module,
+[`repair/llm/context_enricher.py`](src/apr_framework/repair/llm/context_enricher.py):
+
+- **Failing-test source** — the bug's `run_test.sh` is converted to a pytest node id via the
+  existing `load_pytest_targets`; the test file and method name are parsed from it, and the
+  method's source is AST-extracted from the worktree.
+- **Failure traceback** — the trigger test is run **once** on the unpatched checkout (cached
+  for the whole repair run, like the regression baseline), and the last `Traceback …` block
+  is extracted from its output (capped in length).
+
+Gathering happens once per run in `LLMRepairAlgorithm._failing_test_context_for`, mirroring
+the existing lazy `_regression_context` pattern, and the two fields are forwarded into
+`build_repair_prompt`.
+
+### Why the change is safe (isolation)
+
+Context enrichment was deliberately built so it cannot regress the Task-1 path or the
+template backend:
+
+- **Best-effort, degrade to `None`.** Every gather step (missing `run_test.sh`, unsupported
+  test runner, absent traceback) logs a warning and returns `None` rather than aborting the
+  repair.
+- **Byte-identical when off.** `build_repair_prompt` appends a section *only* when its value
+  is non-`None`. With `--no-context-enrichment` (or when nothing could be gathered), the
+  rendered prompt is identical to Task 1.
+- **No shared code touched.** The enricher runs its own trigger-test call instead of
+  extending the shared `repair/regression.py`, so the template backend is completely
+  unaffected.
+
+### CLI
+
+Enrichment is **on by default** (it is the intended improvement) and can be turned off for
+A/B comparison:
+
+```bash
+# Default: enriched prompt (failing test + traceback included)
+python -m apr_framework repair --project black --bug 1 --technique llm --fl-mode perfect
+
+# Original Task-1 prompt (buggy function only) — for comparison
+python -m apr_framework repair --project black --bug 1 --technique llm --fl-mode perfect \
+    --no-context-enrichment
+```
+
+The effective setting is recorded as `context_enrichment` in each run's `config.json`.
+
+> **Cost note.** Enrichment adds exactly **one** extra test run per repair run (the trigger
+> traceback capture), not one per candidate — negligible next to validating N candidates.
 
 ---
 

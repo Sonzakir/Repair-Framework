@@ -18,6 +18,10 @@ from apr_framework.core.models import (
 from apr_framework.repair.base import RepairAlgorithm
 from apr_framework.repair.llm.client import LLMClient
 from apr_framework.repair.llm.config import LLMRepairConfig
+from apr_framework.repair.llm.context_enricher import (
+    FailingTestContext,
+    build_failing_test_context,
+)
 from apr_framework.repair.llm.patch_extractor import extract_patch_from_llm_response
 from apr_framework.repair.llm.prompt_builder import (
     build_repair_prompt,
@@ -62,6 +66,9 @@ class LLMRepairAlgorithm(RepairAlgorithm):
         # Regression baseline is established once, lazily, on the first
         # validate_patch call; reused for every subsequent candidate.
         self._regression: RegressionContext | None = None
+        # Failing-test context (test source + traceback) is gathered once, lazily,
+        # on the first generate_patches call and reused for every prompt.
+        self._failing_test_context: FailingTestContext | None = None
 
     @property
     def name(self) -> str:
@@ -293,11 +300,14 @@ class LLMRepairAlgorithm(RepairAlgorithm):
             )
             return []
 
+        failing_test_context = self._failing_test_context_for(checkout)
         messages = build_repair_prompt(
             location,
             function_source_text,
             function_start_line,
             system_message_text=self._system_message_text,
+            failing_test_source=failing_test_context.failing_test_source,
+            error_traceback=failing_test_context.error_traceback,
         )
 
         logger.info(
@@ -378,6 +388,19 @@ class LLMRepairAlgorithm(RepairAlgorithm):
                 timeout=self._repair_config.timeout_seconds,
             )
         return self._regression
+
+    def _failing_test_context_for(
+        self, checkout: CheckoutResult
+    ) -> FailingTestContext:
+        """Return the failing-test context, gathering it once on first use."""
+        if self._failing_test_context is None:
+            self._failing_test_context = build_failing_test_context(
+                self._adapter,
+                checkout,
+                enabled=self._repair_config.context_enrichment,
+                timeout=self._repair_config.timeout_seconds,
+            )
+        return self._failing_test_context
 
     # TODO: If a third repair backend is added, extract this into a module-level
     # utility shared by all backends (currently duplicated from TemplateRepairAlgorithm).

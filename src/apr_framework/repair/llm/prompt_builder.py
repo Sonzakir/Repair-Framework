@@ -120,7 +120,6 @@ def build_repair_prompt(
     function_start_line: int,
     *,
     system_message_text: str | None = None,
-    # Task 2 enrichment slots — present but no-op in Task 1
     failing_test_source: str | None = None,
     error_traceback: str | None = None,
     fl_score_annotation: bool = False,
@@ -134,9 +133,12 @@ def build_repair_prompt(
                           can locate it at a glance.
       3. Task instruction — asks for a minimal fix inside a fenced code block.
 
-    The optional kwargs (failing_test_source, error_traceback, fl_score_annotation)
-    are Task 2 context-enrichment slots.  They are accepted here so Task 2 can pass
-    values through without changing the signature, but they are not used in Task 1.
+    The optional kwargs enrich the prompt with failing-test context. When
+    ``failing_test_source`` / ``error_traceback`` are provided they are rendered as
+    their own sections (inserted between the buggy code and the task instruction);
+    when both are None the rendered prompt is byte-identical to the un-enriched
+    version, so the feature is invisible unless a caller supplies the context.
+    ``fl_score_annotation`` remains a reserved slot and is not used yet.
 
     Args:
         location:              Suspicious location from the FL result.
@@ -145,9 +147,9 @@ def build_repair_prompt(
                                function_source_text inside the original file.
         system_message_text:   System-prompt text (see prompts/*.txt). Defaults to
                                the ``prompt1`` file when not supplied.
-        failing_test_source:   (Task 2) Body of a relevant failing test.
-        error_traceback:       (Task 2) Exception traceback from the failing run.
-        fl_score_annotation:   (Task 2) Whether to annotate each line with its
+        failing_test_source:    Body of a relevant failing test.
+        error_traceback:        Exception traceback from the failing run.
+        fl_score_annotation:    Whether to annotate each line with its
                                suspiciousness score as an inline comment.
 
     Returns:
@@ -156,15 +158,19 @@ def build_repair_prompt(
     if system_message_text is None:
         system_message_text = load_system_prompt(_DEFAULT_SYSTEM_PROMPT_NAME)
 
-    user_content = "\n\n".join(
-        [
-            _build_fault_location_section(location),
-            _build_buggy_code_section(
-                location, function_source_text, function_start_line
-            ),
-            _build_task_section(location),
-        ]
-    )
+    user_sections = [
+        _build_fault_location_section(location),
+        _build_buggy_code_section(
+            location, function_source_text, function_start_line
+        ),
+    ]
+    if failing_test_source is not None:
+        user_sections.append(_build_failing_test_section(failing_test_source))
+    if error_traceback is not None:
+        user_sections.append(_build_error_traceback_section(error_traceback))
+    user_sections.append(_build_task_section(location))
+
+    user_content = "\n\n".join(user_sections)
 
     return [
         {"role": "system", "content": system_message_text},
@@ -206,6 +212,24 @@ def _build_buggy_code_section(
     return (
         f"## Buggy Code (lines {function_start_line}–{end_line})\n"
         f"```python\n{numbered_code}\n```"
+    )
+
+
+def _build_failing_test_section(failing_test_source: str) -> str:
+    return (
+        "## Failing Test\n"
+        "This is the test the fix must make pass. Use it to infer the intended "
+        "behaviour.\n"
+        f"```python\n{failing_test_source.strip()}\n```"
+    )
+
+
+def _build_error_traceback_section(error_traceback: str) -> str:
+    return (
+        "## Failure Traceback\n"
+        "Running the failing test on the current (buggy) code produces this "
+        "traceback:\n"
+        f"```\n{error_traceback.strip()}\n```"
     )
 
 

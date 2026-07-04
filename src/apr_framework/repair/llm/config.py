@@ -28,6 +28,9 @@ class LLMRepairConfig:
         budget:           Max patch validations before halting (mirrors TemplateRepairConfig).
         stop_on_first:    Stop after first plausible patch.
         regression_check: Whether to run the regression half of plausibility.
+        context_enrichment: Whether to enrich each prompt with the failing test's
+                            source and traceback. When False the prompt contains only
+                            the buggy function (the original Task-1 behaviour).
     """
 
     model_name: str
@@ -46,6 +49,7 @@ class LLMRepairConfig:
     budget: int = 200
     stop_on_first: bool = False
     regression_check: bool = True
+    context_enrichment: bool = True
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.temperature <= 2.0):

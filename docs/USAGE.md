@@ -242,6 +242,42 @@ and print a single weighted ranking.
 python -m apr_framework localize --project PySnooper --bug 1 --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis --sbfl-weight 0.5 --mbfl-weight 0.5 --mutation-strategy random --budget 50 --top-n 10
 ```
 
+## Hybrid SBFL + MBFL 
+- The typical command and the output looks as follows
+```bash
+root@5c7c7e708541:/workspace# python -m apr_framework localize \
+  --project black \
+  --bug 1 \
+  --family hybrid \
+  --src black.py \
+  --test-target tests/test_black.py \
+  --sbfl-metric ochiai \
+  --mbfl-metric metallaxis \
+  --sbfl-weight 0.5 \
+  --mbfl-weight 0.5 \
+  --mutation-strategy random \
+  --budget 50 \
+  --seed 0 \
+  --top-n 10
+apr-bugsinpy-executor
+Project: black
+Bug ID: 1
+Backend: hybrid-fauxpy
+Score formula: 0.5000 * normalized(Ochiai) + 0.5000 * normalized(Metallaxis)
+Ranked locations:
+1. black.py:6339 0.5000
+2. black.py:5769 0.5000
+3. black.py:535 0.5000
+4. black.py:534 0.5000
+5. black.py:533 0.5000
+6. black.py:621 0.4118
+7. black.py:618 0.4118
+8. black.py:617 0.4118
+9. black.py:616 0.4118
+10. black.py:558 0.4118
+root@5c7c7e708541:/workspace# 
+```
+
 Hybrid mode uses `--sbfl-metric` and `--mbfl-metric` instead of `--metric`.
 `--top-n` is applied after score fusion, and mutation controls apply only to the
 MBFL component.
@@ -571,6 +607,8 @@ runs/run_###/results.json
 runs/run_###/execution.log
 ```
 
+
+
 ## LLM-Based Repair
 
 Use an LLM to generate candidate patches for the top-N suspicious locations.
@@ -593,7 +631,7 @@ The key is read at call time from the environment variable named by
 python -m apr_framework repair --project black --bug 1 \
   --technique llm \
   --fl-mode perfect \
-  --model codestral-22b \
+  --model gpt-4.1-2025-04-14 \
   --max-candidates 5 --top-n 3 --budget 200
 ```
 
@@ -685,38 +723,3 @@ python -m apr_framework repair --project black --bug 1 \
 Run artifacts (config, patch diffs, results JSON, execution log) are written to
 `runs/run_###/` as with template repair.
 
-## Hybrid SBFL + MBFL 
-- The typical command and the output looks as follows
-```bash
-root@5c7c7e708541:/workspace# python -m apr_framework localize \
-  --project black \
-  --bug 1 \
-  --family hybrid \
-  --src black.py \
-  --test-target tests/test_black.py \
-  --sbfl-metric ochiai \
-  --mbfl-metric metallaxis \
-  --sbfl-weight 0.5 \
-  --mbfl-weight 0.5 \
-  --mutation-strategy random \
-  --budget 50 \
-  --seed 0 \
-  --top-n 10
-apr-bugsinpy-executor
-Project: black
-Bug ID: 1
-Backend: hybrid-fauxpy
-Score formula: 0.5000 * normalized(Ochiai) + 0.5000 * normalized(Metallaxis)
-Ranked locations:
-1. black.py:6339 0.5000
-2. black.py:5769 0.5000
-3. black.py:535 0.5000
-4. black.py:534 0.5000
-5. black.py:533 0.5000
-6. black.py:621 0.4118
-7. black.py:618 0.4118
-8. black.py:617 0.4118
-9. black.py:616 0.4118
-10. black.py:558 0.4118
-root@5c7c7e708541:/workspace# 
-```
