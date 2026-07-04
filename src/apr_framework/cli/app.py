@@ -422,6 +422,7 @@ def _build_repair_config_data(
                 "llm_provider": args.llm_provider,
                 "system_prompt": args.system_prompt,
                 "context_enrichment": args.context_enrichment,
+                "few_shot_count": args.few_shot_count,
                 "timeout_seconds": args.timeout,
             }
         )
@@ -947,6 +948,7 @@ def _build_llm_algorithm_and_log_start(
         stop_on_first=args.stop_on_first,
         regression_check=args.regression_check,
         context_enrichment=args.context_enrichment,
+        few_shot_count=args.few_shot_count,
     )
     llm_client = OpenAICompatibleClient(repair_config)
     algorithm = LLMRepairAlgorithm(

@@ -2,9 +2,11 @@
 
 import logging
 import os
+import sys
 import time
 from abc import ABC, abstractmethod
 from collections import deque
+from pathlib import Path
 
 from apr_framework.core.exceptions import APRFrameworkError, ConfigurationError
 from apr_framework.repair.llm.config import LLMRepairConfig
@@ -12,6 +14,15 @@ from apr_framework.repair.llm.config import LLMRepairConfig
 logger = logging.getLogger(__name__)
 
 GPT_AT_RUB_DEFAULT_BASE_URL = "https://gpt.ruhr-uni-bochum.de/external/v1"
+
+# Opt-in prompt debugging (off by default). When this env var is set, every prompt
+# sent to the LLM is dumped so a developer can inspect exactly what was sent:
+#   unset / empty  -> no-op (normal behaviour)
+#   "1" / "stderr" -> print each prompt to stderr
+#   <directory>    -> write each prompt to <dir>/prompt_NNNN.txt
+# It never alters the messages, the request, or the return value.
+PROMPT_DEBUG_ENV_VAR = "APR_LLM_DEBUG_PROMPT"
+_PROMPT_DEBUG_STDERR_VALUES = frozenset({"1", "stderr", "true", "yes"})
 
 # GPT@RUB caps external-API requests at 60 per minute (see the "BETA: External API
 # Endpoint" documentation). The client throttles itself to that limit rather than
@@ -48,6 +59,9 @@ class OpenAICompatibleClient(LLMClient):
         self._repair_config = repair_config
         self._endpoint_url = repair_config.base_url or GPT_AT_RUB_DEFAULT_BASE_URL
         self._recent_request_timestamps: deque[float] = deque()
+        # Sequential index used only to name dumped prompt files when the
+        # PROMPT_DEBUG_ENV_VAR debug mode is active. Inert otherwise.
+        self._prompt_debug_count = 0
 
     def _wait_for_rate_limit_slot(self) -> None:
         """Block until issuing another request would stay within the per-minute cap."""
@@ -77,6 +91,43 @@ class OpenAICompatibleClient(LLMClient):
             )
             time.sleep(sleep_seconds)
 
+    def _dump_prompt_if_debugging(self, messages: list[dict[str, str]]) -> None:
+        """Dump the exact prompt for inspection when prompt debugging is enabled.
+
+        Controlled entirely by the ``PROMPT_DEBUG_ENV_VAR`` environment variable and
+        a strict no-op when it is unset — the messages, request, and return value are
+        never touched. Any failure to write is swallowed (logged) so debugging can
+        never break a repair run.
+        """
+        debug_target = os.environ.get(PROMPT_DEBUG_ENV_VAR, "").strip()
+        if not debug_target:
+            return
+
+        self._prompt_debug_count += 1
+        rendered_prompt = _render_messages_for_debug(messages)
+
+        if debug_target.lower() in _PROMPT_DEBUG_STDERR_VALUES:
+            print(
+                f"\n===== LLM PROMPT #{self._prompt_debug_count} "
+                f"({PROMPT_DEBUG_ENV_VAR}) =====\n{rendered_prompt}\n"
+                f"===== END LLM PROMPT #{self._prompt_debug_count} =====",
+                file=sys.stderr,
+            )
+            return
+
+        try:
+            debug_directory_path = Path(debug_target)
+            debug_directory_path.mkdir(parents=True, exist_ok=True)
+            prompt_file_path = (
+                debug_directory_path / f"prompt_{self._prompt_debug_count:04d}.txt"
+            )
+            prompt_file_path.write_text(rendered_prompt, encoding="utf-8")
+            logger.info("Dumped LLM prompt to %s", prompt_file_path)
+        except OSError as dump_error:
+            logger.warning(
+                "Could not write debug prompt to %r: %s", debug_target, dump_error
+            )
+
     def complete(self, messages: list[dict[str, str]]) -> str:
         """Call the OpenAI-compatible chat completions endpoint.
 
@@ -91,6 +142,8 @@ class OpenAICompatibleClient(LLMClient):
             APRFrameworkError: On any OpenAI API error.
         """
         import openai
+
+        self._dump_prompt_if_debugging(messages)
 
         api_key = os.environ.get(self._repair_config.api_key_env_var)
         if not api_key:
@@ -128,3 +181,13 @@ class OpenAICompatibleClient(LLMClient):
         response_text = response.choices[0].message.content
         logger.debug("LLM response received (%d chars)", len(response_text or ""))
         return response_text or ""
+
+
+def _render_messages_for_debug(messages: list[dict[str, str]]) -> str:
+    """Render an OpenAI-style messages list as readable text for prompt debugging."""
+    rendered_blocks: list[str] = []
+    for message in messages:
+        role_name = message.get("role", "unknown").upper()
+        message_content = message.get("content", "")
+        rendered_blocks.append(f"----- {role_name} -----\n{message_content}")
+    return "\n\n".join(rendered_blocks)

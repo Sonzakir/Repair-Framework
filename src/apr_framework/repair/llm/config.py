@@ -31,6 +31,9 @@ class LLMRepairConfig:
         context_enrichment: Whether to enrich each prompt with the failing test's
                             source and traceback. When False the prompt contains only
                             the buggy function (the original Task-1 behaviour).
+        few_shot_count:     Number of (buggy -> fixed) example pairs from sibling bugs
+                            to prepend to each prompt. 0 disables the strategy. Toggled
+                            independently of ``context_enrichment``.
     """
 
     model_name: str
@@ -50,6 +53,7 @@ class LLMRepairConfig:
     stop_on_first: bool = False
     regression_check: bool = True
     context_enrichment: bool = True
+    few_shot_count: int = 0
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.temperature <= 2.0):
@@ -71,5 +75,9 @@ class LLMRepairConfig:
             )
         if self.budget < 1:
             raise ConfigurationError(f"budget must be >= 1, got {self.budget}")
+        if self.few_shot_count < 0:
+            raise ConfigurationError(
+                f"few_shot_count must be >= 0, got {self.few_shot_count}"
+            )
         # Fail fast if the named prompt file does not exist, rather than at first LLM call.
         load_system_prompt(self.system_prompt_name)

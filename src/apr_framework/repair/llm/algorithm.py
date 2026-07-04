@@ -22,6 +22,7 @@ from apr_framework.repair.llm.context_enricher import (
     FailingTestContext,
     build_failing_test_context,
 )
+from apr_framework.repair.llm.few_shot import build_few_shot_examples
 from apr_framework.repair.llm.patch_extractor import extract_patch_with_source
 from apr_framework.repair.llm.prompt_builder import (
     build_repair_prompt,
@@ -69,6 +70,10 @@ class LLMRepairAlgorithm(RepairAlgorithm):
         # Failing-test context (test source + traceback) is gathered once, lazily,
         # on the first generate_patches call and reused for every prompt.
         self._failing_test_context: FailingTestContext | None = None
+        # Few-shot examples are built once, lazily, and reused for every prompt.
+        # _few_shot_ready distinguishes "not built yet" from "built, no examples".
+        self._few_shot_examples: str | None = None
+        self._few_shot_ready: bool = False
 
     @property
     def name(self) -> str:
@@ -306,6 +311,7 @@ class LLMRepairAlgorithm(RepairAlgorithm):
             function_source_text,
             function_start_line,
             system_message_text=self._system_message_text,
+            few_shot_examples=self._few_shot_examples_for(bug),
             failing_test_source=failing_test_context.failing_test_source,
             error_traceback=failing_test_context.error_traceback,
         )
@@ -405,6 +411,17 @@ class LLMRepairAlgorithm(RepairAlgorithm):
                 timeout=self._repair_config.timeout_seconds,
             )
         return self._failing_test_context
+
+    def _few_shot_examples_for(self, bug: BugIdentifier) -> str | None:
+        """Return prepended few-shot examples, building them once on first use."""
+        if not self._few_shot_ready:
+            self._few_shot_examples = build_few_shot_examples(
+                self._adapter,
+                bug,
+                few_shot_count=self._repair_config.few_shot_count,
+            )
+            self._few_shot_ready = True
+        return self._few_shot_examples
 
     # TODO: If a third repair backend is added, extract this into a module-level
     # utility shared by all backends (currently duplicated from TemplateRepairAlgorithm).

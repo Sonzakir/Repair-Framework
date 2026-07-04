@@ -832,6 +832,7 @@ export GPT_AT_RUB_API_KEY="<your-key>"
 | `--llm-base-url` | *(GPT@RUB endpoint)* | Override the API endpoint URL |
 | `--llm-api-key-env` | `GPT_AT_RUB_API_KEY` | Environment variable name holding the API key |
 | `--context-enrichment` / `--no-context-enrichment` | *enabled* | Include the failing test's source + traceback in each prompt (Task 2); disable for the Task-1 prompt |
+| `--few-shot N` | `0` | Prepend N `(buggy → fixed)` example pairs from other bugs of the same project (Task 2); `0` disables. Independent of `--context-enrichment` |
 
 All existing flags (`--fl-mode`, `--fl-family`, `--budget`, `--top-n`, `--timeout`,
 `--stop-on-first`, `--no-regression-check`, `--ranker`, etc.) work identically for
@@ -845,6 +846,7 @@ repair/llm/
     client.py          # LLMClient ABC + OpenAICompatibleClient (GPT@RUB / OpenAI)
     prompt_builder.py  # extract_function_source + build_repair_prompt
     context_enricher.py# failing-test source + traceback gathering (Task 2)
+    few_shot.py        # (buggy → fixed) example pairs from sibling bugs (Task 2)
     patch_extractor.py # extract_patch_from_llm_response → unified diff or None
     algorithm.py       # LLMRepairAlgorithm (implements RepairAlgorithm ABC)
 repair/
@@ -966,6 +968,97 @@ The effective setting is recorded as `context_enrichment` in each run's `config.
 
 > **Cost note.** Enrichment adds exactly **one** extra test run per repair run (the trigger
 > traceback capture), not one per candidate — negligible next to validating N candidates.
+
+### Second strategy — few-shot fix examples (`--few-shot N`)
+
+Task 2 asks for **at least two** context-enrichment strategies, toggleable independently.
+The second one is the *fix examples* strategy: prepend `N` real `(buggy → fixed)` pairs
+from **other bugs of the same project** so the model sees how bugs in this codebase are
+typically fixed (style, size, output format) before tackling the current one.
+
+It is controlled by its own flag, **independently** of `--context-enrichment`:
+
+```bash
+# Few-shot only (2 sibling examples), no failing-test/traceback enrichment:
+python -m apr_framework repair --project black --bug 1 --technique llm --fl-mode perfect \
+    --few-shot 2 --no-context-enrichment
+
+# Both strategies together:
+python -m apr_framework repair --project black --bug 1 --technique llm --fl-mode perfect \
+    --few-shot 2
+```
+
+`--few-shot 0` (the default) disables it. The value is recorded as `few_shot_count` in
+each run's `config.json`.
+
+**How the examples are built** ([`repair/llm/few_shot.py`](src/apr_framework/repair/llm/few_shot.py)):
+
+- The project's other bug ids are listed and taken in **ascending order** (deterministic,
+  reproducible), with the bug under repair **excluded** so no answer leaks into the prompt.
+- Each candidate's developer fix is read **offline** from its `bugs/<id>/bug_patch.txt` via
+  `get_reference_patch` — **no checkout, compile, or test run**, so this strategy is free of
+  side effects and adds no execution cost.
+- The `(buggy, fixed)` snippets are reconstructed from the diff hunks (context+`-` lines →
+  buggy, context+`+` lines → fixed) and rendered as a prepended `## Reference Fixes From
+  This Project` section.
+- Examples whose diff changes more than 40 lines are **skipped** (poor, prompt-bloating
+  examples), and long snippets are trimmed, so the loop keeps scanning until it has `N`
+  usable examples. If none can be built it degrades to no section (prompt unchanged).
+
+Like the failing-test context, the examples are built **once per run** and cached
+(`LLMRepairAlgorithm._few_shot_examples_for`). The two strategies are fully independent:
+`--few-shot` and `--context-enrichment` can each be on or off in any combination.
+
+> Example: `--few-shot 2` on black#1 selects black#3 and black#4 — it **skips black#2**
+> because that fix exceeds the 40-line example cap, which is the deterministic
+> skip-oversized behaviour in action.
+
+### Inspecting the exact prompt (debugging)
+
+To see **exactly** what is sent to the LLM (system + user message, including any
+enrichment and few-shot sections), set the `APR_LLM_DEBUG_PROMPT` environment variable.
+It is **off by default** and a strict no-op when unset — it never alters the messages,
+the request, or the result, so it is safe to leave in place.
+
+The following run writes every prompt to `runs/prompt_dumps/prompt_NNNN.txt`
+(assumes `black 1` is already checked out/compiled and `GPT_AT_RUB_API_KEY` is exported):
+
+```bash
+APR_LLM_DEBUG_PROMPT=runs/prompt_dumps \
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm \
+  --fl-mode perfect \
+  --model gpt-4.1-2025-04-14 \
+  --few-shot 2 \
+  --max-candidates 5 --top-n 3 --budget 100
+```
+
+Then inspect the captured prompts:
+
+```bash
+ls runs/prompt_dumps/                                              # prompt_0001.txt, ...
+grep -l "Reference Fixes From This Project" runs/prompt_dumps/*.txt   # few-shot present
+cat runs/prompt_dumps/prompt_0001.txt                             # the full prompt
+```
+
+To stream the prompts to the terminal instead of files, use `APR_LLM_DEBUG_PROMPT=stderr`.
+
+> **Important — put the variable on the same line as the command.** A bare
+> `APR_LLM_DEBUG_PROMPT=runs/prompt_dumps` on its own line does **not** apply to the next
+> command (it is set and immediately discarded). Either prefix it inline with a trailing
+> `\` as above, or `export APR_LLM_DEBUG_PROMPT=runs/prompt_dumps` first so it persists for
+> the whole shell session. Verify with `echo "$APR_LLM_DEBUG_PROMPT"` (empty = not set).
+
+| `APR_LLM_DEBUG_PROMPT` value | Effect |
+|---|---|
+| *(unset / empty)* | Nothing — normal behaviour |
+| `1`, `stderr`, `true`, `yes` | Print each prompt to **stderr** |
+| any other value | Treat it as a **directory**; write one `prompt_NNNN.txt` per LLM call |
+
+The hook lives at the single send choke point in
+[`repair/llm/client.py`](src/apr_framework/repair/llm/client.py) (`OpenAICompatibleClient._dump_prompt_if_debugging`),
+so it captures the real messages for every call — enriched, few-shot, or plain. A failed
+write (e.g. a bad path) is logged and ignored, never aborting the repair run.
 
 ---
 

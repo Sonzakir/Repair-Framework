@@ -363,6 +363,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     repair_parser.add_argument(
+        "--few-shot",
+        dest="few_shot_count",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "Prepend N (buggy → fixed) example pairs from other bugs of the same "
+            "BugsInPy project to each LLM prompt (default: 0 = off). Toggled "
+            "independently of --context-enrichment. LLM technique only."
+        ),
+    )
+    repair_parser.add_argument(
         "--llm-base-url",
         dest="llm_base_url",
         type=str,

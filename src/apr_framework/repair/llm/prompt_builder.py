@@ -120,25 +120,26 @@ def build_repair_prompt(
     function_start_line: int,
     *,
     system_message_text: str | None = None,
+    few_shot_examples: str | None = None,
     failing_test_source: str | None = None,
     error_traceback: str | None = None,
     fl_score_annotation: bool = False,
 ) -> list[dict[str, str]]:
     """Build the OpenAI-style messages list for a single repair attempt.
 
-    The user message has three sections (in order):
+    The user message has three base sections (in order):
       1. Fault location — file path, suspicious line, rank, and score.
       2. Buggy code     — the extracted function with 1-indexed line numbers;
                           the suspicious line is marked with ``-->`` so the model
                           can locate it at a glance.
       3. Task instruction — asks for a minimal fix inside a fenced code block.
 
-    The optional kwargs enrich the prompt with failing-test context. When
-    ``failing_test_source`` / ``error_traceback`` are provided they are rendered as
-    their own sections (inserted between the buggy code and the task instruction);
-    when both are None the rendered prompt is byte-identical to the un-enriched
-    version, so the feature is invisible unless a caller supplies the context.
-    ``fl_score_annotation`` remains a reserved slot and is not used yet.
+    The optional kwargs enrich the prompt. ``few_shot_examples`` (when provided) is
+    *prepended* before the fault location so the model sees reference fixes first;
+    ``failing_test_source`` / ``error_traceback`` are inserted between the buggy code
+    and the task instruction. When all enrichment kwargs are None the rendered prompt
+    is byte-identical to the un-enriched version, so the feature is invisible unless a
+    caller supplies context. ``fl_score_annotation`` remains a reserved slot.
 
     Args:
         location:              Suspicious location from the FL result.
@@ -147,6 +148,8 @@ def build_repair_prompt(
                                function_source_text inside the original file.
         system_message_text:   System-prompt text (see prompts/*.txt). Defaults to
                                the ``prompt1`` file when not supplied.
+        few_shot_examples:      Formatted (buggy -> fixed) example pairs from sibling
+                               bugs (see repair/llm/few_shot.py).
         failing_test_source:    Body of a relevant failing test.
         error_traceback:        Exception traceback from the failing run.
         fl_score_annotation:    Whether to annotate each line with its
@@ -158,12 +161,13 @@ def build_repair_prompt(
     if system_message_text is None:
         system_message_text = load_system_prompt(_DEFAULT_SYSTEM_PROMPT_NAME)
 
-    user_sections = [
-        _build_fault_location_section(location),
-        _build_buggy_code_section(
-            location, function_source_text, function_start_line
-        ),
-    ]
+    user_sections: list[str] = []
+    if few_shot_examples is not None:
+        user_sections.append(_build_few_shot_section(few_shot_examples))
+    user_sections.append(_build_fault_location_section(location))
+    user_sections.append(
+        _build_buggy_code_section(location, function_source_text, function_start_line)
+    )
     if failing_test_source is not None:
         user_sections.append(_build_failing_test_section(failing_test_source))
     if error_traceback is not None:
@@ -181,6 +185,16 @@ def build_repair_prompt(
 # ---------------------------------------------------------------------------
 # Private section builders
 # ---------------------------------------------------------------------------
+
+
+def _build_few_shot_section(few_shot_examples: str) -> str:
+    return (
+        "## Reference Fixes From This Project\n"
+        "Real (buggy → fixed) examples from other bugs in this project. Use them as "
+        "guidance for the fix style and output format — they are not the answer to "
+        "the current bug.\n\n"
+        f"{few_shot_examples.strip()}"
+    )
 
 
 def _build_fault_location_section(location: RankedLocation) -> str:
