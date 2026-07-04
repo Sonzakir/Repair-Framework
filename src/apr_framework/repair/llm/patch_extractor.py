@@ -15,9 +15,26 @@ import difflib
 import logging
 import re
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ExtractedPatch:
+    """A successfully extracted LLM patch: its unified diff and full patched source.
+
+    Fields:
+        diff_text:      Unified diff applied during validation (PatchCandidate.diff_text).
+        patched_source: The complete patched file content. Stored in the candidate's
+                        metadata as ``patched_source`` so the diff-level correctness
+                        check can run for LLM patches exactly as it does for template
+                        patches.
+    """
+
+    diff_text: str
+    patched_source: str
 
 # Try an explicit ```python fence first; fall back to any generic ``` fence.
 # [ \t]* tolerates trailing spaces/tabs on the opening fence line.
@@ -33,6 +50,9 @@ def extract_patch_from_llm_response(
 ) -> str | None:
     """Turn an LLM completion into a unified diff ready for PatchCandidate.diff_text.
 
+    Thin backward-compatible wrapper around ``extract_patch_with_source`` that keeps
+    the original diff-only return type for callers that do not need the patched source.
+
     Args:
         llm_response_text:  Raw text returned by the LLM.
         source_file_path:   Absolute path to the original Python source file.
@@ -43,6 +63,38 @@ def extract_patch_from_llm_response(
 
     Returns:
         A unified diff string, or None if extraction fails for any reason.
+    """
+    extracted_patch = extract_patch_with_source(
+        llm_response_text,
+        source_file_path,
+        function_start_line,
+        function_end_line,
+    )
+    return extracted_patch.diff_text if extracted_patch is not None else None
+
+
+def extract_patch_with_source(
+    llm_response_text: str,
+    source_file_path: Path,
+    function_start_line: int,
+    function_end_line: int,
+) -> ExtractedPatch | None:
+    """Turn an LLM completion into both a unified diff and the full patched source.
+
+    Same extraction pipeline as ``extract_patch_from_llm_response`` but also returns
+    the fully-spliced file content, so the caller can record it as
+    ``metadata['patched_source']`` for the diff-level correctness check.
+
+    Args:
+        llm_response_text:  Raw text returned by the LLM.
+        source_file_path:   Absolute path to the original Python source file.
+        function_start_line: 1-indexed first line of the region to replace
+                             (as returned by extract_function_source).
+        function_end_line:   1-indexed last line of the region to replace
+                             (inclusive).
+
+    Returns:
+        An ExtractedPatch (diff + patched source), or None if extraction fails.
     """
     extracted_code = _extract_code_block(llm_response_text, source_file_path)
     if extracted_code is None:
@@ -70,7 +122,11 @@ def extract_patch_from_llm_response(
     if not _patched_file_parses(patched_lines, source_file_path):
         return None
 
-    return _compute_diff(original_lines, patched_lines, source_file_path)
+    diff_text = _compute_diff(original_lines, patched_lines, source_file_path)
+    if diff_text is None:
+        return None
+
+    return ExtractedPatch(diff_text=diff_text, patched_source="".join(patched_lines))
 
 
 # ---------------------------------------------------------------------------

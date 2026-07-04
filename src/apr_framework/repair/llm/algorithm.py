@@ -22,7 +22,7 @@ from apr_framework.repair.llm.context_enricher import (
     FailingTestContext,
     build_failing_test_context,
 )
-from apr_framework.repair.llm.patch_extractor import extract_patch_from_llm_response
+from apr_framework.repair.llm.patch_extractor import extract_patch_with_source
 from apr_framework.repair.llm.prompt_builder import (
     build_repair_prompt,
     extract_function_source,
@@ -334,14 +334,14 @@ class LLMRepairAlgorithm(RepairAlgorithm):
                 )
                 continue
 
-            diff_text = extract_patch_from_llm_response(
+            extracted_patch = extract_patch_with_source(
                 llm_response_text,
                 source_file_path,
                 function_start_line,
                 function_end_line,
             )
 
-            if diff_text is None:
+            if extracted_patch is None:
                 logger.warning(
                     "No valid diff extracted from LLM response for %s:%d attempt %d",
                     source_file_path.name,
@@ -357,7 +357,7 @@ class LLMRepairAlgorithm(RepairAlgorithm):
                     f"LLM patch for {location.file_path}:{location.line} "
                     f"(attempt {attempt_index + 1})"
                 ),
-                diff_text=diff_text,
+                diff_text=extracted_patch.diff_text,
                 metadata={
                     "location_rank": location.rank,
                     "location_score": location.score,
@@ -366,6 +366,10 @@ class LLMRepairAlgorithm(RepairAlgorithm):
                     # Used by run_validation_loop for progress logging
                     "source_path": str(source_file_path),
                     "target_line": location.line,
+                    # Full patched file — enables the diff-level correctness check
+                    # (is_correct_patch) to run for LLM patches, as it does for
+                    # template patches. Omitted from JSON output by RepairEvaluationRunner.
+                    "patched_source": extracted_patch.patched_source,
                 },
             )
             location_patch_candidates.append(patch_candidate)
