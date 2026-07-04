@@ -2,6 +2,8 @@
 
 import logging
 import subprocess
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from apr_framework.benchmarks.bugsinpy import BugsInPyAdapter
@@ -14,6 +16,7 @@ from apr_framework.core.models import (
     RankedLocation,
     RepairAttemptResult,
     RepairStatus,
+    TestRunResult,
 )
 from apr_framework.repair.base import RepairAlgorithm
 from apr_framework.repair.llm.client import LLMClient
@@ -21,6 +24,11 @@ from apr_framework.repair.llm.config import LLMRepairConfig
 from apr_framework.repair.llm.context_enricher import (
     FailingTestContext,
     build_failing_test_context,
+)
+from apr_framework.repair.llm.feedback import (
+    build_format_retry_message,
+    build_test_failure_feedback_message,
+    is_no_improvement_signal,
 )
 from apr_framework.repair.llm.few_shot import build_few_shot_examples
 from apr_framework.repair.llm.patch_extractor import extract_patch_with_source
@@ -31,9 +39,29 @@ from apr_framework.repair.llm.prompt_builder import (
 )
 from apr_framework.repair.patch_applier import apply_patch_and_validate
 from apr_framework.repair.regression import RegressionContext, build_regression_context
-from apr_framework.repair.run_loop import run_validation_loop
+from apr_framework.repair.run_loop import LoopOutcome, build_loop_summary
 
 logger = logging.getLogger(__name__)
+
+# Max consecutive unparsable LLM replies tolerated for one location before the
+# iterative loop gives up on it (bounded format-retry, see _run_conversation_for_location).
+_MAX_FORMAT_RETRIES = 2
+
+
+@dataclass(frozen=True)
+class _LocationPrompt:
+    """Everything needed to start — and continue — an LLM conversation at a location.
+
+    Bundles the resolved source file, the enclosing function's line bounds (used
+    later to splice the LLM's replacement back in), and the initial ``[system,
+    user]`` message list. The single-shot and iterative paths both build one of
+    these via :meth:`LLMRepairAlgorithm._build_location_prompt`.
+    """
+
+    source_file_path: Path
+    function_start_line: int
+    function_end_line: int
+    messages: list[dict[str, str]]
 
 
 class LLMRepairAlgorithm(RepairAlgorithm):
@@ -209,6 +237,20 @@ class LLMRepairAlgorithm(RepairAlgorithm):
         failed_count = test_run_result.failed_count
         error_count = test_run_result.error_count
 
+        # Iterative mode hands the failed test run's output back to the LLM as the
+        # next conversation turn. Stash it (and the counts) on the candidate's
+        # metadata — the same side-channel already used for ``patched_source``.
+        # Gated on ``iterative`` so single-shot runs stay byte-for-byte unchanged;
+        # RepairEvaluationRunner filters ``raw_test_output`` out of the JSON output.
+        if self._repair_config.iterative:
+            patch_candidate.metadata["raw_test_output"] = test_run_result.raw_output
+            patch_candidate.metadata["passed_count"] = passed_count
+            patch_candidate.metadata["failed_count"] = failed_count
+            patch_candidate.metadata["error_count"] = error_count
+            patch_candidate.metadata["failure_kind"] = _classify_failure_kind(
+                is_plausible, test_run_result
+            )
+
         if is_plausible:
             logger.info("Plausible patch found: %s", patch_candidate.patch_id)
             return RepairAttemptResult(
@@ -239,10 +281,10 @@ class LLMRepairAlgorithm(RepairAlgorithm):
     ) -> tuple[RepairAttemptResult, list[RepairAttemptResult]]:
         """Run the full repair loop with budget and optional early stopping.
 
-        Delegates to run_validation_loop (the shared backend-agnostic loop),
-        identical to TemplateRepairAlgorithm.repair().  When Task 3 is
-        implemented this method will be overridden for iterative mode;
-        generate_patches() and validate_patch() remain untouched.
+        Delegates to :meth:`repair_loop` (the shared backend-agnostic loop),
+        identical to TemplateRepairAlgorithm.repair(). ``generate_patches()`` and
+        ``validate_patch()`` remain the primitives; iterative mode overrides
+        ``repair_loop`` without touching either.
 
         Args:
             bug:      Bug identifier.
@@ -259,14 +301,271 @@ class LLMRepairAlgorithm(RepairAlgorithm):
             self._repair_config.top_n_locations,
             self._repair_config.model_name,
         )
-        outcome = run_validation_loop(
-            self,
+        outcome = self.repair_loop(
             bug,
             checkout,
             budget=self._repair_config.budget,
             stop_on_first=self._repair_config.stop_on_first,
         )
         return outcome.summary, outcome.all_results
+
+    def repair_loop(
+        self,
+        bug: BugIdentifier,
+        checkout: CheckoutResult,
+        *,
+        budget: int,
+        stop_on_first: bool,
+    ) -> LoopOutcome:
+        """Run the budget-bounded loop, iterative or single-shot.
+
+        In single-shot mode this defers to the shared generate-and-validate loop
+        (the ABC default). In iterative mode (``--iterative``) it instead runs a
+        multi-turn conversation per location, feeding each failed patch's test
+        output back to the model — Task 3's core behavior.
+        """
+        if not self._repair_config.iterative:
+            return super().repair_loop(
+                bug, checkout, budget=budget, stop_on_first=stop_on_first
+            )
+        return self._run_iterative_loop(
+            bug, checkout, budget=budget, stop_on_first=stop_on_first
+        )
+
+    # ------------------------------------------------------------------
+    # Iterative repair (Task 3) — multi-turn conversation per location
+    # ------------------------------------------------------------------
+
+    def _run_iterative_loop(
+        self,
+        bug: BugIdentifier,
+        checkout: CheckoutResult,
+        *,
+        budget: int,
+        stop_on_first: bool,
+    ) -> LoopOutcome:
+        """Drive one multi-turn conversation per top-N location under a global budget.
+
+        Each location gets a fresh conversation (:meth:`_run_conversation_for_location`);
+        the global ``budget`` (test-suite executions) is shared across all locations,
+        while ``max_iterations`` caps the turns spent on any single one.
+        """
+        started_at = time.monotonic()
+        top_locations = self._localization_result.ranked_locations[
+            : self._repair_config.top_n_locations
+        ]
+
+        all_results: list[RepairAttemptResult] = []
+        total_candidates_generated = 0
+        time_to_first_plausible: float | None = None
+        budget_remaining = budget
+        found_plausible = False
+
+        for location in top_locations:
+            if budget_remaining <= 0:
+                logger.info(
+                    "Budget exhausted — stopping iterative loop before location rank %d",
+                    location.rank,
+                )
+                break
+            if found_plausible and stop_on_first:
+                break
+
+            location_results, candidates_used = self._run_conversation_for_location(
+                bug, checkout, location, budget_remaining
+            )
+            all_results.extend(location_results)
+            total_candidates_generated += candidates_used
+            budget_remaining -= candidates_used
+
+            for result in location_results:
+                if (
+                    result.status == RepairStatus.PLAUSIBLE
+                    and time_to_first_plausible is None
+                ):
+                    time_to_first_plausible = time.monotonic() - started_at
+                    found_plausible = True
+
+            if found_plausible and stop_on_first:
+                break
+
+        elapsed = time.monotonic() - started_at
+        summary = build_loop_summary(
+            bug, all_results, total_candidates_generated, budget, elapsed
+        )
+        logger.info(
+            "Iterative repair loop finished in %.1fs: %d validated, %d plausible",
+            elapsed,
+            len(all_results),
+            len(
+                [
+                    result
+                    for result in all_results
+                    if result.status == RepairStatus.PLAUSIBLE
+                ]
+            ),
+        )
+        return LoopOutcome(
+            summary=summary,
+            all_results=all_results,
+            total_candidates_generated=total_candidates_generated,
+            time_to_first_plausible_seconds=time_to_first_plausible,
+            total_wall_clock_seconds=elapsed,
+        )
+
+    def _run_conversation_for_location(
+        self,
+        bug: BugIdentifier,
+        checkout: CheckoutResult,
+        location: RankedLocation,
+        budget_remaining: int,
+    ) -> tuple[list[RepairAttemptResult], int]:
+        """Run a bounded multi-turn conversation to repair one suspicious location.
+
+        Sends the initial repair prompt, then after each failed validation appends
+        the test-failure feedback turn and asks again — up to ``max_iterations``
+        times, never exceeding ``budget_remaining`` validations. Stops early on a
+        plausible patch, a no-improvement signal, or repeated unparsable replies.
+
+        Returns:
+            ``(results, candidates_validated)`` — the per-turn validation results and
+            how many test-suite executions this location consumed from the budget.
+        """
+        prepared_prompt = self._build_location_prompt(bug, checkout, location)
+        if prepared_prompt is None:
+            return [], 0
+
+        source_file_path = prepared_prompt.source_file_path
+        function_start_line = prepared_prompt.function_start_line
+        function_end_line = prepared_prompt.function_end_line
+        messages = prepared_prompt.messages
+
+        results: list[RepairAttemptResult] = []
+        previous_diff_text: str | None = None
+        consecutive_format_failures = 0
+        candidates_validated = 0
+
+        for iteration_index in range(self._repair_config.max_iterations):
+            if budget_remaining - candidates_validated <= 0:
+                logger.info(
+                    "Budget exhausted mid-conversation for %s:%d",
+                    source_file_path.name,
+                    location.line,
+                )
+                break
+
+            try:
+                llm_response_text = self._llm_client.complete(messages)
+            except APRFrameworkError as llm_error:
+                logger.warning(
+                    "LLM call failed for %s:%d turn %d: %s",
+                    source_file_path.name,
+                    location.line,
+                    iteration_index,
+                    llm_error,
+                )
+                break
+
+            extracted_patch = extract_patch_with_source(
+                llm_response_text,
+                source_file_path,
+                function_start_line,
+                function_end_line,
+            )
+
+            if extracted_patch is None:
+                consecutive_format_failures += 1
+                if consecutive_format_failures >= _MAX_FORMAT_RETRIES:
+                    logger.warning(
+                        "Giving up on %s:%d after %d unparsable replies",
+                        source_file_path.name,
+                        location.line,
+                        consecutive_format_failures,
+                    )
+                    break
+                messages.append({"role": "assistant", "content": llm_response_text})
+                messages.append(
+                    {"role": "user", "content": build_format_retry_message()}
+                )
+                continue
+            consecutive_format_failures = 0
+
+            if is_no_improvement_signal(
+                extracted_patch.diff_text, previous_diff_text, llm_response_text
+            ):
+                logger.info(
+                    "No-improvement signal for %s:%d at turn %d — moving to next location",
+                    source_file_path.name,
+                    location.line,
+                    iteration_index + 1,
+                )
+                break
+
+            patch_candidate = PatchCandidate(
+                bug=bug,
+                patch_id=f"llm-iter-{location.rank}-{iteration_index}",
+                summary=(
+                    f"LLM iterative patch for {location.file_path}:{location.line} "
+                    f"(turn {iteration_index + 1})"
+                ),
+                diff_text=extracted_patch.diff_text,
+                metadata={
+                    "location_rank": location.rank,
+                    "location_score": location.score,
+                    "llm_response": llm_response_text,
+                    "model": self._repair_config.model_name,
+                    "source_path": str(source_file_path),
+                    "target_line": location.line,
+                    "patched_source": extracted_patch.patched_source,
+                    "iteration": iteration_index + 1,
+                },
+            )
+
+            # Mirror run_validation_loop's guard: one patch's unexpected failure
+            # must never abort the whole run. A validation error (e.g. establishing
+            # the regression baseline) yields no test output to feed back, so record
+            # FAILED, count it against budget, and end this location's conversation.
+            try:
+                result = self.validate_patch(bug, checkout, patch_candidate)
+            except Exception as validation_error:  # noqa: BLE001 — never abort the loop on one patch
+                logger.error(
+                    "Unexpected error validating %s: %s",
+                    patch_candidate.patch_id,
+                    validation_error,
+                )
+                results.append(
+                    RepairAttemptResult(
+                        bug=bug,
+                        patch=patch_candidate,
+                        status=RepairStatus.FAILED,
+                        validation_summary=(
+                            f"Unexpected validation error: {validation_error}"
+                        ),
+                    )
+                )
+                candidates_validated += 1
+                break
+
+            results.append(result)
+            candidates_validated += 1
+            previous_diff_text = extracted_patch.diff_text
+
+            if result.status == RepairStatus.PLAUSIBLE:
+                break
+
+            feedback_message = build_test_failure_feedback_message(
+                patch_candidate.metadata.get("raw_test_output", ""),
+                iteration_index=iteration_index + 1,
+                max_iterations=self._repair_config.max_iterations,
+                passed_count=patch_candidate.metadata.get("passed_count", 0),
+                failed_count=patch_candidate.metadata.get("failed_count", 0),
+                error_count=patch_candidate.metadata.get("error_count", 0),
+                failure_kind=patch_candidate.metadata.get("failure_kind", "trigger"),
+            )
+            messages.append({"role": "assistant", "content": llm_response_text})
+            messages.append({"role": "user", "content": feedback_message})
+
+        return results, candidates_validated
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -279,42 +578,14 @@ class LLMRepairAlgorithm(RepairAlgorithm):
         location: RankedLocation,
     ) -> list[PatchCandidate]:
         """Query the LLM up to max_patch_count times for one suspicious location."""
-        if location.line is None:
-            logger.warning(
-                "Location %s has no line number — skipping", location.file_path
-            )
+        prepared_prompt = self._build_location_prompt(bug, checkout, location)
+        if prepared_prompt is None:
             return []
 
-        source_file_path = self._resolve_source_file_path(location, checkout)
-        if source_file_path is None:
-            logger.warning(
-                "Cannot resolve source path for %s — skipping", location.file_path
-            )
-            return []
-
-        try:
-            function_source_text, function_start_line, function_end_line = (
-                extract_function_source(source_file_path, location.line)
-            )
-        except Exception as extraction_error:
-            logger.error(
-                "Function extraction failed for %s:%d: %s",
-                source_file_path,
-                location.line,
-                extraction_error,
-            )
-            return []
-
-        failing_test_context = self._failing_test_context_for(checkout)
-        messages = build_repair_prompt(
-            location,
-            function_source_text,
-            function_start_line,
-            system_message_text=self._system_message_text,
-            few_shot_examples=self._few_shot_examples_for(bug),
-            failing_test_source=failing_test_context.failing_test_source,
-            error_traceback=failing_test_context.error_traceback,
-        )
+        source_file_path = prepared_prompt.source_file_path
+        function_start_line = prepared_prompt.function_start_line
+        function_end_line = prepared_prompt.function_end_line
+        messages = prepared_prompt.messages
 
         logger.info(
             "Querying LLM for %s:%d (rank %d, score %s) — up to %d attempt(s)",
@@ -388,6 +659,63 @@ class LLMRepairAlgorithm(RepairAlgorithm):
         )
         return location_patch_candidates
 
+    def _build_location_prompt(
+        self,
+        bug: BugIdentifier,
+        checkout: CheckoutResult,
+        location: RankedLocation,
+    ) -> _LocationPrompt | None:
+        """Resolve the source file, extract the enclosing function, and build the
+        initial ``[system, user]`` message list for one location.
+
+        Shared by the single-shot (:meth:`_generate_patches_for_location`) and
+        iterative (:meth:`_run_conversation_for_location`) paths so both apply the
+        same enrichment. Returns None when the location cannot be prompted — no
+        line number, unresolvable path, or function-extraction failure.
+        """
+        if location.line is None:
+            logger.warning(
+                "Location %s has no line number — skipping", location.file_path
+            )
+            return None
+
+        source_file_path = self._resolve_source_file_path(location, checkout)
+        if source_file_path is None:
+            logger.warning(
+                "Cannot resolve source path for %s — skipping", location.file_path
+            )
+            return None
+
+        try:
+            function_source_text, function_start_line, function_end_line = (
+                extract_function_source(source_file_path, location.line)
+            )
+        except Exception as extraction_error:
+            logger.error(
+                "Function extraction failed for %s:%d: %s",
+                source_file_path,
+                location.line,
+                extraction_error,
+            )
+            return None
+
+        failing_test_context = self._failing_test_context_for(checkout)
+        messages = build_repair_prompt(
+            location,
+            function_source_text,
+            function_start_line,
+            system_message_text=self._system_message_text,
+            few_shot_examples=self._few_shot_examples_for(bug),
+            failing_test_source=failing_test_context.failing_test_source,
+            error_traceback=failing_test_context.error_traceback,
+        )
+        return _LocationPrompt(
+            source_file_path=source_file_path,
+            function_start_line=function_start_line,
+            function_end_line=function_end_line,
+            messages=messages,
+        )
+
     def _regression_context(self, checkout: CheckoutResult) -> RegressionContext:
         """Return the regression baseline, establishing it once on first use."""
         if self._regression is None:
@@ -458,6 +786,32 @@ class LLMRepairAlgorithm(RepairAlgorithm):
             "Source file not found: %s (worktree: %s)", file_path_str, checkout.worktree
         )
         return None
+
+
+def _classify_failure_kind(
+    is_plausible: bool, trigger_test_run_result: TestRunResult
+) -> str:
+    """Classify why a validated patch was not plausible, for iterative feedback.
+
+    ``apply_patch_and_validate`` returns only the *trigger* test run. When a patch
+    makes the bug-triggering test pass but breaks a previously-passing test, that
+    trigger run shows all-green — so its counts/traceback tell the model nothing
+    about the real failure. This distinguishes the two cases so the feedback turn
+    can be honest:
+
+      - "none"       — the patch was plausible (no feedback needed).
+      - "regression" — the trigger test passed but the patch broke another test.
+      - "trigger"    — the bug's own test still fails (trigger output is useful).
+    """
+    if is_plausible:
+        return "none"
+    trigger_passed = (
+        trigger_test_run_result.return_code == 0
+        and trigger_test_run_result.failed_count == 0
+        and trigger_test_run_result.error_count == 0
+        and trigger_test_run_result.passed_count > 0
+    )
+    return "regression" if trigger_passed else "trigger"
 
 
 def _parse_source_file_path_from_diff(diff_text: str) -> Path | None:

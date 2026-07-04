@@ -38,6 +38,8 @@ and `File | Function | Line | Score` table formats
 - **Hybrid SBFL+MBFL localizer** — min-max normalises and combines scores from both families with configurable weights; locations found by both backends receive a tiebreak bonus
 - **MBFL random-budget extension** — caps expensive mutant validation at `--budget N` mutants using random selection, making MBFL practical on large projects
 - **`evaluate-localization` command** — runs all 8 techniques (5 SBFL, 2 MBFL, 1 Hybrid) on a configurable set of BugsInPy bugs, ranks the ground-truth faulty line for each, and writes `experiment_results/results.json` and `experiment_results/README.md`
+- **Template-based repair backend** (`--technique template`) — AST mutation operators driven by FL, with patch ranking and an evaluation matrix (Assignment 3)
+- **LLM-based repair backend** (`--technique llm`) — FL-guided prompting against GPT@RUB, with context enrichment and few-shot examples (Assignment 4 — Tasks 1–2) and an **iterative test-failure feedback loop** (`--iterative`) that revises failed patches across a multi-turn conversation, feeding each failure's traceback back to the model (Assignment 4 — Task 3)
 - Dummy repair algorithm for three BugsInPy `black` bugs (1/3/23)
 - Dummy evaluation runner that creates structured run artifacts:
   - `config.json`
@@ -1059,6 +1061,179 @@ The hook lives at the single send choke point in
 [`repair/llm/client.py`](src/apr_framework/repair/llm/client.py) (`OpenAICompatibleClient._dump_prompt_if_debugging`),
 so it captures the real messages for every call — enriched, few-shot, or plain. A failed
 write (e.g. a bad path) is logged and ignored, never aborting the repair run.
+
+---
+
+## Iterative Repair with Test-Failure Feedback (Assignment 4 — Task 3)
+
+### Why a single LLM query often isn't enough
+
+A one-shot LLM query frequently produces a patch that is syntactically valid but still
+fails the test suite — the model guessed wrong, or fixed only part of the fault. It has no
+way to learn from that failure because it never sees it. Inspired by **ChatRepair**, this
+task turns the single query into a *conversation*: after a patch fails validation, the
+exact test-failure output is fed back to the model as the next turn, and it is asked to
+revise its fix. The model can then react to the concrete failure (the assertion that
+tripped, the exception raised) instead of guessing blind a second time.
+
+### How it works
+
+Iterative mode runs **one fresh multi-turn conversation per FL location** (symmetric with
+single-shot mode, which already queries the top-N locations independently). Each location
+starts from the same `[system, user]` repair prompt as Task 1/2 (all enrichment flags
+still apply), then extends turn by turn:
+
+1. Ask the model for a corrected function; extract the patch and validate it.
+2. If it fails, append the model's reply **and** a structured test-failure feedback turn
+   (see below), then ask again.
+3. Repeat until the location's conversation ends (stop conditions below), then move on to
+   the next location if the global budget allows.
+
+**Two independent counters** govern how long the loop runs:
+
+| Counter | Flag | Scope | Meaning |
+|---|---|---|---|
+| **Conversation budget** | `--max-iterations` | **Per location** | Max conversation turns (LLM calls) spent on one location before giving up on it. Format-retry turns count toward this, so a location can never loop forever. |
+| **Validation budget** | `--budget` | **Global** | Max test-suite executions across the whole bug (same meaning as template and single-shot LLM repair). Decremented only when a syntactically valid patch is actually validated. |
+
+**Interface extension — the `repair_loop` ABC method (documented change).** The assignment
+sheet asks that any interface change needed to accommodate LLM-specific behavior be made
+and documented. Here is why one was necessary. The real evaluation path
+(`RepairEvaluationRunner`) does **not** call an algorithm's `repair()`; it called the
+module-level `run_validation_loop(repair, …)` **directly**. That function generates *all*
+candidates up front and then validates them one by one — a split that iterative repair
+breaks by construction, because generating turn *N+1* requires knowing why turn *N*
+failed. Overriding `repair()` alone would therefore have been invisible to the actual
+evaluation and CLI path.
+
+The fix is a **one-method extension of the `RepairAlgorithm` ABC**: a non-abstract
+`repair_loop(bug, checkout, *, budget, stop_on_first) -> LoopOutcome`. Its default
+implementation simply delegates to `run_validation_loop`, so the template backend and
+non-iterative LLM runs are **byte-for-byte unchanged**. `LLMRepairAlgorithm` overrides
+`repair_loop` only when `--iterative` is set; otherwise it too falls back to the default.
+`RepairEvaluationRunner` now calls `repair.repair_loop(...)` instead of the module
+function. `generate_patches()` and `validate_patch()` remain the untouched primitives that
+every backend still implements and that both loop shapes reuse.
+
+### Feedback message design
+
+Every turn after the first carries the previous attempt's failure. The feedback is a
+structured prompt section (built by [`repair/llm/feedback.py`](src/apr_framework/repair/llm/feedback.py)),
+styled like the other `##`-headed sections so the conversation reads consistently:
+
+```
+## Previous Attempt Failed (turn 2 of 5)
+Your last fix did not pass validation — passed=12, failed=1, errors=0.
+
+Traceback:
+```
+Traceback (most recent call last):
+  File ".../test_foo.py", line 42, in test_bar
+    assert result == 3
+AssertionError: assert 4 == 3
+```
+
+Please analyze this failure and provide a revised fix. Return the corrected function
+in a Python fenced code block, as before.
+```
+
+The traceback is extracted from the failed run's raw pytest output by the shared
+`extract_last_traceback` helper (the same one Task 2 uses for the unpatched-code
+traceback). When no traceback is present the message still carries the pass/fail/error
+counts. The raw output is passed in-memory from `validate_patch` to the loop via the
+candidate's metadata; it is filtered out of `repair_results.json` so it never bloats the
+run artifacts.
+
+**Two failure kinds, two messages.** A patch can fail validation either because the
+bug-triggering test still fails (**trigger** failure) or because the patch *fixes* the
+target test but breaks a previously-passing one (**regression** failure). The plausibility
+helper only returns the trigger run, which for a regression failure shows all-green — its
+counts and (absent) traceback would mislead the model. `validate_patch` therefore
+classifies the failure (`_classify_failure_kind`) and the feedback adapts: trigger failures
+get the traceback/counts shown above; regression failures instead get an explicit note that
+a previously-passing test was broken and a request to fix the bug *without* changing other
+behavior. (A fuller variant that names the specific regressed tests would require plumbing
+the regression run's output out of the shared validation helper — noted as follow-up work.)
+
+### Stop conditions
+
+A location's conversation ends as soon as **any** of these holds — matching the
+assignment's Task 3 bullet list:
+
+- **A plausible patch is found** (all tests pass, no regressions).
+- **`--max-iterations` is exhausted** (conversation-turn budget for this location).
+- **`--budget` is exhausted** (global test-suite execution budget).
+- **The model signals it cannot improve further**, detected by two cheap, explainable
+  heuristics (a documented heuristic, not a semantic judgment):
+  - **Identical diff twice in a row** — the model is repeating itself and making no
+    progress.
+  - **Refusal phrase** — a small case-insensitive substring list (e.g. *"cannot fix"*,
+    *"unable to fix"*, *"no further changes"*) matched against the response text.
+
+Additionally, an **unparsable reply** (no fenced code block) triggers one bounded
+*format-retry* turn — a short "please reply with a valid fenced code block" nudge — up to
+2 consecutive times before giving up on the location, so prose-wrapped answers don't waste
+the whole `--max-iterations` budget. Every early exit is logged at INFO/WARNING level with
+its reason, so `runs/run_NNN/execution.log` explains why each conversation ended.
+
+### CLI flags (Task 3)
+
+| Flag | Default | Description |
+|---|---|---|
+| `--iterative` / `--no-iterative` | *disabled* | Enable the multi-turn feedback loop. Ignored when `--technique template`. |
+| `--max-iterations N` | `5` | Max conversation turns per FL location before giving up on it. Only meaningful with `--iterative`. |
+
+These compose with **all** the Task 1/2 LLM flags (`--model`, `--temperature`,
+`--max-candidates`, `--context-enrichment`, `--few-shot`, `--llm-base-url`,
+`--llm-api-key-env`) and all shared flags (`--fl-mode`, `--fl-family`, `--budget`,
+`--top-n`, `--timeout`, `--stop-on-first`, `--no-regression-check`, `--ranker`). Both
+`--iterative` and `--max-iterations` are recorded in each run's `config.json` and embedded
+`repair_results.json` config, so every result file records which mode produced it.
+
+> Note: `--max-candidates` (turns per location in single-shot mode) and `--max-iterations`
+> (turns per location in iterative mode) are distinct: single-shot mode generates
+> `--max-candidates` independent patches per location, while iterative mode runs up to
+> `--max-iterations` *dependent* turns, each reacting to the last failure. In iterative
+> runs, `--max-candidates` is not used for the conversation length.
+
+### Example invocations
+
+```bash
+# Iterative repair with automated FL:
+python -m apr_framework repair --project black --bug 1 --technique llm \
+    --iterative --max-iterations 5 --fl-mode auto
+
+# Iterative repair with perfect FL, capped test-suite budget:
+python -m apr_framework repair --project black --bug 1 --technique llm \
+    --iterative --max-iterations 5 --fl-mode perfect --budget 20
+
+# Iterative combined with context enrichment and few-shot (Task 2 flags still apply):
+python -m apr_framework repair --project black --bug 1 --technique llm \
+    --iterative --max-iterations 5 --context-enrichment --few-shot 2
+```
+
+Patches produced in iterative mode carry an `llm-iter-<rank>-<turn>` `patch_id` (vs.
+`llm-<rank>-<attempt>` for single-shot), so run artifacts and logs make the mode visually
+obvious.
+
+### Reflection — what test-failure information helps most
+
+> **⚠️ Draft, to be revisited once Task 5's empirical evaluation runs are available.**
+> The points below are grounded in the *design intent*; a firm answer requires observing
+> real multi-turn iterations on actual bugs, which is the separate Task 5 evaluation.
+
+Design expectation: the **traceback** — specifically the final exception type and message
+and the failing test's assertion line — should be the highest-value piece of the feedback.
+It names the concrete symptom (`AssertionError: assert 4 == 3`, an `IndexError`, a
+`TypeError`) that a bare *"passed=12, failed=1"* count cannot convey, and it points the
+model at the exact expected-vs-actual mismatch. The pass/fail/error **counts** are expected
+to be secondary but still useful as a coarse progress signal (did the last edit fix some
+tests while breaking others?). The full pytest transcript is deliberately **not** forwarded
+verbatim — it is large and mostly noise; only the last traceback block (capped at 60 lines)
+is included, on the hypothesis that the trailing failure is the actionable one. Whether the
+model actually benefits more from the assertion line than from the counts, and whether
+truncating to a single traceback loses useful cross-test signal, are the questions Task 5's
+observed iterations will answer.
 
 ---
 

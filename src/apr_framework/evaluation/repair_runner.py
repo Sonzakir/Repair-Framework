@@ -34,7 +34,7 @@ from apr_framework.localization.base import FaultLocalizer
 from apr_framework.repair.base import RepairAlgorithm
 from apr_framework.repair.correctness import is_correct_patch
 from apr_framework.repair.ranking.base import PatchRanker
-from apr_framework.repair.run_loop import LoopOutcome, run_validation_loop
+from apr_framework.repair.run_loop import LoopOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -163,9 +163,10 @@ class RepairEvaluationRunner(EvaluationRunner):
         started_at = datetime.now(timezone.utc)
         checkout = self._resolve_checkout(bug, benchmark)
 
-        # Plausibility —> shared generate-and-validate loop (with timing/counts).
-        outcome = run_validation_loop(
-            repair,
+        # Plausibility —> the algorithm's budget-bounded loop (with timing/counts).
+        # Default backends delegate to the shared generate-and-validate loop; the
+        # iterative LLM backend overrides repair_loop for multi-turn feedback.
+        outcome = repair.repair_loop(
             bug,
             checkout,
             budget=self._budget,
@@ -329,7 +330,8 @@ class RepairEvaluationRunner(EvaluationRunner):
             "metadata": {
                 k: v
                 for k, v in (patch.metadata if patch else {}).items()
-                if k != "patched_source"  # omit large source blobs
+                # omit large blobs: full patched source and raw pytest output
+                if k not in ("patched_source", "raw_test_output")
             },
         }
 

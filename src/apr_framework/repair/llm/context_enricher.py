@@ -26,12 +26,11 @@ from apr_framework.benchmarks.bugsinpy import BugsInPyAdapter
 from apr_framework.core.exceptions import ConfigurationError
 from apr_framework.core.models import CheckoutResult
 from apr_framework.localization.fauxpy import load_pytest_targets
+from apr_framework.repair.llm.traceback_utils import extract_last_traceback
 
 logger = logging.getLogger(__name__)
 
 _RUN_TEST_SCRIPT_NAME = "bugsinpy_run_test.sh"
-_TRACEBACK_MARKER = "Traceback (most recent call last):"
-_TRACEBACK_MAX_LINES = 60
 
 
 @dataclass(frozen=True)
@@ -187,7 +186,7 @@ def _capture_trigger_traceback(
 ) -> str | None:
     """Run the bug's trigger test unpatched and extract its traceback, or None."""
     trigger_run_result = adapter.run_tests(checkout, timeout=timeout)
-    error_traceback = _extract_traceback(trigger_run_result.raw_output)
+    error_traceback = extract_last_traceback(trigger_run_result.raw_output)
     if error_traceback is None:
         logger.warning(
             "No traceback found in trigger-test output for %s#%d — skipping traceback",
@@ -195,15 +194,3 @@ def _capture_trigger_traceback(
             checkout.bug.bug_id,
         )
     return error_traceback
-
-
-def _extract_traceback(raw_output: str) -> str | None:
-    """Return the last Python traceback block from test output, capped in length."""
-    marker_index = raw_output.rfind(_TRACEBACK_MARKER)
-    if marker_index == -1:
-        return None
-
-    traceback_lines = raw_output[marker_index:].splitlines()
-    if len(traceback_lines) > _TRACEBACK_MAX_LINES:
-        traceback_lines = traceback_lines[:_TRACEBACK_MAX_LINES]
-    return "\n".join(traceback_lines).strip() or None

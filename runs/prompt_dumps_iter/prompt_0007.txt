@@ -1,0 +1,332 @@
+----- SYSTEM -----
+You are an automated program repair tool. Your task is to fix a bug in a Python program.
+You will be given the buggy code region and the fault location identified by a fault
+localization tool. You may also be given the failing test and the traceback it produces
+on the current code; when present, use them to infer the behaviour the fix must satisfy
+and the concrete failure to eliminate. Return ONLY the corrected version of the provided function inside a
+Python fenced code block (```python ... ```). Do not include any explanation, commentary,
+or code outside the fenced block. Do not change the function signature.
+The buggy code is shown with leading line numbers and a "-->" marker on the suspicious
+line; these are annotations, NOT part of the source. Do NOT reproduce the line numbers or
+the marker. Return only real Python source, preserving the original indentation exactly.
+
+----- USER -----
+## Fault Location
+File: black.py
+Suspicious line: 646 (rank 3, score 0.9800)
+
+## Buggy Code (lines 639–707)
+```python
+639      async def schedule_formatting(
+640          sources: Set[Path],
+641          fast: bool,
+642          write_back: WriteBack,
+643          mode: Mode,
+644          report: "Report",
+645          loop: asyncio.AbstractEventLoop,
+646  -->      executor: Executor,
+647      ) -> None:
+648          """Run formatting of `sources` in parallel using the provided `executor`.
+649      
+650          (Use ProcessPoolExecutors for actual parallelism.)
+651      
+652          `write_back`, `fast`, and `mode` options are passed to
+653          :func:`format_file_in_place`.
+654          """
+655          cache: Cache = {}
+656          if write_back != WriteBack.DIFF:
+657              cache = read_cache(mode)
+658              sources, cached = filter_cached(cache, sources)
+659              for src in sorted(cached):
+660                  report.done(src, Changed.CACHED)
+661          if not sources:
+662              return
+663      
+664          cancelled = []
+665          sources_to_cache = []
+666          lock = None
+667          if write_back == WriteBack.DIFF:
+668              # For diff output, we need locks to ensure we don't interleave output
+669              # from different processes.
+670              manager = Manager()
+671              lock = manager.Lock()
+672          tasks = {
+673              asyncio.ensure_future(
+674                  loop.run_in_executor(
+675                      executor, format_file_in_place, src, fast, mode, write_back, lock
+676                  )
+677              ): src
+678              for src in sorted(sources)
+679          }
+680          pending: Iterable["asyncio.Future[bool]"] = tasks.keys()
+681          try:
+682              loop.add_signal_handler(signal.SIGINT, cancel, pending)
+683              loop.add_signal_handler(signal.SIGTERM, cancel, pending)
+684          except NotImplementedError:
+685              # There are no good alternatives for these on Windows.
+686              pass
+687          while pending:
+688              done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+689              for task in done:
+690                  src = tasks.pop(task)
+691                  if task.cancelled():
+692                      cancelled.append(task)
+693                  elif task.exception():
+694                      report.failed(src, str(task.exception()))
+695                  else:
+696                      changed = Changed.YES if task.result() else Changed.NO
+697                      # If the file was written back or was successfully checked as
+698                      # well-formatted, store this information in the cache.
+699                      if write_back is WriteBack.YES or (
+700                          write_back is WriteBack.CHECK and changed is Changed.NO
+701                      ):
+702                          sources_to_cache.append(src)
+703                      report.done(src, changed)
+704          if cancelled:
+705              await asyncio.gather(*cancelled, loop=loop, return_exceptions=True)
+706          if sources_to_cache:
+707              write_cache(cache, sources_to_cache, mode)
+```
+
+## Failing Test
+This is the test the fix must make pass. Use it to infer the intended behaviour.
+```python
+def test_works_in_mono_process_only_environment(self, mock_executor) -> None:
+        mock_executor.side_effect = OSError()
+        mode = black.FileMode()
+        with cache_dir() as workspace:
+            one = (workspace / "one.py").resolve()
+            with one.open("w") as fobj:
+                fobj.write("print('hello')")
+            two = (workspace / "two.py").resolve()
+            with two.open("w") as fobj:
+                fobj.write("print('hello')")
+            black.write_cache({}, [one], mode)
+            self.invokeBlack([str(workspace)])
+            with one.open("r") as fobj:
+                self.assertEqual(fobj.read(), "print('hello')")
+            with two.open("r") as fobj:
+                self.assertEqual(fobj.read(), 'print("hello")\n')
+            cache = black.read_cache(mode)
+            self.assertIn(one, cache)
+            self.assertIn(two, cache)
+```
+
+## Failure Traceback
+Running the failing test on the current (buggy) code produces this traceback:
+```
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.8.3/lib/python3.8/unittest/mock.py", line 1325, in patched
+    return func(*newargs, **newkeywargs)
+  File "/home/workspace/black_1/black/tests/test_black.py", line 1288, in test_works_in_mono_process_only_environment
+    self.invokeBlack([str(workspace)])
+  File "/home/workspace/black_1/black/tests/test_black.py", line 162, in invokeBlack
+    self.assertEqual(result.exit_code, exit_code, msg=runner.stderr_bytes.decode())
+AssertionError: 1 != 0 : 
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+FAILED (failures=1)
+```
+
+## Task
+Fix the bug at line 646. Return the corrected function in a Python fenced
+code block. Keep the fix minimal — change as few lines as necessary.
+
+----- ASSISTANT -----
+```python
+      async def schedule_formatting(
+          sources: Set[Path],
+          fast: bool,
+          write_back: WriteBack,
+          mode: Mode,
+          report: "Report",
+          loop: asyncio.AbstractEventLoop,
+          executor: Optional[Executor] = None,
+      ) -> None:
+          """Run formatting of `sources` in parallel using the provided `executor`.
+      
+          (Use ProcessPoolExecutors for actual parallelism.)
+      
+          `write_back`, `fast`, and `mode` options are passed to
+          :func:`format_file_in_place`.
+          """
+          cache: Cache = {}
+          if write_back != WriteBack.DIFF:
+              cache = read_cache(mode)
+              sources, cached = filter_cached(cache, sources)
+              for src in sorted(cached):
+                  report.done(src, Changed.CACHED)
+          if not sources:
+              return
+      
+          cancelled = []
+          sources_to_cache = []
+          lock = None
+          if write_back == WriteBack.DIFF:
+              # For diff output, we need locks to ensure we don't interleave output
+              # from different processes.
+              manager = Manager()
+              lock = manager.Lock()
+          tasks = {
+              asyncio.ensure_future(
+                  loop.run_in_executor(
+                      executor, format_file_in_place, src, fast, mode, write_back, lock
+                  )
+              ): src
+              for src in sorted(sources)
+          }
+          pending: Iterable["asyncio.Future[bool]"] = tasks.keys()
+          try:
+              loop.add_signal_handler(signal.SIGINT, cancel, pending)
+              loop.add_signal_handler(signal.SIGTERM, cancel, pending)
+          except NotImplementedError:
+              # There are no good alternatives for these on Windows.
+              pass
+          while pending:
+              done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+              for task in done:
+                  src = tasks.pop(task)
+                  if task.cancelled():
+                      cancelled.append(task)
+                  elif task.exception():
+                      report.failed(src, str(task.exception()))
+                  else:
+                      changed = Changed.YES if task.result() else Changed.NO
+                      # If the file was written back or was successfully checked as
+                      # well-formatted, store this information in the cache.
+                      if write_back is WriteBack.YES or (
+                          write_back is WriteBack.CHECK and changed is Changed.NO
+                      ):
+                          sources_to_cache.append(src)
+                      report.done(src, changed)
+          if cancelled:
+              await asyncio.gather(*cancelled, loop=loop, return_exceptions=True)
+          if sources_to_cache:
+              write_cache(cache, sources_to_cache, mode)
+```
+
+----- USER -----
+## Previous Attempt Failed (turn 1 of 3)
+Your last fix did not pass validation — passed=0, failed=1, errors=0.
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.8.3/lib/python3.8/unittest/mock.py", line 1325, in patched
+    return func(*newargs, **newkeywargs)
+  File "/home/workspace/black_1/black/tests/test_black.py", line 1288, in test_works_in_mono_process_only_environment
+    self.invokeBlack([str(workspace)])
+  File "/home/workspace/black_1/black/tests/test_black.py", line 162, in invokeBlack
+    self.assertEqual(result.exit_code, exit_code, msg=runner.stderr_bytes.decode())
+AssertionError: 1 != 0 : 
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+FAILED (failures=1)
+```
+
+Please analyze this failure and provide a revised fix. Return the corrected function in a Python fenced code block, as before.
+
+----- ASSISTANT -----
+```python
+      async def schedule_formatting(
+          sources: Set[Path],
+          fast: bool,
+          write_back: WriteBack,
+          mode: Mode,
+          report: "Report",
+          loop: asyncio.AbstractEventLoop,
+          executor: Optional[Executor] = None,
+      ) -> None:
+          """Run formatting of `sources` in parallel using the provided `executor`.
+      
+          (Use ProcessPoolExecutors for actual parallelism.)
+      
+          `write_back`, `fast`, and `mode` options are passed to
+          :func:`format_file_in_place`.
+          """
+          if executor is None:
+              # Fallback to sequential execution if no executor is provided
+              async def sequential_formatting(src: Path) -> bool:
+                  return await loop.run_in_executor(None, format_file_in_place, src, fast, mode, write_back, None)
+
+              format_fn = sequential_formatting
+          else:
+              format_fn = lambda src: loop.run_in_executor(executor, format_file_in_place, src, fast, mode, write_back, None)
+
+          cache: Cache = {}
+          if write_back != WriteBack.DIFF:
+              cache = read_cache(mode)
+              sources, cached = filter_cached(cache, sources)
+              for src in sorted(cached):
+                  report.done(src, Changed.CACHED)
+          if not sources:
+              return
+      
+          cancelled = []
+          sources_to_cache = []
+          lock = None
+          if write_back == WriteBack.DIFF:
+              # For diff output, we need locks to ensure we don't interleave output
+              # from different processes.
+              manager = Manager()
+              lock = manager.Lock()
+          tasks = {
+              asyncio.ensure_future(format_fn(src)): src
+              for src in sorted(sources)
+          }
+          pending: Iterable["asyncio.Future[bool]"] = tasks.keys()
+          try:
+              loop.add_signal_handler(signal.SIGINT, cancel, pending)
+              loop.add_signal_handler(signal.SIGTERM, cancel, pending)
+          except NotImplementedError:
+              # There are no good alternatives for these on Windows.
+              pass
+          while pending:
+              done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+              for task in done:
+                  src = tasks.pop(task)
+                  if task.cancelled():
+                      cancelled.append(task)
+                  elif task.exception():
+                      report.failed(src, str(task.exception()))
+                  else:
+                      changed = Changed.YES if task.result() else Changed.NO
+                      # If the file was written back or was successfully checked as
+                      # well-formatted, store this information in the cache.
+                      if write_back is WriteBack.YES or (
+                          write_back is WriteBack.CHECK and changed is Changed.NO
+                      ):
+                          sources_to_cache.append(src)
+                      report.done(src, changed)
+          if cancelled:
+              await asyncio.gather(*cancelled, loop=loop, return_exceptions=True)
+          if sources_to_cache:
+              write_cache(cache, sources_to_cache, mode)
+```
+
+----- USER -----
+## Previous Attempt Failed (turn 2 of 3)
+Your last fix did not pass validation — passed=0, failed=1, errors=0.
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.8.3/lib/python3.8/unittest/mock.py", line 1325, in patched
+    return func(*newargs, **newkeywargs)
+  File "/home/workspace/black_1/black/tests/test_black.py", line 1288, in test_works_in_mono_process_only_environment
+    self.invokeBlack([str(workspace)])
+  File "/home/workspace/black_1/black/tests/test_black.py", line 162, in invokeBlack
+    self.assertEqual(result.exit_code, exit_code, msg=runner.stderr_bytes.decode())
+AssertionError: 1 != 0 : 
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+FAILED (failures=1)
+```
+
+Please analyze this failure and provide a revised fix. Return the corrected function in a Python fenced code block, as before.

@@ -45,7 +45,8 @@ class LLMRepairConfig:
     api_key_env_var: str = "GPT_AT_RUB_API_KEY"
     system_prompt_name: str = "prompt1"
     timeout_seconds: int = 120
-    # Task 3 hook — overriding repair() for iterative mode is not implemented yet
+    # Iterative repair: multi-turn conversation that feeds each failed patch's test
+    # output back to the model (repair_loop override in LLMRepairAlgorithm).
     iterative: bool = False
     max_iterations: int = 5
     # Repair-loop control (mirrors TemplateRepairConfig)
@@ -75,6 +76,10 @@ class LLMRepairConfig:
             )
         if self.budget < 1:
             raise ConfigurationError(f"budget must be >= 1, got {self.budget}")
+        if self.max_iterations < 1:
+            raise ConfigurationError(
+                f"max_iterations must be >= 1, got {self.max_iterations}"
+            )
         if self.few_shot_count < 0:
             raise ConfigurationError(
                 f"few_shot_count must be >= 0, got {self.few_shot_count}"

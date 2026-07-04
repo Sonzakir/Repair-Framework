@@ -375,6 +375,27 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     repair_parser.add_argument(
+        "--iterative",
+        dest="iterative",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Enable the multi-turn feedback loop: after each failed patch, feed the "
+            "test-failure output back to the LLM and ask it to revise (default: "
+            "disabled). Ignored when --technique template. LLM technique only."
+        ),
+    )
+    repair_parser.add_argument(
+        "--max-iterations",
+        dest="max_iterations",
+        type=int,
+        default=5,
+        help=(
+            "Max conversation turns per FL location before giving up on it. Only "
+            "meaningful with --iterative (default: 5). LLM technique only."
+        ),
+    )
+    repair_parser.add_argument(
         "--llm-base-url",
         dest="llm_base_url",
         type=str,

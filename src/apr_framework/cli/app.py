@@ -423,6 +423,8 @@ def _build_repair_config_data(
                 "system_prompt": args.system_prompt,
                 "context_enrichment": args.context_enrichment,
                 "few_shot_count": args.few_shot_count,
+                "iterative": args.iterative,
+                "max_iterations": args.max_iterations,
                 "timeout_seconds": args.timeout,
             }
         )
@@ -949,6 +951,8 @@ def _build_llm_algorithm_and_log_start(
         regression_check=args.regression_check,
         context_enrichment=args.context_enrichment,
         few_shot_count=args.few_shot_count,
+        iterative=args.iterative,
+        max_iterations=args.max_iterations,
     )
     llm_client = OpenAICompatibleClient(repair_config)
     algorithm = LLMRepairAlgorithm(
@@ -960,7 +964,8 @@ def _build_llm_algorithm_and_log_start(
     writer.log(
         f"Repair started: budget={args.budget}, top_n={args.top_n}, "
         f"model={args.model}, temperature={args.temperature}, "
-        f"max_candidates={args.max_candidates}"
+        f"max_candidates={args.max_candidates}, "
+        f"iterative={args.iterative}, max_iterations={args.max_iterations}"
     )
     return algorithm
 
