@@ -70,7 +70,7 @@ class RepairAlgorithm(ABC):
         """Run the budget-bounded validation loop for this algorithm.
 
         Default implementation delegates to the shared generate-and-validate loop
-        (``run_validation_loop``), identical to today's behavior. Override this
+        (``run_validation_loop``). Override this
         method for algorithms whose generation and validation are interleaved (e.g.
         iterative LLM repair with test-failure feedback), while keeping
         ``generate_patches()`` and ``validate_patch()`` as the primitives every

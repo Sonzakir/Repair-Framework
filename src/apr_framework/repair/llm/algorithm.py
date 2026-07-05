@@ -333,7 +333,7 @@ class LLMRepairAlgorithm(RepairAlgorithm):
         )
 
     # ------------------------------------------------------------------
-    # Iterative repair (Task 3) — multi-turn conversation per location
+    # Iterative repair (T-3) — multi-turn conversation per location
     # ------------------------------------------------------------------
 
     def _run_iterative_loop(

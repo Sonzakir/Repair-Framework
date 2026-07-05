@@ -11,90 +11,81 @@ line; these are annotations, NOT part of the source. Do NOT reproduce the line n
 the marker. Return only real Python source, preserving the original indentation exactly.
 
 ----- USER -----
-## Reference Fixes From This Project
-Real (buggy → fixed) examples from other bugs in this project. Use them as guidance for the fix style and output format — they are not the answer to the current bug.
-
-### Example 1: black#3
-Buggy code:
-```python
-@click.option(
-    "--config",
-    type=click.Path(
-        exists=False, file_okay=True, dir_okay=False, readable=True, allow_dash=False
-    ),
-    is_eager=True,
-    callback=read_pyproject_toml,
-```
-Fixed code:
-```python
-@click.option(
-    "--config",
-    type=click.Path(
-        exists=True, file_okay=True, dir_okay=False, readable=True, allow_dash=False
-    ),
-    is_eager=True,
-    callback=read_pyproject_toml,
-```
-
-### Example 2: black#4
-Buggy code:
-```python
-        lines (two on module-level).
-        """
-        before, after = self._maybe_empty_lines(current_line)
-        before -= self.previous_after
-        self.previous_after = after
-        self.previous_line = current_line
-        return before, after
-```
-Fixed code:
-```python
-        lines (two on module-level).
-        """
-        before, after = self._maybe_empty_lines(current_line)
-        before = (
-            # Black should not insert empty lines at the beginning
-            # of the file
-            0
-            if self.previous_line is None
-            else before - self.previous_after
-        )
-        self.previous_after = after
-        self.previous_line = current_line
-        return before, after
-```
-
 ## Fault Location
 File: black.py
-Suspicious line: 621 (rank 1, score 1.0000)
+Suspicious line: 646 (rank 3, score 0.9800)
 
-## Buggy Code (lines 612–636)
+## Buggy Code (lines 639–707)
 ```python
-612      def reformat_many(
-613          sources: Set[Path], fast: bool, write_back: WriteBack, mode: Mode, report: "Report"
-614      ) -> None:
-615          """Reformat multiple files using a ProcessPoolExecutor."""
-616          loop = asyncio.get_event_loop()
-617          worker_count = os.cpu_count()
-618          if sys.platform == "win32":
-619              # Work around https://bugs.python.org/issue26903
-620              worker_count = min(worker_count, 61)
-621  -->      executor = ProcessPoolExecutor(max_workers=worker_count)
-622          try:
-623              loop.run_until_complete(
-624                  schedule_formatting(
-625                      sources=sources,
-626                      fast=fast,
-627                      write_back=write_back,
-628                      mode=mode,
-629                      report=report,
-630                      loop=loop,
-631                      executor=executor,
-632                  )
-633              )
-634          finally:
-635              shutdown(loop)
-636              executor.shutdown()
+639      async def schedule_formatting(
+640          sources: Set[Path],
+641          fast: bool,
+642          write_back: WriteBack,
+643          mode: Mode,
+644          report: "Report",
+645          loop: asyncio.AbstractEventLoop,
+646  -->      executor: Executor,
+647      ) -> None:
+648          """Run formatting of `sources` in parallel using the provided `executor`.
+649      
+650          (Use ProcessPoolExecutors for actual parallelism.)
+651      
+652          `write_back`, `fast`, and `mode` options are passed to
+653          :func:`format_file_in_place`.
+654          """
+655          cache: Cache = {}
+656          if write_back != WriteBack.DIFF:
+657              cache = read_cache(mode)
+658              sources, cached = filter_cached(cache, sources)
+659              for src in sorted(cached):
+660                  report.done(src, Changed.CACHED)
+661          if not sources:
+662              return
+663      
+664          cancelled = []
+665          sources_to_cache = []
+666          lock = None
+667          if write_back == WriteBack.DIFF:
+668              # For diff output, we need locks to ensure we don't interleave output
+669              # from different processes.
+670              manager = Manager()
+671              lock = manager.Lock()
+672          tasks = {
+673              asyncio.ensure_future(
+674                  loop.run_in_executor(
+675                      executor, format_file_in_place, src, fast, mode, write_back, lock
+676                  )
+677              ): src
+678              for src in sorted(sources)
+679          }
+680          pending: Iterable["asyncio.Future[bool]"] = tasks.keys()
+681          try:
+682              loop.add_signal_handler(signal.SIGINT, cancel, pending)
+683              loop.add_signal_handler(signal.SIGTERM, cancel, pending)
+684          except NotImplementedError:
+685              # There are no good alternatives for these on Windows.
+686              pass
+687          while pending:
+688              done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+689              for task in done:
+690                  src = tasks.pop(task)
+691                  if task.cancelled():
+692                      cancelled.append(task)
+693                  elif task.exception():
+694                      report.failed(src, str(task.exception()))
+695                  else:
+696                      changed = Changed.YES if task.result() else Changed.NO
+697                      # If the file was written back or was successfully checked as
+698                      # well-formatted, store this information in the cache.
+699                      if write_back is WriteBack.YES or (
+700                          write_back is WriteBack.CHECK and changed is Changed.NO
+701                      ):
+702                          sources_to_cache.append(src)
+703                      report.done(src, changed)
+704          if cancelled:
+705              await asyncio.gather(*cancelled, loop=loop, return_exceptions=True)
+706          if sources_to_cache:
+707              write_cache(cache, sources_to_cache, mode)
 ```
 
 ## Failing Test
@@ -140,5 +131,5 @@ FAILED (failures=1)
 ```
 
 ## Task
-Fix the bug at line 621. Return the corrected function in a Python fenced
+Fix the bug at line 646. Return the corrected function in a Python fenced
 code block. Keep the fix minimal — change as few lines as necessary.

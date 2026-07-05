@@ -23,7 +23,7 @@ class LLMRepairConfig:
         system_prompt_name: File stem under repair/llm/prompts/ (e.g. "prompt1")
                             supplying the system message sent with every request.
         timeout_seconds:  Wall-clock seconds allowed per test-suite invocation.
-        iterative:        For loops
+        iterative:        For loops 
         max_iterations:   Max conversation turns for the iterative loop
         budget:           Max patch validations before halting (mirrors TemplateRepairConfig).
         stop_on_first:    Stop after first plausible patch.

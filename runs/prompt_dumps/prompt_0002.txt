@@ -11,62 +11,9 @@ line; these are annotations, NOT part of the source. Do NOT reproduce the line n
 the marker. Return only real Python source, preserving the original indentation exactly.
 
 ----- USER -----
-## Reference Fixes From This Project
-Real (buggy → fixed) examples from other bugs in this project. Use them as guidance for the fix style and output format — they are not the answer to the current bug.
-
-### Example 1: black#3
-Buggy code:
-```python
-@click.option(
-    "--config",
-    type=click.Path(
-        exists=False, file_okay=True, dir_okay=False, readable=True, allow_dash=False
-    ),
-    is_eager=True,
-    callback=read_pyproject_toml,
-```
-Fixed code:
-```python
-@click.option(
-    "--config",
-    type=click.Path(
-        exists=True, file_okay=True, dir_okay=False, readable=True, allow_dash=False
-    ),
-    is_eager=True,
-    callback=read_pyproject_toml,
-```
-
-### Example 2: black#4
-Buggy code:
-```python
-        lines (two on module-level).
-        """
-        before, after = self._maybe_empty_lines(current_line)
-        before -= self.previous_after
-        self.previous_after = after
-        self.previous_line = current_line
-        return before, after
-```
-Fixed code:
-```python
-        lines (two on module-level).
-        """
-        before, after = self._maybe_empty_lines(current_line)
-        before = (
-            # Black should not insert empty lines at the beginning
-            # of the file
-            0
-            if self.previous_line is None
-            else before - self.previous_after
-        )
-        self.previous_after = after
-        self.previous_line = current_line
-        return before, after
-```
-
 ## Fault Location
 File: black.py
-Suspicious line: 621 (rank 1, score 1.0000)
+Suspicious line: 636 (rank 2, score 0.9900)
 
 ## Buggy Code (lines 612–636)
 ```python
@@ -79,7 +26,7 @@ Suspicious line: 621 (rank 1, score 1.0000)
 618          if sys.platform == "win32":
 619              # Work around https://bugs.python.org/issue26903
 620              worker_count = min(worker_count, 61)
-621  -->      executor = ProcessPoolExecutor(max_workers=worker_count)
+621          executor = ProcessPoolExecutor(max_workers=worker_count)
 622          try:
 623              loop.run_until_complete(
 624                  schedule_formatting(
@@ -94,7 +41,7 @@ Suspicious line: 621 (rank 1, score 1.0000)
 633              )
 634          finally:
 635              shutdown(loop)
-636              executor.shutdown()
+636  -->          executor.shutdown()
 ```
 
 ## Failing Test
@@ -140,5 +87,5 @@ FAILED (failures=1)
 ```
 
 ## Task
-Fix the bug at line 621. Return the corrected function in a Python fenced
+Fix the bug at line 636. Return the corrected function in a Python fenced
 code block. Keep the fix minimal — change as few lines as necessary.

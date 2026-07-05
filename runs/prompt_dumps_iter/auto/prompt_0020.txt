@@ -13,35 +13,21 @@ the marker. Return only real Python source, preserving the original indentation 
 ----- USER -----
 ## Fault Location
 File: black.py
-Suspicious line: 636 (rank 2, score 0.9900)
+Suspicious line: 6311 (rank 5, score 0.9091)
 
-## Buggy Code (lines 612–636)
+## Buggy Code (lines 6307–6317)
 ```python
-612      def reformat_many(
-613          sources: Set[Path], fast: bool, write_back: WriteBack, mode: Mode, report: "Report"
-614      ) -> None:
-615          """Reformat multiple files using a ProcessPoolExecutor."""
-616          loop = asyncio.get_event_loop()
-617          worker_count = os.cpu_count()
-618          if sys.platform == "win32":
-619              # Work around https://bugs.python.org/issue26903
-620              worker_count = min(worker_count, 61)
-621          executor = ProcessPoolExecutor(max_workers=worker_count)
-622          try:
-623              loop.run_until_complete(
-624                  schedule_formatting(
-625                      sources=sources,
-626                      fast=fast,
-627                      write_back=write_back,
-628                      mode=mode,
-629                      report=report,
-630                      loop=loop,
-631                      executor=executor,
-632                  )
-633              )
-634          finally:
-635              shutdown(loop)
-636  -->          executor.shutdown()
+6307      def write_cache(cache: Cache, sources: Iterable[Path], mode: Mode) -> None:
+6308          """Update the cache file."""
+6309          cache_file = get_cache_file(mode)
+6310          try:
+6311  -->          CACHE_DIR.mkdir(parents=True, exist_ok=True)
+6312              new_cache = {**cache, **{src.resolve(): get_cache_info(src) for src in sources}}
+6313              with tempfile.NamedTemporaryFile(dir=str(cache_file.parent), delete=False) as f:
+6314                  pickle.dump(new_cache, f, protocol=4)
+6315              os.replace(f.name, cache_file)
+6316          except OSError:
+6317              pass
 ```
 
 ## Failing Test
@@ -87,51 +73,27 @@ FAILED (failures=1)
 ```
 
 ## Task
-Fix the bug at line 636. Return the corrected function in a Python fenced
+Fix the bug at line 6311. Return the corrected function in a Python fenced
 code block. Keep the fix minimal — change as few lines as necessary.
 
 ----- ASSISTANT -----
 ```python
-def reformat_many(
-    sources: Set[Path], fast: bool, write_back: WriteBack, mode: Mode, report: "Report"
-) -> None:
-    """Reformat multiple files using a ProcessPoolExecutor."""
-    loop = asyncio.get_event_loop()
-    worker_count = os.cpu_count()
-    if sys.platform == "win32":
-        # Work around https://bugs.python.org/issue26903
-        worker_count = min(worker_count, 61)
-    executor = ProcessPoolExecutor(max_workers=worker_count)
+def write_cache(cache: Cache, sources: Iterable[Path], mode: Mode) -> None:
+    """Update the cache file."""
+    cache_file = get_cache_file(mode)
     try:
-        loop.run_until_complete(
-            schedule_formatting(
-                sources=sources,
-                fast=fast,
-                write_back=write_back,
-                mode=mode,
-                report=report,
-                loop=loop,
-                executor=executor,
-            )
-        )
+        if not CACHE_DIR.exists():
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        new_cache = {**cache, **{src.resolve(): get_cache_info(src) for src in sources}}
+        with tempfile.NamedTemporaryFile(dir=str(cache_file.parent), delete=False) as f:
+            pickle.dump(new_cache, f, protocol=4)
+        os.replace(f.name, cache_file)
     except OSError:
-        # Handle the case where executor initialization fails
-        schedule_formatting(
-            sources=sources,
-            fast=fast,
-            write_back=write_back,
-            mode=mode,
-            report=report,
-            loop=loop,
-            executor=None,
-        )
-    finally:
-        shutdown(loop)
-        executor.shutdown()
+        pass
 ```
 
 ----- USER -----
-## Previous Attempt Failed (turn 1 of 3)
+## Previous Attempt Failed (turn 1 of 5)
 Your last fix did not pass validation — passed=0, failed=1, errors=0.
 
 Traceback:
@@ -146,7 +108,46 @@ Traceback (most recent call last):
 AssertionError: 1 != 0 : 
 
 ----------------------------------------------------------------------
-Ran 1 test in 0.006s
+Ran 1 test in 0.005s
+
+FAILED (failures=1)
+```
+
+Please analyze this failure and provide a revised fix. Return the corrected function in a Python fenced code block, as before.
+
+----- ASSISTANT -----
+```python
+def write_cache(cache: Cache, sources: Iterable[Path], mode: Mode) -> None:
+    """Update the cache file."""
+    cache_file = get_cache_file(mode)
+    try:
+        if not cache_file.parent.exists():
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+        new_cache = {**cache, **{src.resolve(): get_cache_info(src) for src in sources}}
+        with tempfile.NamedTemporaryFile(dir=str(cache_file.parent), delete=False) as f:
+            pickle.dump(new_cache, f, protocol=4)
+        os.replace(f.name, cache_file)
+    except OSError:
+        pass
+```
+
+----- USER -----
+## Previous Attempt Failed (turn 2 of 5)
+Your last fix did not pass validation — passed=0, failed=1, errors=0.
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.8.3/lib/python3.8/unittest/mock.py", line 1325, in patched
+    return func(*newargs, **newkeywargs)
+  File "/home/workspace/black_1/black/tests/test_black.py", line 1288, in test_works_in_mono_process_only_environment
+    self.invokeBlack([str(workspace)])
+  File "/home/workspace/black_1/black/tests/test_black.py", line 162, in invokeBlack
+    self.assertEqual(result.exit_code, exit_code, msg=runner.stderr_bytes.decode())
+AssertionError: 1 != 0 : 
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
 
 FAILED (failures=1)
 ```

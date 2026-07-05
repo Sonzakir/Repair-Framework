@@ -89,3 +89,53 @@ FAILED (failures=1)
 ## Task
 Fix the bug at line 621. Return the corrected function in a Python fenced
 code block. Keep the fix minimal — change as few lines as necessary.
+
+----- ASSISTANT -----
+```python
+def reformat_many(
+    sources: Set[Path], fast: bool, write_back: WriteBack, mode: Mode, report: "Report"
+) -> None:
+    """Reformat multiple files using a ProcessPoolExecutor."""
+    loop = asyncio.get_event_loop()
+    worker_count = os.cpu_count()
+    if sys.platform == "win32":
+        # Work around https://bugs.python.org/issue26903
+        worker_count = min(worker_count, 61)
+    try:
+        executor = ProcessPoolExecutor(max_workers=worker_count)
+        loop.run_until_complete(
+            schedule_formatting(
+                sources=sources,
+                fast=fast,
+                write_back=write_back,
+                mode=mode,
+                report=report,
+                loop=loop,
+                executor=executor,
+            )
+        )
+    except OSError:
+        loop.run_until_complete(
+            schedule_formatting(
+                sources=sources,
+                fast=fast,
+                write_back=write_back,
+                mode=mode,
+                report=report,
+                loop=loop,
+                executor=None,
+            )
+        )
+    finally:
+        shutdown(loop)
+        if 'executor' in locals():
+            executor.shutdown()
+```
+
+----- USER -----
+## Previous Attempt Failed (turn 1 of 5)
+Your fix made the target (bug-triggering) test pass, but it broke a test that previously passed — a regression.
+
+No failure traceback is available: the target test itself passed, so the counts above do not reflect the regression. Revise the function so it fixes the bug WITHOUT changing any other behavior.
+
+Please analyze this failure and provide a revised fix. Return the corrected function in a Python fenced code block, as before.
