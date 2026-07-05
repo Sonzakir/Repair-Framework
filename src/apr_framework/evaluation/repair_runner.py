@@ -287,6 +287,10 @@ class RepairEvaluationRunner(EvaluationRunner):
         return {
             "project": bug_result.bug.project,
             "bug_id": bug_result.bug.bug_id,
+            # Hoisted from config so the FL mode used is recorded at the top level
+            # of every result file (Task 4), not only nested under "config".
+            "fl_mode": self._config_data.get("fl_mode"),
+            "fl_backend": self._config_data.get("fl_backend"),
             "status": bug_result.status.value,
             "validation_summary": bug_result.outcome.summary.validation_summary,
             "started_at": bug_result.started_at.isoformat(),
