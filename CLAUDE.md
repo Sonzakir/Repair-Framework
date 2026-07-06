@@ -31,7 +31,7 @@ pytest tests/test_imports.py
 pytest "tests/test_imports.py::test_public_modules_import[apr_framework.localization.fauxpy]"
 ```
 
-The only test file is `tests/test_imports.py`, which parametrizes a smoke-import check over every public module. Integration tests require Docker.
+The only test file is `tests/test_imports.py`, which parametrizes a smoke-import check over every public module. Integration tests require Docker. CI (`.github/workflows/ci.yml`) runs `pytest -q` on Python 3.10 and 3.12 and builds the sdist/wheel — it does **not** run the Docker end-to-end path, so green CI does not satisfy the validation requirement below.
 
 > **Validation requirement — Docker end-to-end is mandatory.** Unit tests (`pytest tests/`) are NOT sufficient to accept a change. Every change must be executed end-to-end inside the Docker container and its real results observed before the work is considered done. Build and run the framework via Docker Compose, run the affected command(s) against an actual checked-out/compiled bug, and confirm the output is correct — do not rely on import smoke tests or local reasoning alone:
 > ```bash
@@ -133,6 +133,9 @@ src/apr_framework/
                      # load_pytest_targets, extract_mbfl_tracking_metadata
     hybrid.py        # HybridFaultLocalizer — weighted normalized merge of SBFL + MBFL rankings
     perfect.py       # PerfectFaultLocalizer — oracle locations from bug_patch.txt (Task 3)
+    scripts/         # in-place FauxPy source patches applied by FauxPyToolchain before each run
+      fauxpy_sbfl_metrics_patch.py     # adds MetricJaccard + MetricWSBI to FauxPy's schema/pipeline
+      fauxpy_mbfl_selection_patch.py   # injects --mutation-selection/-budget/-seed pytest options
   repair/
     base.py          # RepairAlgorithm ABC
     dummy.py         # DummyRepairAlgorithm (random ground-truth / no-op)
@@ -202,6 +205,12 @@ Both patches use `replace_once` helpers that are idempotent (safe to re-apply). 
 .workspace/bugsinpy/   # checked-out project worktrees (e.g. PySnooper_1/PySnooper/)
 runs/run_NNN/          # single-localization run outputs: config.json, results.json, execution.log
 experiment_results/    # evaluate-localization outputs: results.json + README.md comparison report
+```
+
+### Regenerating experiment results without Docker
+`scripts/generate_experiment_results.py` rebuilds `experiment_results/{results.json,README.md}` from FauxPy CSV files already cached under `.workspace/` by prior Docker runs — it reuses `LocalizationComparisonRunner` (the same code path as `evaluate-localization`) but runs no containers. Use it to refresh the report after tweaking scoring/reporting logic; it cannot produce results for bugs whose CSVs were never generated in Docker.
+```bash
+python scripts/generate_experiment_results.py   # run from repo root
 ```
 
 ## Naming conventions
