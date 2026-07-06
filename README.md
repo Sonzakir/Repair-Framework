@@ -234,61 +234,61 @@ the prepared BugsInPy checkout, parses the suspicious-location tables, and print
 ranked locations for the selected metric.
 
 - FauxPy localization currently expects BugsInPy `run_test.sh` files that invoke
-pytest directly. The examples below use `PySnooper 1`, whose BugsInPy test script
+pytest directly. The examples below use `black 1`, whose BugsInPy test script
 is pytest-based.
 
 - Prepare the bug first:
 
 ```bash
 python -m apr_framework bugsinpy setup
-python -m apr_framework bugsinpy checkout PySnooper 1
-python -m apr_framework bugsinpy compile PySnooper 1
+python -m apr_framework bugsinpy checkout black 1
+python -m apr_framework bugsinpy compile black 1
 ```
 
 - Run localization with the default FauxPy backend:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1
+python -m apr_framework localize --project black --bug 1
 ```
 
 - The backend flag is available too. At the moment, `fauxpy` is the only
 implemented localization backend:
 
 ```bash
-python -m apr_framework localize --backend fauxpy --project PySnooper --bug 1
+python -m apr_framework localize --backend fauxpy --project black --bug 1
 ```
 
 - Choose the source root when automatic inference is not enough:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --src pysnooper
+python -m apr_framework localize --project black --bug 1 --src black or .
 ```
 
 - Select the metric used for the primary ranking:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai
+python -m apr_framework localize --project black --bug 1 --metric ochiai
 ```
 
 Jaccard and WSBI are available for SBFL runs through the framework's FauxPy 0.7.0
 patch, which is applied inside the prepared checkout environment before localization:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --metric jaccard
-python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi
+python -m apr_framework localize --project black --bug 1 --metric jaccard
+python -m apr_framework localize --project black --bug 1 --metric wsbi
 ```
 
 - Use `--wsbi-alpha` to control the passing-test weight (default: `0.5`):
 
 ```bash
 # Default alpha=0.5: passing tests count half as much as failing tests
-python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi
+python -m apr_framework localize --project black --bug 1 --metric wsbi
 
 # alpha=1.0 reduces to plain SBI (equal weight)
-python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi --wsbi-alpha 1.0
+python -m apr_framework localize --project black --bug 1 --metric wsbi --wsbi-alpha 1.0
 
 # alpha=0.25 further discounts passing-test coverage
-python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi --wsbi-alpha 0.25
+python -m apr_framework localize --project black --bug 1 --metric wsbi --wsbi-alpha 0.25
 ```
 
 Implementation note: FauxPy normally computes Tarantula, Ochiai, and DStar for
@@ -317,31 +317,31 @@ smaller values of alpha make the metric increasingly aggressive.
 - Limit the number of ranked locations printed:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai --top-n 10
+python -m apr_framework localize --project black --bug 1 --metric ochiai --top-n 10
 ```
 
 - Run function-level localization:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --granularity function --metric ochiai --top-n 10
+python -m apr_framework localize --project black --bug 1 --granularity function --metric ochiai --top-n 10
 ```
 
 - Pass a failing test list to FauxPy:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --failing_tests "tests/test_chinese.py::test_chinese"
+python -m apr_framework localize --project black --bug 1 --failing_tests "tests/test_chinese.py::test_chinese"
 ```
 
 - Run MBFL mode:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --mbfl --granularity statement --metric metallaxis --top-n 10
+python -m apr_framework localize --project black --bug 1 --mbfl --granularity statement --metric metallaxis --top-n 10
 ```
 
 - Limit expensive MBFL mutant validation runs with the random mutation selector:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --mbfl --mutation-strategy random --budget 50 --metric metallaxis
+python -m apr_framework localize --project black --bug 1 --mbfl --mutation-strategy random --budget 50 --metric metallaxis
 ```
 
   - `--budget` limits how many generated mutants are validated, which is the
@@ -352,7 +352,7 @@ python -m apr_framework localize --project PySnooper --bug 1 --mbfl --mutation-s
 - Run weighted hybrid SBFL + MBFL localization:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis --sbfl-weight 0.5 --mbfl-weight 0.5 --mutation-strategy random --budget 50 --top-n 10
+python -m apr_framework localize --project black --bug 1 --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis --sbfl-weight 0.5 --mbfl-weight 0.5 --mutation-strategy random --budget 50 --top-n 10
 ```
 
 Hybrid mode runs SBFL and MBFL through the existing FauxPy adapter, normalizes
@@ -387,314 +387,10 @@ examples.
 
 The framework was evaluated on three real BugsInPy bugs: **fastapi#3**, **fastapi#6**, and **luigi#33**. All 8 techniques were compared against the ground-truth faulty line from each bug's patch. Full results are in [`experiment_results/README.md`](experiment_results/README.md).
 
-### Summary table
-
-## Template-based APR repair (Assignment 3 — Task 1)
-
-> A standalone, learn-by-reading write-up of this technique (design decisions,
-> file map, verification) lives in
-> [`assignment3_task1_implementation.md`](assignment3_task1_implementation.md).
-
-### Technique overview
-
-The `repair` command implements a **template-based APR** strategy guided by SBFL/MBFL fault localization:
-
-1. **Where to fix** — the top-N suspicious locations produced by `localize` (ranked by suspiciousness score) are used as repair targets.
-2. **What to try** — AST mutation operators generate syntactically valid program variants at each suspicious line.
-3. **Which variants pass** — each mutated variant is applied to the checkout worktree, the BugsInPy test suite is executed inside the executor container, and the file is restored unconditionally.
-
-A patch is **plausible** only when the test command exits cleanly
-(`return_code == 0`), reports zero failures and zero errors, **and** at least one
-test actually passed. The exit-code and passed-count guards reject patches that
-break test collection/import (which otherwise look like "0 failed, 0 error").
-
-### Mutation operators
-
-| Key | Description |
-|---|---|
-| `arith` | Swaps arithmetic operators in `BinOp` nodes: `+↔−`, `*↔/`, `//↔%` |
-| `comp` | Swaps comparison operators in `Compare` nodes: `>↔>=`, `<↔<=`, `==↔!=`, `is↔is not`, `in↔not in` |
-| `obo` | Off-by-one: emits `n+1` and `n-1` variants for integer constants and the upper bound of `range(n)` calls |
-| `bool` | Swaps `and↔or` in `BoolOp` nodes |
-| `negate` | Wraps the `test` of `if`/`while` statements in `not (...)` |
-| `return` | Mutates `return True → return False` (and vice versa), and `return <expr> → return None` |
-
-All operators accept a `target_line` parameter and restrict mutations to AST nodes whose source range covers that line — ensuring surgical, one-location-at-a-time mutations.
-
-### Example invocations
-
-```bash
-# Full repair run (localize + repair) with default settings:
-python -m apr_framework repair --project PySnooper --bug 1
-
-# Cap budget to 20 validations, try top 3 locations only:
-python -m apr_framework repair --project PySnooper --bug 1 --budget 20 --top-n 3
-
-# Only apply arithmetic and comparison operators:
-python -m apr_framework repair --project PySnooper --bug 1 --operators arith,comp
-
-# Stop as soon as the first plausible patch is found:
-python -m apr_framework repair --project PySnooper --bug 1 --stop-on-first
-
-# Choose the fault-localization family that drives the repair targets:
-python -m apr_framework repair --project PySnooper --bug 1 --fl-family mbfl --mbfl-metric metallaxis
-python -m apr_framework repair --project PySnooper --bug 1 --fl-family hybrid --sbfl-weight 0.5 --mbfl-weight 0.5
-
-# Skip re-running localization; load the most recent cached result:
-python -m apr_framework repair --project PySnooper --bug 1 --skip-localize
-
-# Use a different SBFL metric for localization:
-python -m apr_framework repair --project PySnooper --bug 1 --localization-metric tarantula
-
-# Full sequence from scratch:
-python -m apr_framework bugsinpy setup
-python -m apr_framework bugsinpy test PySnooper 1       # checkout + compile + test
-python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai --top-n 10
-python -m apr_framework repair --project PySnooper --bug 1 --budget 20 --top-n 3 --skip-localize
-```
-
-### Key design decisions
-
-**AST-based vs text-based mutations.**
-Mutations are performed on the Python AST using `ast.NodeTransformer` subclasses and `ast.unparse()` (Python 3.9+) to reconstruct source text. The advantage is syntactic validity — every generated variant parses correctly. The trade-off is that `ast.unparse()` reformats the entire file (normalises whitespace, removes redundant parentheses), so the unified diff includes cosmetic changes beyond the actual mutation. The `patched_source` stored in `PatchCandidate.metadata` is written directly to avoid re-parsing.
-
-**Line-to-AST-node mapping.**
-Every operator checks `node.lineno <= target_line <= node.end_lineno` before mutating. This maps the SBFL/MBFL statement-level line number to the precise AST sub-tree covering that line, avoiding mutations on unrelated parts of the file.
-
-**Cost control: budget, stop-on-first, timeout.**
-`--budget` caps the total number of patch validations — each `adapter.run_tests()`
-call counts as one. Generation (AST mutation) is free; validation (test execution)
-is expensive. `--stop-on-first` halts as soon as a plausible patch is found.
-`--timeout` is a *real* per-test-run wall-clock limit: it threads down to the
-Docker `exec` call, and a timed-out run is treated as a failed (non-plausible)
-candidate (exit code 124) instead of hanging the loop.
-
-**Fault-localization family is selectable.**
-`--fl-family sbfl|mbfl|hybrid` chooses which Assignment-2 localizer ranks the repair
-targets (SBFL via `--localization-metric`, MBFL via `--mbfl-metric`/`--mutation-budget`/`--seed`,
-or a weighted `HybridFaultLocalizer` via `--sbfl-weight`/`--mbfl-weight`).
-
-**No changes to `RepairAlgorithm` ABC.**
-`TemplateRepairAlgorithm` implements `generate_patches(bug, checkout)` (generate candidates without testing) and `validate_patch(bug, checkout, patch)` (apply + test + revert one candidate) from the existing ABC without modification. An additional non-ABC convenience method `repair(bug, checkout)` orchestrates the full budget loop. As of Task 2 the CLI drives the pipeline through `RepairEvaluationRunner` instead (see the Task 2 section); both share the single loop in `run_validation_loop`.
-
-### Output
-
-The command creates the next `runs/run_NNN/` directory and writes:
-
-- `config.json` — all configuration parameters
-- `repair_results.json` — per-candidate validation outcomes (valid unified diffs,
-  test counts incl. `test_return_code`) and the plausible-patch list
-- `execution.log` — timestamped step log
-- `patches/<patch_id>.diff` and `patches/<patch_id>.patched.py` — written for each
-  **plausible** patch so the fix is recoverable outside the JSON
-
-### Known limitations
-
-- `ast.unparse()` reformats entire files, so diffs include cosmetic whitespace changes. The patched file is identical in behaviour but may differ in style.
-- Multi-line expressions split across lines are still targeted by the operator at the opening line; operators at the target line may produce no variants if the key AST node starts on a different line.
-- Decorators, f-strings with complex expressions, and type-annotated assignments may be reformatted in unexpected ways by `ast.unparse()`.
-- Only projects whose `run_test.sh` invokes pytest directly are supported (same restriction as the `localize` command).
-- Requires Python 3.9+ inside the framework container (for `ast.unparse()`).
-
-## Patch validation pipeline (Assignment 3 — Task 2)
-
-Task 2 turns repair into a proper **patch-validation pipeline** with two levels of
-judgment and a set of tracked metrics, all surfaced in the structured JSON output.
-
-### Two levels of judgment
-
-- **Plausible** — both halves of the spec definition are enforced
-  ([`repair/template/validator.py`](src/apr_framework/repair/template/validator.py)):
-  1. *the failing test now passes* — the bug's trigger test command exits cleanly
-     with zero failures/errors and ≥1 passing test (the return-code and
-     passed-count guards also reject patches that break import/collection); **and**
-  2. *no previously passing test is broken* — a regression run of the bug's whole
-     `test_file` introduces no new failures
-     ([`repair/regression.py`](src/apr_framework/repair/regression.py)).
-- **Correct** — a *plausible* patch that also matches the developer fix
-  (BugsInPy ground truth) at the **diff level**. Implemented in
-  [`repair/correctness.py`](src/apr_framework/repair/correctness.py).
-
-#### Regression check (the "no previously passing test broken" half)
-
-BugsInPy's `run_test.sh` usually contains only the single bug-triggering test, so
-running it alone cannot detect a patch that fixes the trigger but breaks something
-else. To enforce the second half of plausibility, the framework:
-
-1. once per repair run, runs the bug's whole regression suite (the `test_file` from
-   `bugsinpy_bug.info`, broadened from the trigger command) on the **unpatched**
-   checkout and records the **baseline failing set**;
-2. for a candidate that already passes the trigger, runs the same suite **with the
-   patch** and records its failing set;
-3. accepts the patch only if its failing set is a **subset** of the baseline — i.e.
-   it introduces no new failure.
-
-Comparing failing **sets** (not counts) is what makes this correct: a patch that
-fixes the trigger but breaks a different, previously passing test has the same
-failure *count* as the baseline but a non-subset failing *set*, so it is rejected.
-The baseline run is established once and reused for every candidate; the same
-prepared environment is reused by temporarily swapping the checkout's
-`bugsinpy_run_test.sh` (`BugsInPyAdapter.run_tests(..., command=...)`). The check is
-on by default and can be skipped for speed with `--no-regression-check`, in which
-case plausibility falls back to the trigger test only.
-
-The correctness check compares the candidate to the reference fix
-(`projects/<project>/bugs/<id>/bug_patch.txt`, read via
-`BugsInPyAdapter.get_reference_patch`). Because the template generator reconstructs
-source with `ast.unparse` (which reformats whole files), a raw textual diff would
-never match. So we build a **reformatting-neutral minimal diff** — both the original
-and the patched source are round-tripped through `ast.unparse`, so cosmetic noise
-cancels out — then reduce each side (candidate and reference) to its set of
-whitespace-normalized added/removed lines and require them to be equal for the
-touched file. This is a deliberately strict, purely syntactic check.
-
-### Tracked metrics
-
-Every repair run records these in `repair_results.json` under a `"metrics"` block
-(and the headline counts at the top level):
-
-| Metric | Meaning |
-|---|---|
-| `total_candidates_generated` | candidate patches produced before budget capping |
-| `candidates_validated` | candidates actually run against the test suite |
-| `plausible_count` | candidates whose patched program passed all tests |
-| `correct_count` | plausible candidates that match the developer fix |
-| `time_to_first_plausible_seconds` | wall-clock to the first plausible patch (`null` if none) |
-| `total_wall_clock_seconds` | wall-clock for the whole repair run |
-
-Each entry in `all_results` / `plausible_patches` also carries an `is_correct` flag.
-
-### Architecture: `RepairEvaluationRunner`
-
-The pipeline is implemented as a dedicated
-[`RepairEvaluationRunner`](src/apr_framework/evaluation/repair_runner.py) that
-implements the Assignment-1 `EvaluationRunner` ABC. It drives the shared
-generate-and-validate loop ([`repair/run_loop.py`](src/apr_framework/repair/run_loop.py)),
-runs the correctness check on plausible patches, assembles the metrics
-(`RepairRunMetrics` in `core/models.py`), and writes all run artifacts.
-
-> **Interface note (API decision).** The budget/early-stop validation loop was
-> extracted from `TemplateRepairAlgorithm.repair()` into the standalone
-> `run_validation_loop`, which uses **only** the `RepairAlgorithm` ABC methods
-> (`generate_patches` / `validate_patch`). Both the algorithm's convenience
-> `repair()` and the runner call it, so there is a single loop implementation and a
-> future LLM repair backend works with the runner unchanged. `RepairStatus.CORRECT`
-> (already defined in Assignment 1) is now actually used.
-
-No new CLI flags are required — `python -m apr_framework repair ...` now prints and
-persists the validation metrics, e.g.:
-
-```text
-Generated:     2 candidate(s)
-Validated:     2 candidate(s)
-Plausible:     0 patch(es)
-Correct:       0 patch(es)
-1st plausible: n/a
-Total time:    1.0s
-```
-
-## FL-guided repair & perfect FL baseline (Assignment 3 — Task 3)
-
-Repair quality depends heavily on the fault location it is given. To separate the
-repair algorithm's strength from the localizer's, the `repair` command runs under
-**two FL conditions**, selected with `--fl-mode`:
-
-| Mode | Flag | Fault location source |
-|---|---|---|
-| **Automated FL** | `--fl-mode auto` (default) | the Assignment-2 localizer chosen by `--fl-family {sbfl,mbfl,hybrid}` |
-| **Perfect FL** | `--fl-mode perfect` | the BugsInPy developer fix (`bug_patch.txt`) — the *oracle* fault location, no localizer runs |
-
-```bash
-# Automated FL (e.g. SBFL/Ochiai) drives the repair targets:
-python -m apr_framework repair --project black --bug 1 --fl-mode auto --fl-family sbfl
-
-# Perfect FL (oracle): repair targets are the exact lines the developer changed.
-python -m apr_framework repair --project black --bug 1 --fl-mode perfect
-```
-
-**How perfect FL works.** `PerfectFaultLocalizer`
-(`src/apr_framework/localization/perfect.py`) implements the same `FaultLocalizer`
-interface as the FauxPy localizers, so it is a drop-in replacement. Instead of
-analysing the program, it reads the developer fix via
-`BugsInPyAdapter.get_reference_patch` and parses the unified diff's **buggy-side**
-line numbers (`derive_oracle_locations`): each hunk header `@@ -old_start,… @@`
-anchors a counter that walks the hunk body, so every `-` (changed/removed) line
-becomes a ranked oracle location, and pure insertions are anchored to their
-insertion point. The resulting `LocalizationResult` (`backend="perfect-fl"`) flows
-into the *unchanged* repair/validation pipeline — perfect FL is just a different
-*source* of suspicious locations.
-
-For black#1, perfect FL yields exactly the three developer-fix lines:
-
-```text
-rank 1: black.py:621   rank 2: black.py:636   rank 3: black.py:646
-```
-
-The selected mode is recorded in the result files: `config.json` and each bug's
-`config` block in `repair_results.json` carry `fl_mode` (`auto`/`perfect`) and
-`fl_backend` (the FL family, or `oracle`), so Task-5 comparisons can group runs by
-mode. `--fl-mode perfect` ignores `--fl-family` and `--skip-localize` (no FL is run),
-and raises a clear error if the bug has no `bug_patch.txt`.
-
-> Note: perfect FL is an *upper bound on localization*, not on operator reach — a bug
-> whose fix is out of the mutation operators' reach (e.g. black#1's `try/except`
-> wrapper) still yields `correct=0` even with perfect locations. See the design notes
-> in [`docs/assignment3/assignment3_task3_implementation.md`](docs/assignment3/assignment3_task3_implementation.md).
-
-## Patch ranking (Assignment 3 — Task 4)
-
-> A detailed write-up of design decisions and refactoring pointers lives in
-> [`docs/assignment3/assignment3_task4_implementation.md`](docs/assignment3/assignment3_task4_implementation.md).
-
-When a repair run produces more than one plausible patch, the order in which
-patches are shown to a developer matters. Task 4 adds a **patch ranker** that
-reorders plausible patches by a composite score before they appear in the output,
-while keeping the original generation-order list as a baseline so the two orderings
-can be compared.
-
-### Ranking formula
-
-```
-ranking_score = w1 * suspiciousness + w2 * patch_simplicity + w3 * operator_priority
-```
-
-All three components are normalised to `[0, 1]` before weighting. Higher score means
-the patch is surfaced first.
-
-| Component | Source | Rationale |
-|---|---|---|
-| `suspiciousness` | FL score of the targeted line (`patch.metadata["suspiciousness_score"]`), normalised by the max across the plausible batch | The most evidence-based signal — comes from running the actual tests |
-| `patch_simplicity` | `1 − (changed_lines / max_changed_lines)` — a two-line template change scores higher than a multi-line one | Smaller patches overfit less; simpler is more trustworthy |
-| `operator_priority` | Fixed tier per operator key (`obo`=1.0, `comp`=0.9, `bool`=0.7, `negate`=0.6, `arith`=0.5, `return`=0.4) | Off-by-one and comparison bugs are the most common single-statement Python fix patterns |
-
-Default weights: **w1 = 0.6, w2 = 0.25, w3 = 0.15**. These are normalised internally,
-so only relative magnitudes matter — `--ranker-weights 6,2.5,1.5` is identical to
-the defaults.
-
-### CLI
-
-```bash
-# Default: no ranking — generation order, identical to pre-Task-4 behavior
-python -m apr_framework repair --project black --bug 1
-
-# Opt in to ranking with default weights (0.6 / 0.25 / 0.15)
-python -m apr_framework repair --project black --bug 1 --ranker weighted
-
-# Custom weights
-python -m apr_framework repair --project black --bug 1 \
-    --ranker weighted --ranker-weights 0.7,0.2,0.1
-```
-
-When a ranker is active, the CLI summary prints an extra line:
-
-```text
-Rank of 1st correct (ranked): 2
-```
-
 ### Output
 
 `repair_results.json` always contains `plausible_patches` in generation order.
-When a ranker is active, it also contains `ranked_plausible_patches` — the same
+When a ranker is active, it also contains `ranked_plausible_patches` -> the same
 patches reordered, each annotated with `rank_position` and per-patch
 `ranking_score` / `ranking_score_components` inside `metadata`.
 `rank_of_first_correct` (1-indexed) appears at both the top level and inside the
@@ -1272,6 +968,446 @@ observed iterations will answer.
 
 
 
+
+# 3- Traditional APR
+
+## Template-based APR repair 
+
+
+
+### Technique overview
+
+The `repair` command implements a **template-based APR** strategy guided by SBFL/MBFL fault localization:
+
+1. **Where to fix** -> the top-N suspicious locations produced by `localize` (ranked by suspiciousness score) are used as repair targets.
+2. **What to try** -> AST mutation operators generate syntactically valid program variants at each suspicious line.
+3. **Which variants pass** -> each mutated variant is applied to the checkout worktree, the BugsInPy test suite is executed inside the executor container, and the file is restored unconditionally.
+
+A patch is **plausible** only when the test command exits cleanly
+(`return_code == 0`), reports zero failures and zero errors, **and** at least one
+test actually passed. The exit-code and passed-count guards reject patches that
+break test collection/import (which otherwise look like "0 failed, 0 error"). See: regression suites
+
+### Mutation operators
+
+| Key | Description |
+|---|---|
+| `arith` | Swaps arithmetic operators in `BinOp` nodes: `+↔−`, `*↔/`, `//↔%` |
+| `comp` | Swaps comparison operators in `Compare` nodes: `>↔>=`, `<↔<=`, `==↔!=`, `is↔is not`, `in↔not in` |
+| `obo` | Off-by-one: emits `n+1` and `n-1` variants for integer constants and the upper bound of `range(n)` calls |
+| `bool` | Swaps `and↔or` in `BoolOp` nodes |
+| `negate` | Wraps the `test` of `if`/`while` statements in `not (...)` |
+| `return` | Mutates `return True → return False` (and vice versa), and `return <expr> → return None` |
+
+All operators accept a `target_line` parameter and restrict mutations to AST nodes whose source range covers that line — ensuring surgical, one-location-at-a-time mutations.
+
+### Example invocations
+
+```bash
+# Full repair run (localize + repair) with default settings:
+python -m apr_framework repair --project black --bug 1
+
+# Cap budget to 20 validations, try top 3 locations only:
+python -m apr_framework repair --project black --bug 1 --budget 20 --top-n 3
+
+# Only apply arithmetic and comparison operators:
+python -m apr_framework repair --project tornado --bug 14 --operators arith,comp --fl-mode perfect
+
+# Stop as soon as the first plausible patch is found:
+python -m apr_framework repair --project black --bug 1 --stop-on-first
+
+# Choose the fault-localization family that drives the repair targets:
+python -m apr_framework repair --project black --bug 1 --fl-family mbfl --mbfl-metric metallaxis
+python -m apr_framework repair --project black --bug 1 --fl-family hybrid --sbfl-weight 0.5 --mbfl-weight 0.5
+
+# Skip re-running localization; load the most recent cached result:
+python -m apr_framework repair --project black --bug 1 --skip-localize
+
+# Use a different SBFL metric for localization:
+python -m apr_framework repair --project black --bug 1 --localization-metric tarantula
+
+# Full sequence from scratch:
+python -m apr_framework bugsinpy setup
+python -m apr_framework bugsinpy test black 1       # checkout + compile + test
+python -m apr_framework localize --project black --bug 1 --metric ochiai --top-n 10
+python -m apr_framework repair --project black --bug 1 --budget 20 --top-n 3 --skip-localize
+```
+
+### Key design decisions
+
+**AST-based vs text-based mutations.**
+Mutations are performed on the Python AST using `ast.NodeTransformer` subclasses and `ast.unparse()` (Python 3.9+) to reconstruct source text. The advantage is syntactic validity => every generated variant parses correctly. The trade-off is that `ast.unparse()` reformats the entire file (normalises whitespace, removes redundant parentheses), so the unified diff includes cosmetic changes beyond the actual mutation. The `patched_source` stored in `PatchCandidate.metadata` is written directly to avoid re-parsing.
+
+**Line-to-AST-node mapping.**
+Every operator checks `node.lineno <= target_line <= node.end_lineno` before mutating. This maps the SBFL/MBFL statement-level line number to the precise AST sub-tree covering that line, avoiding mutations on unrelated parts of the file.
+
+**Cost control: budget, stop-on-first, timeout.**
+`--budget` caps the total number of patch validations — each `adapter.run_tests()`
+call counts as one. Generation (AST mutation) is free; validation (test execution)
+is expensive. `--stop-on-first` halts as soon as a plausible patch is found.
+`--timeout` is a *real* per-test-run wall-clock limit: it threads down to the
+Docker `exec` call, and a timed-out run is treated as a failed (non-plausible)
+candidate (exit code 124) instead of hanging the loop.
+
+**Fault-localization family is selectable.**
+`--fl-family sbfl|mbfl|hybrid` chooses which Assignment-2 localizer ranks the repair
+targets (SBFL via `--localization-metric`, MBFL via `--mbfl-metric`/`--mutation-budget`/`--seed`,
+or a weighted `HybridFaultLocalizer` via `--sbfl-weight`/`--mbfl-weight`).
+
+**No changes to `RepairAlgorithm` ABC.**
+`TemplateRepairAlgorithm` implements `generate_patches(bug, checkout)` (generate candidates without testing) and `validate_patch(bug, checkout, patch)` (apply + test + revert one candidate) from the existing ABC without modification. An additional non-ABC convenience method `repair(bug, checkout)` orchestrates the full budget loop. As of Task 2 the CLI drives the pipeline through `RepairEvaluationRunner` instead (see the Task 2 section); both share the single loop in `run_validation_loop`.
+
+### Output
+
+The command creates the next `runs/run_NNN/` directory and writes:
+
+- `config.json` — all configuration parameters
+- `repair_results.json` — per-candidate validation outcomes (valid unified diffs,
+  test counts incl. `test_return_code`) and the plausible-patch list
+- `execution.log` — timestamped step log
+- `patches/<patch_id>.diff` and `patches/<patch_id>.patched.py` — written for each
+  **plausible** patch so the fix is recoverable outside the JSON
+
+### Known limitations
+
+- Only projects whose `run_test.sh` invokes pytest directly are supported (same restriction as the `localize` command).
+- Requires Python 3.9+ inside the framework container (for `ast.unparse()`).
+
+## 3.2) Patch validation pipeline 
+
+Task 2 turns repair into a proper **patch-validation pipeline** with two levels of
+judgment and a set of tracked metrics, all surfaced in the structured JSON output.
+
+### Two levels of judgment
+
+- **Plausible** — both halves of the spec definition are enforced
+  ([`repair/template/validator.py`](src/apr_framework/repair/template/validator.py)):
+  1. *the failing test now passes* -> the bug's trigger test command exits cleanly
+     with zero failures/errors and >= 1 passing test (the return-code and
+     passed-count guards also reject patches that break import/collection); **and**
+  2. *no previously passing test is broken* — a regression run of the bug's whole
+     `test_file` introduces no new failures
+     ([`repair/regression.py`](src/apr_framework/repair/regression.py)).
+     - ==> trigger_passed + regression_ok
+- **Correct** -> a *plausible* patch that also matches the developer fix
+  (BugsInPy ground truth) at the **diff level**. Implemented in
+  [`repair/correctness.py`](src/apr_framework/repair/correctness.py).
+
+#### Regression check (the "no previously passing test broken" half)
+
+BugsInPy's `run_test.sh` usually contains only the single bug-triggering test, so
+running it alone cannot detect a patch that fixes the trigger but breaks something
+else. To enforce the second half of plausibility, the framework:
+
+1. once per repair run, runs the bug's whole regression suite (the `test_file` from
+   `bugsinpy_bug.info`, broadened from the trigger command) on the **unpatched**
+   checkout and records the **baseline failing set**;
+2. for a candidate that already passes the trigger, runs the same suite **with the
+   patch** and records its failing set;
+3. accepts the patch only if its failing set is a **subset** of the baseline — i.e.
+   it introduces no new failure.
+
+Comparing failing **sets** (not counts) is what makes this correct: a patch that
+fixes the trigger but breaks a different, previously passing test has the same
+failure *count* as the baseline but a non-subset failing *set*, so it is rejected.
+The baseline run is established once and reused for every candidate; the same
+prepared environment is reused by temporarily swapping the checkout's
+`bugsinpy_run_test.sh` (`BugsInPyAdapter.run_tests(..., command=...)`). The check is
+on by default and can be skipped for speed with `--no-regression-check`, in which
+case plausibility falls back to the trigger test only.
+
+The correctness check compares the candidate to the reference fix
+(`projects/<project>/bugs/<id>/bug_patch.txt`, read via
+`BugsInPyAdapter.get_reference_patch`). Because the template generator reconstructs
+source with `ast.unparse` (which reformats whole files), a raw textual diff would
+never match. So we build a **reformatting-neutral minimal diff** -> both the original
+and the patched source are round-tripped through `ast.unparse`, so cosmetic noise
+cancels out — then reduce each side (candidate and reference) to its set of
+whitespace-normalized added/removed lines and require them to be equal for the
+touched file. This is a deliberately strict, purely syntactic check.
+
+### Tracked metrics
+
+Every repair run records these in `repair_results.json` under a `"metrics"` block
+(and the headline counts at the top level):
+
+| Metric | Meaning |
+|---|---|
+| `total_candidates_generated` | candidate patches produced before budget capping |
+| `candidates_validated` | candidates actually run against the test suite |
+| `plausible_count` | candidates whose patched program passed all tests |
+| `correct_count` | plausible candidates that match the developer fix |
+| `time_to_first_plausible_seconds` | wall-clock to the first plausible patch (`null` if none) |
+| `total_wall_clock_seconds` | wall-clock for the whole repair run |
+
+Each entry in `all_results` / `plausible_patches` also carries an `is_correct` flag.
+
+### Architecture: `RepairEvaluationRunner`
+
+The pipeline is implemented as a dedicated
+[`RepairEvaluationRunner`](src/apr_framework/evaluation/repair_runner.py) that
+implements the Assignment-1 `EvaluationRunner` ABC. It drives the shared
+generate-and-validate loop ([`repair/run_loop.py`](src/apr_framework/repair/run_loop.py)),
+runs the correctness check on plausible patches, assembles the metrics
+(`RepairRunMetrics` in `core/models.py`), and writes all run artifacts.
+
+> **Interface note (API decision).** The budget/early-stop validation loop was
+> extracted from `TemplateRepairAlgorithm.repair()` into the standalone
+> `run_validation_loop`, which uses **only** the `RepairAlgorithm` ABC methods
+> (`generate_patches` / `validate_patch`). Both the algorithm's convenience
+> `repair()` and the runner call it, so there is a single loop implementation and a
+> future LLM repair backend works with the runner unchanged. `RepairStatus.CORRECT`
+> (already defined in Assignment 1) is now actually used.
+
+No new CLI flags are required — `python -m apr_framework repair ...` now prints and
+persists the validation metrics, e.g.:
+
+```text
+Generated:     2 candidate(s)
+Validated:     2 candidate(s)
+Plausible:     0 patch(es)
+Correct:       0 patch(es)
+1st plausible: n/a
+Total time:    1.0s
+```
+
+## 3.3) - FL-guided repair & perfect FL baselinex
+
+Repair quality depends heavily on the fault location it is given. To separate the
+repair algorithm's strength from the localizer's, the `repair` command runs under
+**two FL conditions**, selected with `--fl-mode`:
+
+| Mode | Flag | Fault location source |
+|---|---|---|
+| **Automated FL** | `--fl-mode auto` (default) | the (modified) FauxPy localizer chosen by `--fl-family {sbfl,mbfl,hybrid}` |
+| **Perfect FL** | `--fl-mode perfect` | the BugsInPy developer fix (`bug_patch.txt`) — the *oracle* fault location, no localizer runs |
+
+```bash
+# Automated FL (e.g. SBFL/Ochiai) drives the repair targets:
+python -m apr_framework repair --project black --bug 1 --fl-mode auto --fl-family sbfl
+
+# Perfect FL (oracle): repair targets are the exact lines the developer changed.
+python -m apr_framework repair --project tornado --bug 14 --fl-mode perfect
+```
+
+**How perfect FL works.** `PerfectFaultLocalizer`
+(`src/apr_framework/localization/perfect.py`) implements the same `FaultLocalizer`
+interface as the FauxPy localizers, so it is a drop-in replacement. Instead of
+analysing the program, it reads the developer fix via
+`BugsInPyAdapter.get_reference_patch` and parses the unified diff's **buggy-side**
+line numbers (`derive_oracle_locations`): each hunk header `@@ -old_start,… @@`
+anchors a counter that walks the hunk body, so every `-` (changed/removed) line
+becomes a ranked oracle location, and pure insertions are anchored to their
+insertion point. The resulting `LocalizationResult` (`backend="perfect-fl"`) flows
+into the *unchanged* repair/validation pipeline — perfect FL is just a different
+*source* of suspicious locations.
+
+For black#1, perfect FL yields exactly the three developer-fix lines:
+
+```text
+rank 1: black.py:621   rank 2: black.py:636   rank 3: black.py:646
+```
+
+The selected mode is recorded in the result files: `config.json` and each bug's
+`config` block in `repair_results.json` carry `fl_mode` (`auto`/`perfect`) and
+`fl_backend` (the FL family, or `oracle`), so Task-5 comparisons can group runs by
+mode. `--fl-mode perfect` ignores `--fl-family` and `--skip-localize` (no FL is run),
+and raises a clear error if the bug has no `bug_patch.txt`.
+
+> Note: perfect FL is an *upper bound on localization*, not on operator reach -> a bug
+> whose fix is out of the mutation operators' reach (e.g. black#1's `try/except`
+> wrapper) still yields `correct=0` even with perfect locations.
+
+## 3.4) - Patch ranking   
+
+When a repair run produces more than one plausible patch, the order in which
+patches are shown to a developer matters. Task 4 adds a **patch ranker** that
+reorders plausible patches by a composite score before they appear in the output,
+while keeping the original generation-order list as a baseline so the two orderings
+can be compared.
+
+### Ranking formula
+
+```
+ranking_score = w1 * suspiciousness + w2 * patch_simplicity + w3 * operator_priority
+```
+
+All three components are normalised to `[0, 1]` before weighting. Higher score means
+the patch is surfaced first.
+
+| Component | Source | Rationale |
+|---|---|---|
+| `suspiciousness` | FL score of the targeted line (`patch.metadata["suspiciousness_score"]`), min-max normalised across the plausible batch (`(score − min) / (max − min)`) | The most evidence-based signal — comes from running the actual tests |
+| `patch_simplicity` | `1 − (changed_lines − min_changed_lines) / (max_changed_lines − min_changed_lines)` (min-max normalised, then inverted) — a two-line template change scores higher than a multi-line one | Smaller patches overfit less; simpler is more trustworthy |
+| `operator_priority` | Fixed tier per operator key (`obo`=1.0, `comp`=0.9, `bool`=0.7, `negate`=0.6, `arith`=0.5, `return`=0.4) | Off-by-one and comparison bugs are the most common single-statement Python fix patterns |
+
+Default weights: **w1 = 0.6, w2 = 0.25, w3 = 0.15**. These are normalised internally,
+so only relative magnitudes matter — `--ranker-weights 6,2.5,1.5` is identical to
+the defaults.
+
+### CLI
+
+```bash
+# Default: no ranking — generation order, identical to pre-Task-4 behavior
+python -m apr_framework repair --project black --bug 1
+
+# Opt in to ranking with default weights (0.6 / 0.25 / 0.15)
+python -m apr_framework repair --project black --bug 1 --ranker weighted
+
+# Custom weights
+python -m apr_framework repair --project black --bug 1 \
+    --ranker weighted --ranker-weights 0.7,0.2,0.1
+```
+
+When a ranker is active, the CLI summary prints an extra line:
+
+```text
+Rank of 1st correct (ranked): 2
+```
+
+
+
+
+## 3.5) - Evaluation and comparison
+
+Task 5 runs the **whole repair pipeline** (fault localization → patch generation ->
+validation -> ranking) across a matrix of *bugs × FL modes* and aggregates the
+outcome. It adds no new repair capability -> it exercises everything Tasks 1–4 built
+and reports the metrics side by side so automated FL and perfect FL can be compared
+directly.
+
+The matrix is driven by `bugsinpy evaluate-repair`. Each *(bug, FL mode)* cell is a
+complete repair run executed by the existing `RepairEvaluationRunner` (so every cell
+gets its own `runs/run_NNN/` with logs and patch diffs); `RepairComparisonRunner`
+only orchestrates the matrix and aggregates. A localization failure in one cell
+(e.g. FauxPy uninstallable for a bug's Python) is recorded as an **error cell**
+rather than aborting the whole run.
+
+### CLI
+
+Each bug must be checked out and compiled first (the runner does not re-check-out):
+
+```bash
+# EX: Checkout and Compile on multiple bugs
+for b in "tornado 14" "scrapy 2" "black 1"; do
+  python -m apr_framework bugsinpy checkout $b
+  python -m apr_framework bugsinpy compile  $b
+done
+
+# EX: Run the evalutation pipeline on multiple bugs
+python -m apr_framework bugsinpy evaluate-repair \
+    --bugs "tornado:14,scrapy:2,black:1" \
+    --fl-modes "auto,perfect" \
+    --fl-family sbfl --localization-metric ochiai \
+    --ranker weighted \
+    --output-dir experiment_results/repair
+```
+
+Every per-cell flag of the `repair` command is also accepted here (`--budget`,
+`--top-n`, `--operators`, `--timeout`, `--granularity`, `--ranker-weights`, and the
+MBFL/hybrid knobs).
+
+### Reported metrics
+
+Per cell, written to `experiment_results/repair/results.json`:
+
+| Field | Meaning |
+|---|---|
+| `total_candidates_generated` | Patches the template generator produced. |
+| `candidates_validated` | Patches actually run against the test suite (≤ budget). |
+| `plausible_count` | Patched programs that passed the trigger test + regression check. |
+| `correct_count` | Plausible patches that also match the developer fix at the diff level. |
+| `time_to_first_plausible_seconds` | Wall-clock to the first plausible patch, or `null`. |
+| `total_wall_clock_seconds` | Wall-clock for the whole cell. |
+| `generation_rank_of_first_correct` | 1-based position of the first correct patch in **generation order** (unranked baseline). |
+| `ranked_rank_of_first_correct` | 1-based position of the first correct patch after the **ranker** reorders. |
+
+### Results
+
+The numbers below are the real output of one `evaluate-repair` run over
+`tornado:14, scrapy:2, black:1` (committed under `experiment_results/repair/`).
+
+**Per bug:**
+
+| Bug | FL mode | Generated | Plausible | Correct | Correct rank (gen → ranked) | Time to 1st plausible | Total | Outcome |
+|---|---|---|---|---|---|---|---|---|
+| tornado#14 | auto | — | — | — | — | — | — | **error** — FauxPy 0.7.0 cannot install on Python 3.7.0 (openai dependency issue) |
+| tornado#14 | perfect | 6 | 1 | **1** | 1 → 1 | 0.65s | 1.14s | **correct** |
+| scrapy#2 | auto | 0 | 0 | 0 | — | — | ~0s | no operator-reachable node in the SBFL top-N |
+| scrapy#2 | perfect | 5 | 0 | 0 | — | — | 1.12s | 5 candidates at the oracle line, none plausible |
+| black#1 | auto | 8 | 0 | 0 | — | — | 12.09s | SBFL ran; 8 candidates, none plausible |
+| black#1 | perfect | 0 | 0 | 0 | — | — | 1.08s | developer fix (try/except) is out of operator reach |
+
+**Aggregate per FL mode:**
+
+| FL mode | Generated | Plausible | Correct | Bugs repaired |
+|---|---|---|---|---|
+| auto | 8 | 0 | 0 | 0 |
+| perfect | 11 | 1 | 1 | 1 |
+
+### Discussion
+
+**Which bugs were repaired?** One: `tornado#14`, under perfect FL. Its developer fix
+is `if IOLoop.current(instance=False) is None:` -> `... is not None:` -> a single
+`Is`→`IsNot` swap, exactly what the `comp` operator emits. With the oracle pointing at
+the fault line, the generator produces the developer fix verbatim, it passes
+validation, and the diff-level check confirms correctness (patch preserved under
+`run_artifacts/`). No bug was repaired under automated FL.
+
+**Did the technique benefit from better FL?** The effect is real but **mediated by
+operator reach**, and the three bugs show all three cases:
+
+- `tornado#14` is the clearest case: perfect FL turns the fix into a single reachable
+  mutation and yields a correct patch, while automated FL never even runs (FauxPy is
+  uninstallable on its Python 3.7.0).
+- `scrapy#2` shows better FL producing *more attempts*: perfect FL targets the
+  operator-reachable oracle line and generates 5 candidates, whereas automated FL
+  surfaces no reachable node in its top-N and generates 0.
+- `black#1` shows the reverse: its developer fix wraps code in
+  `try/except` (unreachable by any operator), so perfect FL generates 0 candidates
+  while automated FL's top-N happens to include operator-reachable lines and generates
+  8 -> none correct.
+
+Observation: for the bugs whose fix restructures control flow / or the bugs who makes calls to external services the
+single-operator template technique produces no plausible patch. We believe that the LLM-based repair
+backend introduced in the next assignment is expected to handle this class of bug
+better.
+
+The takeaway: FL quality decides *whether the fault line is even attempted*, but the
+**template operator set is the dominant bottleneck**. When the real fix is not an
+operator-level edit, no FL mode can repair it.
+
+**Did the ranker surface correct patches earlier?** On the only cell that produced a
+correct patch (`tornado#14`, perfect FL), the plausible set had a single element, so
+generation order and ranked order coincide (rank 1 in both). The ranker correctly
+places that patch first, but *demonstrating reordering* needs ≥2 plausible patches in
+one cell, which none of these bugs produced — consistent with the Task-4 limitation
+that ranking only distinguishes patches when at least two are plausible.
+
+### Limitations
+
+- **Operator reach dominates.** The six operators only match fixes that are themselves
+  single operator-level edits; most BugsInPy developer fixes add or restructure
+  statements and are unreachable regardless of FL. Across the packaged benchmark,
+  `tornado#14` is effectively the only pure-operator-swap fix — which is why it is the
+  single repaired bug.
+- **Automated FL is environment-sensitive.** FauxPy 0.7.0 depends (transitively via
+  `pyllmut` -> `openai`) on Python ≥ 3.7.1, so it cannot install for bugs pinned to
+  Python 3.7.0. Such cells are reported honestly as error cells; perfect FL has no such
+  dependency and always runs.
+- **Correctness is strict and syntactic.** It is a diff-level match of the normalized
+  added/removed lines against the single-file developer fix;
+
+### Artifacts
+
+```
+experiment_results/repair/
+  results.json                 # machine-readable matrix (one row per cell)
+  README.md                    # generated per-bug tables + aggregate
+  run_artifacts/run_NNN/       # per-cell logs, config, repair_results.json, patch diffs
+```
+
+
 ## Troubleshooting
 
 - If Docker Compose cannot infer the host repository path, set it explicitly:
@@ -1305,29 +1441,6 @@ python -m apr_framework bugsinpy setup
 
 ## Summary
 
-| Content | Implementation |
-| --- | --- |
-| Benchmark interface | `BenchmarkAdapter` |
-| Fault localization interface | `FaultLocalizer` |
-| Repair interface | `RepairAlgorithm` |
-| Evaluation interface | `EvaluationRunner` |
-| Report interface | `ReportGenerator` |
-| BugsInPy list projects/bugs | `bugsinpy list-projects`, `bugsinpy list-bugs` |
-| BugsInPy checkout | `bugsinpy checkout` |
-| BugsInPy prepare environment | Safe compilation via `bugsinpy-safe-compile` and internal evaluation setup |
-| BugsInPy run tests | `bugsinpy test` |
-| Structured test results | `TestRunResult` with counts and raw output |
-| FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
-| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard` |
-| Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
-| FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
-| FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
-| FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
-| CLI entry point | `python -m apr_framework` and `apr-framework` script |
-| Dummy repair component | `DummyRepairAlgorithm` |
-| Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` , `*.zip`|
-| Patch ranking | `WeightedCompositeRanker` via `--ranker weighted` (`--ranker-weights` to override) |
-| Rank of first correct patch | `rank_of_first_correct` in `repair_results.json` metrics block |
 
 
 ## Starting the application in clean ubuntu 24.04 Container 
@@ -1366,7 +1479,37 @@ python -m apr_framework bugsinpy test black 1
 
 # Dummy repair evaluation (writes runs/run_xxx/)
 python -m apr_framework bugsinpy evaluate-dummy --seed 123
-````
+```
+
+## Summary
+
+| Content | Implementation |
+| --- | --- |
+| Benchmark interface | `BenchmarkAdapter` |
+| Fault localization interface | `FaultLocalizer` |
+| Repair interface | `RepairAlgorithm` |
+| Evaluation interface | `EvaluationRunner` |
+| Report interface | `ReportGenerator` |
+| BugsInPy list projects/bugs | `bugsinpy list-projects`, `bugsinpy list-bugs` |
+| BugsInPy checkout | `bugsinpy checkout` |
+| BugsInPy prepare environment | Safe compilation via `bugsinpy-safe-compile` and internal evaluation setup |
+| BugsInPy run tests | `bugsinpy test` |
+| Structured test results | `TestRunResult` with counts and raw output |
+| FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
+| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard` |
+| Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
+| FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
+| FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
+| FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
+| CLI entry point | `python -m apr_framework` and `apr-framework` script |
+| Dummy repair component | `DummyRepairAlgorithm` |
+| Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` , `*.zip`|
+| Patch ranking | `WeightedCompositeRanker` via `--ranker weighted` (`--ranker-weights` to override) |
+| Rank of first correct patch | `rank_of_first_correct` in `repair_results.json` metrics block |
+| Repair evaluation matrix | `bugsinpy evaluate-repair --bugs "tornado:14,scrapy:2,black:1" --fl-modes "auto,perfect"` |
+| Repair evaluation output | `experiment_results/repair/results.json` + `README.md` + per-cell `run_artifacts/` |
+
+
 
 ## Quick Reference Table
 
@@ -1389,7 +1532,7 @@ python -m apr_framework bugsinpy evaluate-dummy --seed 123
 | Dummy repair component | `DummyRepairAlgorithm` |
 | Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` |
 
-## 2 - Commands 
+## Commands 
 
 ```bash
 docker compose down --remove-orphans
@@ -1413,4 +1556,6 @@ python -m apr_framework localize \
   --metric ochiai \
   --top-n 10 \
   --show-raw-output
+
+python -m apr_framework repair --project black --bug 1
 ```
