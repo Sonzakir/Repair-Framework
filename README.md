@@ -232,61 +232,61 @@ the prepared BugsInPy checkout, parses the suspicious-location tables, and print
 ranked locations for the selected metric.
 
 - FauxPy localization currently expects BugsInPy `run_test.sh` files that invoke
-pytest directly. The examples below use `PySnooper 1`, whose BugsInPy test script
+pytest directly. The examples below use `black 1`, whose BugsInPy test script
 is pytest-based.
 
 - Prepare the bug first:
 
 ```bash
 python -m apr_framework bugsinpy setup
-python -m apr_framework bugsinpy checkout PySnooper 1
-python -m apr_framework bugsinpy compile PySnooper 1
+python -m apr_framework bugsinpy checkout black 1
+python -m apr_framework bugsinpy compile black 1
 ```
 
 - Run localization with the default FauxPy backend:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1
+python -m apr_framework localize --project black --bug 1
 ```
 
 - The backend flag is available too. At the moment, `fauxpy` is the only
 implemented localization backend:
 
 ```bash
-python -m apr_framework localize --backend fauxpy --project PySnooper --bug 1
+python -m apr_framework localize --backend fauxpy --project black --bug 1
 ```
 
 - Choose the source root when automatic inference is not enough:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --src pysnooper
+python -m apr_framework localize --project black --bug 1 --src black or .
 ```
 
 - Select the metric used for the primary ranking:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai
+python -m apr_framework localize --project black --bug 1 --metric ochiai
 ```
 
 Jaccard and WSBI are available for SBFL runs through the framework's FauxPy 0.7.0
 patch, which is applied inside the prepared checkout environment before localization:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --metric jaccard
-python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi
+python -m apr_framework localize --project black --bug 1 --metric jaccard
+python -m apr_framework localize --project black --bug 1 --metric wsbi
 ```
 
 - Use `--wsbi-alpha` to control the passing-test weight (default: `0.5`):
 
 ```bash
 # Default alpha=0.5: passing tests count half as much as failing tests
-python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi
+python -m apr_framework localize --project black --bug 1 --metric wsbi
 
 # alpha=1.0 reduces to plain SBI (equal weight)
-python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi --wsbi-alpha 1.0
+python -m apr_framework localize --project black --bug 1 --metric wsbi --wsbi-alpha 1.0
 
 # alpha=0.25 further discounts passing-test coverage
-python -m apr_framework localize --project PySnooper --bug 1 --metric wsbi --wsbi-alpha 0.25
+python -m apr_framework localize --project black --bug 1 --metric wsbi --wsbi-alpha 0.25
 ```
 
 Implementation note: FauxPy normally computes Tarantula, Ochiai, and DStar for
@@ -315,31 +315,31 @@ smaller values of alpha make the metric increasingly aggressive.
 - Limit the number of ranked locations printed:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai --top-n 10
+python -m apr_framework localize --project black --bug 1 --metric ochiai --top-n 10
 ```
 
 - Run function-level localization:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --granularity function --metric ochiai --top-n 10
+python -m apr_framework localize --project black --bug 1 --granularity function --metric ochiai --top-n 10
 ```
 
 - Pass a failing test list to FauxPy:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --failing_tests "tests/test_chinese.py::test_chinese"
+python -m apr_framework localize --project black --bug 1 --failing_tests "tests/test_chinese.py::test_chinese"
 ```
 
 - Run MBFL mode:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --mbfl --granularity statement --metric metallaxis --top-n 10
+python -m apr_framework localize --project black --bug 1 --mbfl --granularity statement --metric metallaxis --top-n 10
 ```
 
 - Limit expensive MBFL mutant validation runs with the random mutation selector:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --mbfl --mutation-strategy random --budget 50 --metric metallaxis
+python -m apr_framework localize --project black --bug 1 --mbfl --mutation-strategy random --budget 50 --metric metallaxis
 ```
 
   - `--budget` limits how many generated mutants are validated, which is the
@@ -350,7 +350,7 @@ python -m apr_framework localize --project PySnooper --bug 1 --mbfl --mutation-s
 - Run weighted hybrid SBFL + MBFL localization:
 
 ```bash
-python -m apr_framework localize --project PySnooper --bug 1 --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis --sbfl-weight 0.5 --mbfl-weight 0.5 --mutation-strategy random --budget 50 --top-n 10
+python -m apr_framework localize --project black --bug 1 --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis --sbfl-weight 0.5 --mbfl-weight 0.5 --mutation-strategy random --budget 50 --top-n 10
 ```
 
 Hybrid mode runs SBFL and MBFL through the existing FauxPy adapter, normalizes
@@ -385,26 +385,26 @@ examples.
 
 The framework was evaluated on three real BugsInPy bugs: **fastapi#3**, **fastapi#6**, and **luigi#33**. All 8 techniques were compared against the ground-truth faulty line from each bug's patch. Full results are in [`experiment_results/README.md`](experiment_results/README.md).
 
-### Summary table
 
-## Template-based APR repair (Assignment 3 — Task 1)
 
-> A standalone, learn-by-reading write-up of this technique (design decisions,
-> file map, verification) lives in
-> [`assignment3_task1_implementation.md`](assignment3_task1_implementation.md).
+# 3- Traditional APR
+
+## Template-based APR repair 
+
+
 
 ### Technique overview
 
 The `repair` command implements a **template-based APR** strategy guided by SBFL/MBFL fault localization:
 
-1. **Where to fix** — the top-N suspicious locations produced by `localize` (ranked by suspiciousness score) are used as repair targets.
-2. **What to try** — AST mutation operators generate syntactically valid program variants at each suspicious line.
-3. **Which variants pass** — each mutated variant is applied to the checkout worktree, the BugsInPy test suite is executed inside the executor container, and the file is restored unconditionally.
+1. **Where to fix** -> the top-N suspicious locations produced by `localize` (ranked by suspiciousness score) are used as repair targets.
+2. **What to try** -> AST mutation operators generate syntactically valid program variants at each suspicious line.
+3. **Which variants pass** -> each mutated variant is applied to the checkout worktree, the BugsInPy test suite is executed inside the executor container, and the file is restored unconditionally.
 
 A patch is **plausible** only when the test command exits cleanly
 (`return_code == 0`), reports zero failures and zero errors, **and** at least one
 test actually passed. The exit-code and passed-count guards reject patches that
-break test collection/import (which otherwise look like "0 failed, 0 error").
+break test collection/import (which otherwise look like "0 failed, 0 error"). See: regression suites
 
 ### Mutation operators
 
@@ -423,38 +423,38 @@ All operators accept a `target_line` parameter and restrict mutations to AST nod
 
 ```bash
 # Full repair run (localize + repair) with default settings:
-python -m apr_framework repair --project PySnooper --bug 1
+python -m apr_framework repair --project black --bug 1
 
 # Cap budget to 20 validations, try top 3 locations only:
-python -m apr_framework repair --project PySnooper --bug 1 --budget 20 --top-n 3
+python -m apr_framework repair --project black --bug 1 --budget 20 --top-n 3
 
 # Only apply arithmetic and comparison operators:
-python -m apr_framework repair --project PySnooper --bug 1 --operators arith,comp
+python -m apr_framework repair --project tornado --bug 14 --operators arith,comp --fl-mode perfect
 
 # Stop as soon as the first plausible patch is found:
-python -m apr_framework repair --project PySnooper --bug 1 --stop-on-first
+python -m apr_framework repair --project black --bug 1 --stop-on-first
 
 # Choose the fault-localization family that drives the repair targets:
-python -m apr_framework repair --project PySnooper --bug 1 --fl-family mbfl --mbfl-metric metallaxis
-python -m apr_framework repair --project PySnooper --bug 1 --fl-family hybrid --sbfl-weight 0.5 --mbfl-weight 0.5
+python -m apr_framework repair --project black --bug 1 --fl-family mbfl --mbfl-metric metallaxis
+python -m apr_framework repair --project black --bug 1 --fl-family hybrid --sbfl-weight 0.5 --mbfl-weight 0.5
 
 # Skip re-running localization; load the most recent cached result:
-python -m apr_framework repair --project PySnooper --bug 1 --skip-localize
+python -m apr_framework repair --project black --bug 1 --skip-localize
 
 # Use a different SBFL metric for localization:
-python -m apr_framework repair --project PySnooper --bug 1 --localization-metric tarantula
+python -m apr_framework repair --project black --bug 1 --localization-metric tarantula
 
 # Full sequence from scratch:
 python -m apr_framework bugsinpy setup
-python -m apr_framework bugsinpy test PySnooper 1       # checkout + compile + test
-python -m apr_framework localize --project PySnooper --bug 1 --metric ochiai --top-n 10
-python -m apr_framework repair --project PySnooper --bug 1 --budget 20 --top-n 3 --skip-localize
+python -m apr_framework bugsinpy test black 1       # checkout + compile + test
+python -m apr_framework localize --project black --bug 1 --metric ochiai --top-n 10
+python -m apr_framework repair --project black --bug 1 --budget 20 --top-n 3 --skip-localize
 ```
 
 ### Key design decisions
 
 **AST-based vs text-based mutations.**
-Mutations are performed on the Python AST using `ast.NodeTransformer` subclasses and `ast.unparse()` (Python 3.9+) to reconstruct source text. The advantage is syntactic validity — every generated variant parses correctly. The trade-off is that `ast.unparse()` reformats the entire file (normalises whitespace, removes redundant parentheses), so the unified diff includes cosmetic changes beyond the actual mutation. The `patched_source` stored in `PatchCandidate.metadata` is written directly to avoid re-parsing.
+Mutations are performed on the Python AST using `ast.NodeTransformer` subclasses and `ast.unparse()` (Python 3.9+) to reconstruct source text. The advantage is syntactic validity => every generated variant parses correctly. The trade-off is that `ast.unparse()` reformats the entire file (normalises whitespace, removes redundant parentheses), so the unified diff includes cosmetic changes beyond the actual mutation. The `patched_source` stored in `PatchCandidate.metadata` is written directly to avoid re-parsing.
 
 **Line-to-AST-node mapping.**
 Every operator checks `node.lineno <= target_line <= node.end_lineno` before mutating. This maps the SBFL/MBFL statement-level line number to the precise AST sub-tree covering that line, avoiding mutations on unrelated parts of the file.
@@ -488,13 +488,10 @@ The command creates the next `runs/run_NNN/` directory and writes:
 
 ### Known limitations
 
-- `ast.unparse()` reformats entire files, so diffs include cosmetic whitespace changes. The patched file is identical in behaviour but may differ in style.
-- Multi-line expressions split across lines are still targeted by the operator at the opening line; operators at the target line may produce no variants if the key AST node starts on a different line.
-- Decorators, f-strings with complex expressions, and type-annotated assignments may be reformatted in unexpected ways by `ast.unparse()`.
 - Only projects whose `run_test.sh` invokes pytest directly are supported (same restriction as the `localize` command).
 - Requires Python 3.9+ inside the framework container (for `ast.unparse()`).
 
-## Patch validation pipeline (Assignment 3 — Task 2)
+## 3.2) Patch validation pipeline 
 
 Task 2 turns repair into a proper **patch-validation pipeline** with two levels of
 judgment and a set of tracked metrics, all surfaced in the structured JSON output.
@@ -874,4 +871,6 @@ python -m apr_framework localize \
   --metric ochiai \
   --top-n 10 \
   --show-raw-output
+
+python -m apr_framework repair --project black --bug 1
 ```
