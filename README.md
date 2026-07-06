@@ -840,9 +840,8 @@ operator reach**, and the three bugs show all three cases:
   while automated FL's top-N happens to include operator-reachable lines and generates
   8 -> none correct.
 
-Observation: for the bugs whose fix restructures control flow — `scrapy#2` adds an
-`if self.limit:` guard around a loop, `black#1` wraps code in `try/except` — the
-single-operator template technique produces no plausible patch. The LLM-based repair
+Observation: for the bugs whose fix restructures control flow / or the bugs who makes calls to external services the
+single-operator template technique produces no plausible patch. We believe that the LLM-based repair
 backend introduced in the next assignment is expected to handle this class of bug
 better.
 
@@ -869,8 +868,7 @@ that ranking only distinguishes patches when at least two are plausible.
   Python 3.7.0. Such cells are reported honestly as error cells; perfect FL has no such
   dependency and always runs.
 - **Correctness is strict and syntactic.** It is a diff-level match of the normalized
-  added/removed lines against the single-file developer fix; a semantically-equivalent
-  but textually-different patch is not credited.
+  added/removed lines against the single-file developer fix;
 
 ### Artifacts
 
