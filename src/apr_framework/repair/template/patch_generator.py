@@ -106,14 +106,9 @@ def generate_patches(
                 continue
 
             patch_id = (
-                f"{bug.project}-{bug.bug_id}"
-                f"-{op_key}"
-                f"-L{target_line}"
-                f"-v{variant_idx}"
+                f"{bug.project}-{bug.bug_id}-{op_key}-L{target_line}-v{variant_idx}"
             )
-            summary = (
-                f"{op_key} mutation at {source_path.name}:{target_line} (variant {variant_idx})"
-            )
+            summary = f"{op_key} mutation at {source_path.name}:{target_line} (variant {variant_idx})"
 
             candidates.append(
                 PatchCandidate(

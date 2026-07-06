@@ -91,9 +91,7 @@ def validate_patch(
 
     with patched_file(source_path, patched_source):
         try:
-            test_result = adapter.run_tests(
-                checkout, timeout=config.timeout_per_test
-            )
+            test_result = adapter.run_tests(checkout, timeout=config.timeout_per_test)
         except Exception as exc:
             logger.error(
                 "Test run failed for candidate %s: %s", candidate.patch_id, exc
@@ -129,8 +127,12 @@ def validate_patch(
                 )
                 return candidate, False
             regression_ran = True
-            patched_suite_failing_tests = parse_failing_test_ids(regression_result.raw_output)
-            new_failures = sorted(patched_suite_failing_tests - regression.baseline_failing)
+            patched_suite_failing_tests = parse_failing_test_ids(
+                regression_result.raw_output
+            )
+            new_failures = sorted(
+                patched_suite_failing_tests - regression.baseline_failing
+            )
             regression_ok = not new_failures
 
         is_plausible = trigger_passed and regression_ok

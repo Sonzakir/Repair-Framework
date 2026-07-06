@@ -7,7 +7,15 @@ RUN apt-get update \
         bash \
         ca-certificates \
         git \
+        patch \
     && rm -rf /var/lib/apt/lists/*
+
+# Runtime Python dependencies (mirrors [project].dependencies in pyproject.toml).
+# The package itself is imported from the mounted source tree via
+# PYTHONPATH=/workspace/src, but its third-party deps must be present in the image.
+RUN pip install --no-cache-dir \
+        "openai>=1.0.0" \
+        "python-dotenv>=1.0.0"
 
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 

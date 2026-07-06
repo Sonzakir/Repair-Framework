@@ -1,0 +1,441 @@
+----- SYSTEM -----
+You are an automated program repair tool. Your task is to fix a bug in a Python program.
+You will be given the buggy code region and the fault location identified by a fault
+localization tool. You may also be given the failing test and the traceback it produces
+on the current code; when present, use them to infer the behaviour the fix must satisfy
+and the concrete failure to eliminate. Return ONLY the corrected version of the provided function inside a
+Python fenced code block (```python ... ```). Do not include any explanation, commentary,
+or code outside the fenced block. Do not change the function signature.
+The buggy code is shown with leading line numbers and a "-->" marker on the suspicious
+line; these are annotations, NOT part of the source. Do NOT reproduce the line numbers or
+the marker. Return only real Python source, preserving the original indentation exactly.
+
+----- USER -----
+## Fault Location
+File: black.py
+Suspicious line: 2411 (rank 3, score 0.9800)
+
+## Buggy Code (lines 2393–2419)
+```python
+2393      def bracket_split_build_line(
+2394          leaves: List[Leaf], original: Line, opening_bracket: Leaf, *, is_body: bool = False
+2395      ) -> Line:
+2396          """Return a new line with given `leaves` and respective comments from `original`.
+2397      
+2398          If `is_body` is True, the result line is one-indented inside brackets and as such
+2399          has its first leaf's prefix normalized and a trailing comma added when expected.
+2400          """
+2401          result = Line(depth=original.depth)
+2402          if is_body:
+2403              result.inside_brackets = True
+2404              result.depth += 1
+2405              if leaves:
+2406                  # Since body is a new indent level, remove spurious leading whitespace.
+2407                  normalize_prefix(leaves[0], inside_brackets=True)
+2408                  # Ensure a trailing comma when expected.
+2409                  if original.is_import:
+2410                      if leaves[-1].type != token.COMMA:
+2411  -->                      leaves.append(Leaf(token.COMMA, ","))
+2412          # Populate the line
+2413          for leaf in leaves:
+2414              result.append(leaf, preformatted=True)
+2415              for comment_after in original.comments_after(leaf):
+2416                  result.append(comment_after, preformatted=True)
+2417          if is_body:
+2418              result.should_explode = should_explode(result, opening_bracket)
+2419          return result
+```
+
+## Failing Test
+This is the test the fix must make pass. Use it to infer the intended behaviour.
+```python
+def test_comments7(self) -> None:
+        source, expected = read_data("comments7")
+        actual = fs(source)
+        self.assertFormatEqual(expected, actual)
+        black.assert_equivalent(source, actual)
+        black.assert_stable(source, actual, black.FileMode())
+```
+
+## Failure Traceback
+Running the failing test on the current (buggy) code produces this traceback:
+```
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.8.3/lib/python3.8/unittest/mock.py", line 1325, in patched
+    return func(*newargs, **newkeywargs)
+  File "/home/workspace/black_8/black/tests/test_black.py", line 395, in test_comments7
+    self.assertFormatEqual(expected, actual)
+  File "/home/workspace/black_8/black/tests/test_black.py", line 159, in assertFormatEqual
+    self.assertEqual(expected, actual)
+AssertionError: 'from[181 chars]ES,\n)\n\n\nfrom .config import (\n    Any,\n [179 chars]n)\n' != 'from[181 chars]ES,\n    ,\n)\n\n\nfrom .config import (\n    [192 chars]n)\n'
+  from .config import (
+      Any,
+      Bool,
+      ConfigType,
+      ConfigTypeAttributes,
+      Int,
+      Path,
+      #  String,
+      #  resolve_to_config_type,
+      #  DEFAULT_TYPE_ATTRIBUTES,
++     ,
+  )
+  
+  
+  from .config import (
+      Any,
+      Bool,
+      ConfigType,
+      ConfigTypeAttributes,
+      Int,
+-     no_comma_here_yet,
+?                      -
++     no_comma_here_yet
+      #  and some comments,
+      #  resolve_to_config_type,
+      #  DEFAULT_TYPE_ATTRIBUTES,
++     ,
+  )
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (failures=1)
+```
+
+## Task
+Fix the bug at line 2411. Return the corrected function in a Python fenced
+code block. Keep the fix minimal — change as few lines as necessary.
+
+----- ASSISTANT -----
+```python
+def bracket_split_build_line(
+    leaves: List[Leaf], original: Line, opening_bracket: Leaf, *, is_body: bool = False
+) -> Line:
+    """Return a new line with given `leaves` and respective comments from `original`.
+
+    If `is_body` is True, the result line is one-indented inside brackets and as such
+    has its first leaf's prefix normalized and a trailing comma added when expected.
+    """
+    result = Line(depth=original.depth)
+    if is_body:
+        result.inside_brackets = True
+        result.depth += 1
+        if leaves:
+            # Since body is a new indent level, remove spurious leading whitespace.
+            normalize_prefix(leaves[0], inside_brackets=True)
+            # Ensure a trailing comma when expected.
+            if original.is_import:
+                if leaves[-1].type != token.COMMA and leaves[-1].type != token.STRING:
+                    leaves.append(Leaf(token.COMMA, ","))
+    # Populate the line
+    for leaf in leaves:
+        result.append(leaf, preformatted=True)
+        for comment_after in original.comments_after(leaf):
+            result.append(comment_after, preformatted=True)
+    if is_body:
+        result.should_explode = should_explode(result, opening_bracket)
+    return result
+```
+
+----- USER -----
+## Previous Attempt Failed (turn 1 of 5)
+Your last fix did not pass validation — passed=0, failed=1, errors=0.
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.8.3/lib/python3.8/unittest/mock.py", line 1325, in patched
+    return func(*newargs, **newkeywargs)
+  File "/home/workspace/black_8/black/tests/test_black.py", line 395, in test_comments7
+    self.assertFormatEqual(expected, actual)
+  File "/home/workspace/black_8/black/tests/test_black.py", line 159, in assertFormatEqual
+    self.assertEqual(expected, actual)
+AssertionError: 'from[181 chars]ES,\n)\n\n\nfrom .config import (\n    Any,\n [179 chars]n)\n' != 'from[181 chars]ES,\n    ,\n)\n\n\nfrom .config import (\n    [192 chars]n)\n'
+  from .config import (
+      Any,
+      Bool,
+      ConfigType,
+      ConfigTypeAttributes,
+      Int,
+      Path,
+      #  String,
+      #  resolve_to_config_type,
+      #  DEFAULT_TYPE_ATTRIBUTES,
++     ,
+  )
+  
+  
+  from .config import (
+      Any,
+      Bool,
+      ConfigType,
+      ConfigTypeAttributes,
+      Int,
+-     no_comma_here_yet,
+?                      -
++     no_comma_here_yet
+      #  and some comments,
+      #  resolve_to_config_type,
+      #  DEFAULT_TYPE_ATTRIBUTES,
++     ,
+  )
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (failures=1)
+```
+
+Please analyze this failure and provide a revised fix. Return the corrected function in a Python fenced code block, as before.
+
+----- ASSISTANT -----
+```python
+def bracket_split_build_line(
+    leaves: List[Leaf], original: Line, opening_bracket: Leaf, *, is_body: bool = False
+) -> Line:
+    """Return a new line with given `leaves` and respective comments from `original`.
+
+    If `is_body` is True, the result line is one-indented inside brackets and as such
+    has its first leaf's prefix normalized and a trailing comma added when expected.
+    """
+    result = Line(depth=original.depth)
+    if is_body:
+        result.inside_brackets = True
+        result.depth += 1
+        if leaves:
+            # Since body is a new indent level, remove spurious leading whitespace.
+            normalize_prefix(leaves[0], inside_brackets=True)
+            # Ensure a trailing comma when expected.
+            if original.is_import:
+                if leaves[-1].type != token.COMMA and leaves[-1].type not in (token.NAME, token.STRING):
+                    leaves.append(Leaf(token.COMMA, ","))
+    # Populate the line
+    for leaf in leaves:
+        result.append(leaf, preformatted=True)
+        for comment_after in original.comments_after(leaf):
+            result.append(comment_after, preformatted=True)
+    if is_body:
+        result.should_explode = should_explode(result, opening_bracket)
+    return result
+```
+
+----- USER -----
+## Previous Attempt Failed (turn 2 of 5)
+Your last fix did not pass validation — passed=0, failed=1, errors=0.
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.8.3/lib/python3.8/unittest/mock.py", line 1325, in patched
+    return func(*newargs, **newkeywargs)
+  File "/home/workspace/black_8/black/tests/test_black.py", line 395, in test_comments7
+    self.assertFormatEqual(expected, actual)
+  File "/home/workspace/black_8/black/tests/test_black.py", line 159, in assertFormatEqual
+    self.assertEqual(expected, actual)
+AssertionError: 'from[181 chars]ES,\n)\n\n\nfrom .config import (\n    Any,\n [179 chars]n)\n' != 'from[181 chars]ES,\n    ,\n)\n\n\nfrom .config import (\n    [192 chars]n)\n'
+  from .config import (
+      Any,
+      Bool,
+      ConfigType,
+      ConfigTypeAttributes,
+      Int,
+      Path,
+      #  String,
+      #  resolve_to_config_type,
+      #  DEFAULT_TYPE_ATTRIBUTES,
++     ,
+  )
+  
+  
+  from .config import (
+      Any,
+      Bool,
+      ConfigType,
+      ConfigTypeAttributes,
+      Int,
+-     no_comma_here_yet,
+?                      -
++     no_comma_here_yet
+      #  and some comments,
+      #  resolve_to_config_type,
+      #  DEFAULT_TYPE_ATTRIBUTES,
++     ,
+  )
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (failures=1)
+```
+
+Please analyze this failure and provide a revised fix. Return the corrected function in a Python fenced code block, as before.
+
+----- ASSISTANT -----
+```python
+def bracket_split_build_line(
+    leaves: List[Leaf], original: Line, opening_bracket: Leaf, *, is_body: bool = False
+) -> Line:
+    """Return a new line with given `leaves` and respective comments from `original`.
+
+    If `is_body` is True, the result line is one-indented inside brackets and as such
+    has its first leaf's prefix normalized and a trailing comma added when expected.
+    """
+    result = Line(depth=original.depth)
+    if is_body:
+        result.inside_brackets = True
+        result.depth += 1
+        if leaves:
+            # Since body is a new indent level, remove spurious leading whitespace.
+            normalize_prefix(leaves[0], inside_brackets=True)
+            # Ensure a trailing comma when expected.
+            if original.is_import:
+                if leaves[-1].type != token.COMMA and leaves[-1].type != token.RPAR:
+                    leaves.append(Leaf(token.COMMA, ","))
+    # Populate the line
+    for leaf in leaves:
+        result.append(leaf, preformatted=True)
+        for comment_after in original.comments_after(leaf):
+            result.append(comment_after, preformatted=True)
+    if is_body:
+        result.should_explode = should_explode(result, opening_bracket)
+    return result
+```
+
+----- USER -----
+## Previous Attempt Failed (turn 3 of 5)
+Your last fix did not pass validation — passed=0, failed=1, errors=0.
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.8.3/lib/python3.8/unittest/mock.py", line 1325, in patched
+    return func(*newargs, **newkeywargs)
+  File "/home/workspace/black_8/black/tests/test_black.py", line 395, in test_comments7
+    self.assertFormatEqual(expected, actual)
+  File "/home/workspace/black_8/black/tests/test_black.py", line 159, in assertFormatEqual
+    self.assertEqual(expected, actual)
+AssertionError: 'from[181 chars]ES,\n)\n\n\nfrom .config import (\n    Any,\n [179 chars]n)\n' != 'from[181 chars]ES,\n    ,\n)\n\n\nfrom .config import (\n    [192 chars]n)\n'
+  from .config import (
+      Any,
+      Bool,
+      ConfigType,
+      ConfigTypeAttributes,
+      Int,
+      Path,
+      #  String,
+      #  resolve_to_config_type,
+      #  DEFAULT_TYPE_ATTRIBUTES,
++     ,
+  )
+  
+  
+  from .config import (
+      Any,
+      Bool,
+      ConfigType,
+      ConfigTypeAttributes,
+      Int,
+-     no_comma_here_yet,
+?                      -
++     no_comma_here_yet
+      #  and some comments,
+      #  resolve_to_config_type,
+      #  DEFAULT_TYPE_ATTRIBUTES,
++     ,
+  )
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (failures=1)
+```
+
+Please analyze this failure and provide a revised fix. Return the corrected function in a Python fenced code block, as before.
+
+----- ASSISTANT -----
+```python
+def bracket_split_build_line(
+    leaves: List[Leaf], original: Line, opening_bracket: Leaf, *, is_body: bool = False
+) -> Line:
+    """Return a new line with given `leaves` and respective comments from `original`.
+
+    If `is_body` is True, the result line is one-indented inside brackets and as such
+    has its first leaf's prefix normalized and a trailing comma added when expected.
+    """
+    result = Line(depth=original.depth)
+    if is_body:
+        result.inside_brackets = True
+        result.depth += 1
+        if leaves:
+            # Since body is a new indent level, remove spurious leading whitespace.
+            normalize_prefix(leaves[0], inside_brackets=True)
+            # Ensure a trailing comma when expected.
+            if original.is_import:
+                if leaves[-1].type != token.COMMA and leaves[-1].type != token.RPAR:
+                    # Ensure the trailing comma is not added after a comment
+                    if not (leaves[-1].type == token.COMMENT or leaves[-1].value.startswith("#")):
+                        leaves.append(Leaf(token.COMMA, ","))
+    # Populate the line
+    for leaf in leaves:
+        result.append(leaf, preformatted=True)
+        for comment_after in original.comments_after(leaf):
+            result.append(comment_after, preformatted=True)
+    if is_body:
+        result.should_explode = should_explode(result, opening_bracket)
+    return result
+```
+
+----- USER -----
+## Previous Attempt Failed (turn 4 of 5)
+Your last fix did not pass validation — passed=0, failed=1, errors=0.
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.8.3/lib/python3.8/unittest/mock.py", line 1325, in patched
+    return func(*newargs, **newkeywargs)
+  File "/home/workspace/black_8/black/tests/test_black.py", line 395, in test_comments7
+    self.assertFormatEqual(expected, actual)
+  File "/home/workspace/black_8/black/tests/test_black.py", line 159, in assertFormatEqual
+    self.assertEqual(expected, actual)
+AssertionError: 'from[307 chars]e_yet,\n    #  and some comments,\n    #  reso[53 chars]n)\n' != 'from[307 chars]e_yet\n    #  and some comments,\n    #  resol[52 chars]n)\n'
+  from .config import (
+      Any,
+      Bool,
+      ConfigType,
+      ConfigTypeAttributes,
+      Int,
+      Path,
+      #  String,
+      #  resolve_to_config_type,
+      #  DEFAULT_TYPE_ATTRIBUTES,
+  )
+  
+  
+  from .config import (
+      Any,
+      Bool,
+      ConfigType,
+      ConfigTypeAttributes,
+      Int,
+-     no_comma_here_yet,
+?                      -
++     no_comma_here_yet
+      #  and some comments,
+      #  resolve_to_config_type,
+      #  DEFAULT_TYPE_ATTRIBUTES,
+  )
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (failures=1)
+```
+
+Please analyze this failure and provide a revised fix. Return the corrected function in a Python fenced code block, as before.

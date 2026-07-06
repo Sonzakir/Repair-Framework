@@ -15,13 +15,25 @@ classifiers = [
     "Development Status :: 3 - Alpha" ,
     "Programming Language :: Python"
 ]
-dependencies = []
+dependencies = [
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+]
 
 [project.urls]
 Repository = "https://github.com/rub-sq-teaching-repair-2026/repair-framework-Sonzakir.git"
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.15.0",
+]
 
 [tool.setuptools.packages.find]
 where=["src"]
 
 [project.scripts]
 apr-framework = "apr_framework.__main__:app"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

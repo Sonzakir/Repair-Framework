@@ -16,7 +16,6 @@ from apr_framework.core.models import (
 from apr_framework.repair.base import RepairAlgorithm
 from apr_framework.repair.regression import RegressionContext, build_regression_context
 from apr_framework.repair.template.config import TemplateRepairConfig
-from apr_framework.repair.run_loop import run_validation_loop
 from apr_framework.repair.template.patch_generator import generate_patches
 from apr_framework.repair.template.validator import validate_patch
 
@@ -194,7 +193,7 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
     ) -> tuple[RepairAttemptResult, list[RepairAttemptResult]]:
         """Run the full repair loop with budget and optional early stopping.
 
-        Thin convenience wrapper around :func:`run_validation_loop` (the shared,
+        Thin convenience wrapper around :meth:`repair_loop` (the shared,
         backend-agnostic loop). The summary_result uses the first plausible patch
         (status=PLAUSIBLE), or RepairStatus.FAILED if candidates existed but none
         passed, or RepairStatus.NO_PATCH if no candidates were generated.
@@ -221,8 +220,7 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
             config.enabled_operators,
         )
 
-        outcome = run_validation_loop(
-            self,
+        outcome = self.repair_loop(
             bug,
             checkout,
             budget=config.budget,
@@ -279,7 +277,9 @@ class TemplateRepairAlgorithm(RepairAlgorithm):
         # Try stripping a leading "./" component that FauxPy sometimes emits.
         parts = file_path.parts
         if parts and parts[0] in (".", "./"):
-            stripped_file_path = Path(*parts[1:]) if len(parts) > 1 else Path(file_path_str)
+            stripped_file_path = (
+                Path(*parts[1:]) if len(parts) > 1 else Path(file_path_str)
+            )
             worktree_stripped_path = (checkout.worktree / stripped_file_path).resolve()
             if worktree_stripped_path.exists():
                 return worktree_stripped_path

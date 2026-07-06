@@ -72,7 +72,7 @@ def _normalize_patch_path(raw: str) -> str:
     """Strip ``a/`` / ``b/`` prefixes written by git-diff."""
     for prefix in ("a/", "b/"):
         if raw.startswith(prefix):
-            return raw[len(prefix):]
+            return raw[len(prefix) :]
     if raw == "/dev/null":
         return ""
     return raw

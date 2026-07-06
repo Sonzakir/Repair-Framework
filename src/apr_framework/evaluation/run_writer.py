@@ -45,19 +45,31 @@ def serialize_localization_result(result) -> dict:
     return {
         "backend": result.backend,
         "bug": dataclasses.asdict(result.bug),
-        "ranked_locations": [dataclasses.asdict(loc) for loc in result.ranked_locations],
+        "ranked_locations": [
+            dataclasses.asdict(loc) for loc in result.ranked_locations
+        ],
         "metadata": _serialize_metadata(result.metadata),
     }
 
 
 def _serialize_metadata(metadata: dict) -> dict:
-    out = {}
-    for key, value in metadata.items():
-        if key == "all_metrics" and isinstance(value, dict):
-            out[key] = {
-                metric: [dataclasses.asdict(loc) for loc in locs]
-                for metric, locs in value.items()
-            }
-        else:
-            out[key] = value
-    return out
+    """Recursively convert a localization metadata dict to a JSON-safe dict.
+
+    Metadata may nest sub-result metadata (e.g. the hybrid backend embeds each
+    backend's ``all_metrics`` under ``sbfl_metadata``/``mbfl_metadata``), and
+    those inner tables still hold ``RankedLocation`` dataclass instances.  A
+    plain top-level pass would leave them un-serialized, so this walks the whole
+    structure and turns any dataclass instance into a dict.
+    """
+    return {key: _to_json_safe(value) for key, value in metadata.items()}
+
+
+def _to_json_safe(value):
+    """Recursively convert dataclasses / nested containers into JSON-safe values."""
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return dataclasses.asdict(value)
+    if isinstance(value, dict):
+        return {key: _to_json_safe(inner) for key, inner in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_json_safe(inner) for inner in value]
+    return value

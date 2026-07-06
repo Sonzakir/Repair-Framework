@@ -1,0 +1,91 @@
+----- SYSTEM -----
+You are an automated program repair tool. Your task is to fix a bug in a Python program.
+You will be given the buggy code region and the fault location identified by a fault
+localization tool. You may also be given the failing test and the traceback it produces
+on the current code; when present, use them to infer the behaviour the fix must satisfy
+and the concrete failure to eliminate. Return ONLY the corrected version of the provided function inside a
+Python fenced code block (```python ... ```). Do not include any explanation, commentary,
+or code outside the fenced block. Do not change the function signature.
+The buggy code is shown with leading line numbers and a "-->" marker on the suspicious
+line; these are annotations, NOT part of the source. Do NOT reproduce the line numbers or
+the marker. Return only real Python source, preserving the original indentation exactly.
+
+----- USER -----
+## Fault Location
+File: black.py
+Suspicious line: 621 (rank 1, score 1.0000)
+
+## Buggy Code (lines 612–636)
+```python
+612      def reformat_many(
+613          sources: Set[Path], fast: bool, write_back: WriteBack, mode: Mode, report: "Report"
+614      ) -> None:
+615          """Reformat multiple files using a ProcessPoolExecutor."""
+616          loop = asyncio.get_event_loop()
+617          worker_count = os.cpu_count()
+618          if sys.platform == "win32":
+619              # Work around https://bugs.python.org/issue26903
+620              worker_count = min(worker_count, 61)
+621  -->      executor = ProcessPoolExecutor(max_workers=worker_count)
+622          try:
+623              loop.run_until_complete(
+624                  schedule_formatting(
+625                      sources=sources,
+626                      fast=fast,
+627                      write_back=write_back,
+628                      mode=mode,
+629                      report=report,
+630                      loop=loop,
+631                      executor=executor,
+632                  )
+633              )
+634          finally:
+635              shutdown(loop)
+636              executor.shutdown()
+```
+
+## Failing Test
+This is the test the fix must make pass. Use it to infer the intended behaviour.
+```python
+def test_works_in_mono_process_only_environment(self, mock_executor) -> None:
+        mock_executor.side_effect = OSError()
+        mode = black.FileMode()
+        with cache_dir() as workspace:
+            one = (workspace / "one.py").resolve()
+            with one.open("w") as fobj:
+                fobj.write("print('hello')")
+            two = (workspace / "two.py").resolve()
+            with two.open("w") as fobj:
+                fobj.write("print('hello')")
+            black.write_cache({}, [one], mode)
+            self.invokeBlack([str(workspace)])
+            with one.open("r") as fobj:
+                self.assertEqual(fobj.read(), "print('hello')")
+            with two.open("r") as fobj:
+                self.assertEqual(fobj.read(), 'print("hello")\n')
+            cache = black.read_cache(mode)
+            self.assertIn(one, cache)
+            self.assertIn(two, cache)
+```
+
+## Failure Traceback
+Running the failing test on the current (buggy) code produces this traceback:
+```
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.8.3/lib/python3.8/unittest/mock.py", line 1325, in patched
+    return func(*newargs, **newkeywargs)
+  File "/home/workspace/black_1/black/tests/test_black.py", line 1288, in test_works_in_mono_process_only_environment
+    self.invokeBlack([str(workspace)])
+  File "/home/workspace/black_1/black/tests/test_black.py", line 162, in invokeBlack
+    self.assertEqual(result.exit_code, exit_code, msg=runner.stderr_bytes.decode())
+AssertionError: 1 != 0 : 
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+FAILED (failures=1)
+```
+
+## Task
+Fix the bug at line 621. Return the corrected function in a Python fenced
+code block. Keep the fix minimal — change as few lines as necessary.

@@ -44,9 +44,15 @@ class WeightedCompositeRanker(PatchRanker):
         simplicity_weight: float = DEFAULT_SIMPLICITY_WEIGHT,
         operator_priority_weight: float = DEFAULT_OPERATOR_PRIORITY_WEIGHT,
     ) -> None:
-        if suspiciousness_weight < 0 or simplicity_weight < 0 or operator_priority_weight < 0:
+        if (
+            suspiciousness_weight < 0
+            or simplicity_weight < 0
+            or operator_priority_weight < 0
+        ):
             raise ValueError("Ranker weights must be non-negative.")
-        total_weight = suspiciousness_weight + simplicity_weight + operator_priority_weight
+        total_weight = (
+            suspiciousness_weight + simplicity_weight + operator_priority_weight
+        )
         if total_weight == 0:
             raise ValueError("At least one ranker weight must be positive.")
         self._suspiciousness_weight = suspiciousness_weight / total_weight
@@ -74,7 +80,9 @@ class WeightedCompositeRanker(PatchRanker):
         ]
         operator_priority_scores = [
             _OPERATOR_PRIORITY.get(
-                attempt_result.patch.metadata.get("operator", "") if attempt_result.patch else "",
+                attempt_result.patch.metadata.get("operator", "")
+                if attempt_result.patch
+                else "",
                 _FALLBACK_OPERATOR_PRIORITY,
             )
             for attempt_result in plausible_results
@@ -82,7 +90,9 @@ class WeightedCompositeRanker(PatchRanker):
 
         normalised_suspiciousness = _normalise(suspiciousness_scores, fallback=0.5)
         normalised_simplicity = _invert_and_normalise(changed_line_counts)
-        normalised_operator_priority = _normalise(operator_priority_scores, fallback=0.5)
+        normalised_operator_priority = _normalise(
+            operator_priority_scores, fallback=0.5
+        )
 
         scored_results: list[tuple[float, RepairAttemptResult]] = []
         for index, attempt_result in enumerate(plausible_results):

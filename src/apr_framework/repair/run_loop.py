@@ -52,7 +52,66 @@ class LoopOutcome:
 
     @property
     def plausible_results(self) -> list[RepairAttemptResult]:
-        return [attempt_result for attempt_result in self.all_results if attempt_result.status in (RepairStatus.PLAUSIBLE, RepairStatus.CORRECT)]
+        return [
+            attempt_result
+            for attempt_result in self.all_results
+            if attempt_result.status in (RepairStatus.PLAUSIBLE, RepairStatus.CORRECT)
+        ]
+
+
+def build_loop_summary(
+    bug: BugIdentifier,
+    all_results: list[RepairAttemptResult],
+    total_candidates_generated: int,
+    budget: int,
+    elapsed_seconds: float,
+) -> RepairAttemptResult:
+    """Build the single representative result for a finished validation loop.
+
+    Mirrors the branching used at the end of ``run_validation_loop``: the first
+    plausible result if any exist, else FAILED (candidates existed, none passed),
+    else NO_PATCH (nothing was generated/validated). The iterative LLM loop calls
+    this same helper so both loop shapes produce identically-formatted summaries.
+    """
+    if total_candidates_generated == 0:
+        return RepairAttemptResult(
+            bug=bug,
+            patch=None,
+            status=RepairStatus.NO_PATCH,
+            validation_summary=(
+                "No candidate patches were generated at the top suspicious locations."
+            ),
+        )
+
+    validated_count = len(all_results)
+    plausible_results = [
+        result for result in all_results if result.status == RepairStatus.PLAUSIBLE
+    ]
+
+    if plausible_results:
+        first_plausible_result = plausible_results[0]
+        return RepairAttemptResult(
+            bug=bug,
+            patch=first_plausible_result.patch,
+            status=RepairStatus.PLAUSIBLE,
+            validation_summary=(
+                f"Found {len(plausible_results)} plausible patch(es) out of "
+                f"{validated_count} validated (budget: {budget}, "
+                f"elapsed: {elapsed_seconds:.1f}s). "
+                f"First plausible: {first_plausible_result.patch.patch_id if first_plausible_result.patch else '?'}."
+            ),
+        )
+
+    return RepairAttemptResult(
+        bug=bug,
+        patch=None,
+        status=RepairStatus.FAILED,
+        validation_summary=(
+            f"No plausible patch found. Validated {validated_count}/"
+            f"{total_candidates_generated} candidates (budget: {budget}, "
+            f"elapsed: {elapsed_seconds:.1f}s)."
+        ),
+    )
 
 
 def run_validation_loop(
@@ -77,7 +136,7 @@ def run_validation_loop(
     """
     started_at = time.monotonic()
 
-    # Generate all candidate patches 
+    # Generate all candidate patches
     candidates = repair.generate_patches(bug, checkout)
     total_generated = len(candidates)
     logger.info("Total candidates generated: %d", total_generated)
@@ -99,7 +158,6 @@ def run_validation_loop(
             time_to_first_plausible_seconds=None,
             total_wall_clock_seconds=elapsed,
         )
-
 
     budget_remaining = budget
     all_results: list[RepairAttemptResult] = []
@@ -145,12 +203,16 @@ def run_validation_loop(
                 result.patch.patch_id if result.patch else "?",
             )
             if stop_on_first:
-                logger.info("stop_on_first=True — stopping after first plausible patch.")
+                logger.info(
+                    "stop_on_first=True — stopping after first plausible patch."
+                )
                 break
 
     elapsed = time.monotonic() - started_at
     validated_count = len(all_results)
-    plausible_results = [result for result in all_results if result.status == RepairStatus.PLAUSIBLE]
+    plausible_results = [
+        result for result in all_results if result.status == RepairStatus.PLAUSIBLE
+    ]
 
     logger.info(
         "Repair loop finished in %.1fs: %d validated, %d plausible",
@@ -159,30 +221,7 @@ def run_validation_loop(
         len(plausible_results),
     )
 
-    if plausible_results:
-        first_plausible_result = plausible_results[0]
-        summary = RepairAttemptResult(
-            bug=bug,
-            patch=first_plausible_result.patch,
-            status=RepairStatus.PLAUSIBLE,
-            validation_summary=(
-                f"Found {len(plausible_results)} plausible patch(es) out of "
-                f"{validated_count} validated (budget: {budget}, "
-                f"elapsed: {elapsed:.1f}s). "
-                f"First plausible: {first_plausible_result.patch.patch_id if first_plausible_result.patch else '?'}."
-            ),
-        )
-    else:
-        summary = RepairAttemptResult(
-            bug=bug,
-            patch=None,
-            status=RepairStatus.FAILED,
-            validation_summary=(
-                f"No plausible patch found. Validated {validated_count}/"
-                f"{total_generated} candidates (budget: {budget}, "
-                f"elapsed: {elapsed:.1f}s)."
-            ),
-        )
+    summary = build_loop_summary(bug, all_results, total_generated, budget, elapsed)
 
     return LoopOutcome(
         summary=summary,

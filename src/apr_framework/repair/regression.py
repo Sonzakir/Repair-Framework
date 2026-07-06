@@ -34,9 +34,7 @@ logger = logging.getLogger(__name__)
 # The negative lookahead skips unittest's "FAILED (failures=1, errors=1)" summary.
 _PYTEST_FAIL = re.compile(r"^(?:FAILED|ERROR)\s+(?!\()(\S+)", re.MULTILINE)
 # unittest: "FAIL: test_a (tests.test_x.Case)" / "ERROR: test_a (tests.test_x.Case)"
-_UNITTEST_FAIL = re.compile(
-    r"^(?:FAIL|ERROR):\s+(\w+)\s+\(([\w.]+)\)", re.MULTILINE
-)
+_UNITTEST_FAIL = re.compile(r"^(?:FAIL|ERROR):\s+(\w+)\s+\(([\w.]+)\)", re.MULTILINE)
 
 
 @dataclass(frozen=True)

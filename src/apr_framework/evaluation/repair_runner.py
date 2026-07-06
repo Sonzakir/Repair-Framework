@@ -34,7 +34,7 @@ from apr_framework.localization.base import FaultLocalizer
 from apr_framework.repair.base import RepairAlgorithm
 from apr_framework.repair.correctness import is_correct_patch
 from apr_framework.repair.ranking.base import PatchRanker
-from apr_framework.repair.run_loop import LoopOutcome, run_validation_loop
+from apr_framework.repair.run_loop import LoopOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -124,13 +124,13 @@ class RepairEvaluationRunner(EvaluationRunner):
             writer = self._writer
         else:
             writer = RunWriter.create(self._runs_dir)
-            writer.write_json(
-                "config.json", {"runner": self.name, **self._config_data}
-            )
+            writer.write_json("config.json", {"runner": self.name, **self._config_data})
         self._last_run_dir = writer.run_dir
         writer.log(f"Started {self.name} for {len(bugs)} bug(s)")
 
         bug_run_results: list[_BugRunResult] = []
+        
+        # Run each bug in the `bugs` and store the BugRunResult's 
         for bug in bugs:
             writer.log(f"Repairing {bug.project}#{bug.bug_id}")
             bug_run_results.append(self._run_one_bug(writer, bug, benchmark, repair))
@@ -163,9 +163,10 @@ class RepairEvaluationRunner(EvaluationRunner):
         started_at = datetime.now(timezone.utc)
         checkout = self._resolve_checkout(bug, benchmark)
 
-        # Plausibility —> shared generate-and-validate loop (with timing/counts).
-        outcome = run_validation_loop(
-            repair,
+        # Plausibility —> the algorithm's budget-bounded loop (with timing/counts).
+        # Default backends delegate to the shared generate-and-validate loop; the
+        # iterative LLM backend overrides repair_loop for multi-turn feedback.
+        outcome = repair.repair_loop(
             bug,
             checkout,
             budget=self._budget,
@@ -195,7 +196,9 @@ class RepairEvaluationRunner(EvaluationRunner):
                 outcome.plausible_results, self._localization_result
             )
             rank_of_first_correct: int | None = None
-            for rank_position, attempt_result in enumerate(ranked_plausible_results, start=1):
+            for rank_position, attempt_result in enumerate(
+                ranked_plausible_results, start=1
+            ):
                 if attempt_result.status == RepairStatus.CORRECT:
                     rank_of_first_correct = rank_position
                     break
@@ -227,7 +230,11 @@ class RepairEvaluationRunner(EvaluationRunner):
             f"plausible={metrics.plausible_count}, correct={metrics.correct_count}, "
             f"ttfp={metrics.time_to_first_plausible_seconds}, "
             f"wall_clock={metrics.total_wall_clock_seconds:.1f}s"
-            + (f", rank_of_first_correct={rank_of_first_correct}" if self._ranker is not None else "")
+            + (
+                f", rank_of_first_correct={rank_of_first_correct}"
+                if self._ranker is not None
+                else ""
+            )
         )
 
         return _BugRunResult(
@@ -245,7 +252,9 @@ class RepairEvaluationRunner(EvaluationRunner):
     # ------------------------------------------------------------------
 
     def _persist(self, writer: RunWriter, results: list[_BugRunResult]) -> None:
-        bug_payloads = [self._serialise_bug(writer, bug_result) for bug_result in results]
+        bug_payloads = [
+            self._serialise_bug(writer, bug_result) for bug_result in results
+        ]
 
         # The repair CLI runs one bug at a time -> keep the long-standing single-bug
         # repair_results.json schema (consumed by ranking/evaluation in later
@@ -257,20 +266,31 @@ class RepairEvaluationRunner(EvaluationRunner):
 
         writer.write_json("repair_results.json", payload)
 
-    def _serialise_bug(self, writer: RunWriter, bug_result: _BugRunResult) -> dict[str, Any]:
+    def _serialise_bug(
+        self, writer: RunWriter, bug_result: _BugRunResult
+    ) -> dict[str, Any]:
         plausible_results = bug_result.outcome.plausible_results
         self._write_patch_artifacts(writer, plausible_results)
 
         ranked_plausible_patches = None
         if self._ranker is not None:
             ranked_plausible_patches = [
-                {**self._serialise_result(attempt_result), "rank_position": rank_position}
-                for rank_position, attempt_result in enumerate(bug_result.ranked_plausible_results, start=1)
+                {
+                    **self._serialise_result(attempt_result),
+                    "rank_position": rank_position,
+                }
+                for rank_position, attempt_result in enumerate(
+                    bug_result.ranked_plausible_results, start=1
+                )
             ]
 
         return {
             "project": bug_result.bug.project,
             "bug_id": bug_result.bug.bug_id,
+            # Hoisted from config so the FL mode used is recorded at the top level
+            # of every result file (Task 4), not only nested under "config".
+            "fl_mode": self._config_data.get("fl_mode"),
+            "fl_backend": self._config_data.get("fl_backend"),
             "status": bug_result.status.value,
             "validation_summary": bug_result.outcome.summary.validation_summary,
             "started_at": bug_result.started_at.isoformat(),
@@ -289,10 +309,16 @@ class RepairEvaluationRunner(EvaluationRunner):
                 "total_wall_clock_seconds": bug_result.metrics.total_wall_clock_seconds,
                 "rank_of_first_correct": bug_result.metrics.rank_of_first_correct,
             },
-            "plausible_patches": [self._serialise_result(attempt_result) for attempt_result in plausible_results],
+            "plausible_patches": [
+                self._serialise_result(attempt_result)
+                for attempt_result in plausible_results
+            ],
             "ranked_plausible_patches": ranked_plausible_patches,
             "rank_of_first_correct": bug_result.metrics.rank_of_first_correct,
-            "all_results": [self._serialise_result(attempt_result) for attempt_result in bug_result.outcome.all_results],
+            "all_results": [
+                self._serialise_result(attempt_result)
+                for attempt_result in bug_result.outcome.all_results
+            ],
         }
 
     @staticmethod
@@ -308,7 +334,8 @@ class RepairEvaluationRunner(EvaluationRunner):
             "metadata": {
                 k: v
                 for k, v in (patch.metadata if patch else {}).items()
-                if k != "patched_source"  # omit large source blobs
+                # omit large blobs: full patched source and raw pytest output
+                if k not in ("patched_source", "raw_test_output")
             },
         }
 
@@ -367,16 +394,16 @@ class RepairEvaluationRunner(EvaluationRunner):
                 "first."
             )
         return CheckoutResult(
-            bug=BugIdentifier(benchmark="bugsinpy", project=canonical, bug_id=bug.bug_id),
+            bug=BugIdentifier(
+                benchmark="bugsinpy", project=canonical, bug_id=bug.bug_id
+            ),
             worktree=worktree,
             success=True,
             prepared=True,
         )
 
     @staticmethod
-    def _reference_patch(
-        benchmark: BenchmarkAdapter, bug: BugIdentifier
-    ) -> str | None:
+    def _reference_patch(benchmark: BenchmarkAdapter, bug: BugIdentifier) -> str | None:
         getter = getattr(benchmark, "get_reference_patch", None)
         if getter is None:
             return None

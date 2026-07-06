@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from apr_framework.core.models import (
     BugIdentifier,
@@ -6,6 +7,9 @@ from apr_framework.core.models import (
     PatchCandidate,
     RepairAttemptResult,
 )
+
+if TYPE_CHECKING:
+    from apr_framework.repair.run_loop import LoopOutcome
 
 
 class RepairAlgorithm(ABC):
@@ -54,3 +58,37 @@ class RepairAlgorithm(ABC):
             Validation outcome for the given candidate patch.
         """
         raise NotImplementedError
+
+    def repair_loop(
+        self,
+        bug: BugIdentifier,
+        checkout: CheckoutResult,
+        *,
+        budget: int,
+        stop_on_first: bool,
+    ) -> "LoopOutcome":
+        """Run the budget-bounded validation loop for this algorithm.
+
+        Default implementation delegates to the shared generate-and-validate loop
+        (``run_validation_loop``). Override this
+        method for algorithms whose generation and validation are interleaved (e.g.
+        iterative LLM repair with test-failure feedback), while keeping
+        ``generate_patches()`` and ``validate_patch()`` as the primitives every
+        backend still implements.
+
+        Args:
+            bug:           Bug under repair.
+            checkout:      Checked-out worktree to validate against.
+            budget:        Maximum number of patch validations (test-suite runs).
+            stop_on_first: Stop as soon as a plausible patch is found.
+
+        Returns:
+            A ``LoopOutcome`` with the summary result, per-candidate results, and
+            metrics.
+        """
+        # Deferred import avoids a circular import: run_loop imports RepairAlgorithm.
+        from apr_framework.repair.run_loop import run_validation_loop
+
+        return run_validation_loop(
+            self, bug, checkout, budget=budget, stop_on_first=stop_on_first
+        )

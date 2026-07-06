@@ -34,8 +34,6 @@ class BenchmarkAdapter(ABC):
         """
         raise NotImplementedError
 
-    
-
     @abstractmethod
     def list_bugs(self, project: str) -> list[BugInfo]:
         """

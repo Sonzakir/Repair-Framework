@@ -2,10 +2,10 @@
 
 Two FL conditions feeding the repair algorithm:
 
-  * **Automated FL** — the integrated FauxPy localizers (SBFL/MBFL/hybrid). 
+  * **Automated FL** — the integrated FauxPy localizers (SBFL/MBFL/hybrid).
         Selected with ``repair --fl-mode auto --fl-family ...``.
   * **Perfect FL** — the *ground-truth* fault location from BugsInPy, bypassing any
-    localizer. 
+    localizer.
         This module implements that "upper bound" condition.
 
 The developer fix is stored as a unified diff at
@@ -82,7 +82,11 @@ def derive_oracle_locations(reference_diff: str | None) -> list[RankedLocation]:
             path = raw[4:].strip().split("\t", 1)[0].split(" ", 1)[0]
             current_file = path[2:] if path.startswith(("a/", "b/")) else path
             continue
-        if raw.startswith("--- ") or raw.startswith("diff ") or raw.startswith("index "):
+        if (
+            raw.startswith("--- ")
+            or raw.startswith("diff ")
+            or raw.startswith("index ")
+        ):
             continue
 
         header = _HUNK_HEADER.match(raw)

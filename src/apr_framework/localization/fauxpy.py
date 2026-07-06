@@ -64,9 +64,7 @@ def _list_fauxpy_report_dirs(worktree: Path) -> dict[Path, Path]:
     if not parent.exists():
         return {}
     return {
-        path.resolve(): path
-        for path in parent.glob("FauxPyReport_*")
-        if path.is_dir()
+        path.resolve(): path for path in parent.glob("FauxPyReport_*") if path.is_dir()
     }
 
 
@@ -214,7 +212,7 @@ def load_pytest_targets(run_test_script: Path) -> list[str]:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        
+
         # split each command like shell
         parts = shlex.split(line)
 
@@ -245,6 +243,13 @@ def load_pytest_targets(run_test_script: Path) -> list[str]:
     return targets
 
 
+def extract_pytest_node_ids(test_targets: list[str]) -> list[str]:
+    """Filter out pytest CLI flags (e.g. -q, -s), keeping only test node IDs."""
+    return [
+        test_target for test_target in test_targets if not test_target.startswith("-")
+    ]
+
+
 @dataclass(frozen=True)
 class FauxPyConfig:
     """Configuration for one FauxPy localization run.
@@ -253,14 +258,15 @@ class FauxPyConfig:
     test selection, and metric to expose as the primary ranking. Validation keeps
     unsupported combinations out of the toolchain before any subprocess runs.
     """
-    family: str = "sbfl" # sbfl | mbfl 
-    granularity: str = "statement" # statement | function
+
+    family: str = "sbfl"  # sbfl | mbfl
+    granularity: str = "statement"  # statement | function
     src: str = "."
-    exclude : list[str] = field(default_factory=list)
+    exclude: list[str] = field(default_factory=list)
     test_targets: list[str] = field(default_factory=list)
     failing_tests: list[str] = field(default_factory=list)
     top_n: int | None = None
-    # MBFL-only knobs 
+    # MBFL-only knobs
     mutation_strategy: str | None = None
     mutation_budget: int | None = None
     mutation_seed: int = 0
@@ -271,22 +277,36 @@ class FauxPyConfig:
 
     def __post_init__(self) -> None:
         """Validate FauxPy options and reject unsupported combinations early."""
-        if self.family not in {"sbfl" , "mbfl"}:
-            raise ConfigurationError("Currently the FauxPy integration supports only SBFL and MBFL.")
-        if self.granularity not in {"statement" , "function"}:
-            raise ConfigurationError("Currently the FauxPy integration only supports statement level and function level granularity")
-        if (self.mutation_strategy is not None or self.mutation_budget is not None) and self.family != "mbfl":
+        if self.family not in {"sbfl", "mbfl"}:
+            raise ConfigurationError(
+                "Currently the FauxPy integration supports only SBFL and MBFL."
+            )
+        if self.granularity not in {"statement", "function"}:
+            raise ConfigurationError(
+                "Currently the FauxPy integration only supports statement level and function level granularity"
+            )
+        if (
+            self.mutation_strategy is not None or self.mutation_budget is not None
+        ) and self.family != "mbfl":
             raise ConfigurationError("Mutation selection options are MBFL only.")
         if self.mutation_strategy is not None:
             if self.mutation_strategy != "random":
-                raise ConfigurationError("Currently the FauxPy integration supports only the random mutation selection strategy.")
+                raise ConfigurationError(
+                    "Currently the FauxPy integration supports only the random mutation selection strategy."
+                )
             if self.mutation_budget is None:
-                raise ConfigurationError("FauxPy mutation selection requires a positive mutation budget.")
+                raise ConfigurationError(
+                    "FauxPy mutation selection requires a positive mutation budget."
+                )
         if self.mutation_budget is not None:
             if not isinstance(self.mutation_budget, int) or self.mutation_budget <= 0:
-                raise ConfigurationError("FauxPy mutation budget must be a positive integer.")
+                raise ConfigurationError(
+                    "FauxPy mutation budget must be a positive integer."
+                )
             if self.mutation_strategy is None:
-                raise ConfigurationError("FauxPy mutation budget requires a mutation strategy.")
+                raise ConfigurationError(
+                    "FauxPy mutation budget requires a mutation strategy."
+                )
         if not isinstance(self.mutation_seed, int):
             raise ConfigurationError("FauxPy mutation seed must be an integer.")
         if self.metric is None:
@@ -303,7 +323,9 @@ class FauxPyConfig:
             raise ConfigurationError("FauxPy src must be a non-empty string.")
         if self.top_n is not None:
             if not isinstance(self.top_n, int) or self.top_n <= 0:
-                raise ConfigurationError("FauxPy top_n must be a positive integer or None.")
+                raise ConfigurationError(
+                    "FauxPy top_n must be a positive integer or None."
+                )
 
         _validate_string_list("test_targets", self.test_targets)
         _validate_string_list("failing_tests", self.failing_tests)
@@ -337,8 +359,10 @@ class FauxPyToolchain:
         """Create a toolchain using runner for all subprocess execution"""
         self._runner = runner
 
-    def localize(self, config: FauxPyConfig, checkout: CheckoutResult) -> LocalizationResult:
-        """Run FauxPy for checkout and return ranked locations for config.metric
+    def localize(
+        self, config: FauxPyConfig, checkout: CheckoutResult
+    ) -> LocalizationResult:
+        """Run FauxPy for ``checkout`` and return ranked locations for ``config.metric``.
 
         The result metadata includes the raw command output, the selected score
         formula, the FauxPy run options, and all_metrics containing every
@@ -357,7 +381,7 @@ class FauxPyToolchain:
 
         self._ensure_patched_fauxpy_installed(python, checkout.worktree, config.wsbi_alpha)
 
-        fauxpy_command = self._build_fauxpy_command(python , config)
+        fauxpy_command = self._build_fauxpy_command(python, config)
         before_report_dirs = _list_fauxpy_report_dirs(checkout.worktree)
 
         completed = self._runner.run_command(
@@ -374,8 +398,7 @@ class FauxPyToolchain:
 
         if completed.returncode not in {0, 1}:
             raise ConfigurationError(
-                "FauxPy localization command failed. "
-                f"{raw_output}".strip()
+                f"FauxPy localization command failed. {raw_output}".strip()
             )
 
         all_metrics = parse_fauxpy_output(raw_output, metric_filter=None)
@@ -501,15 +524,23 @@ class FauxPyToolchain:
                 "framework could not upgrade the environment build tooling. "
                 f"{_completed_output(upgrade)}".strip()
             )
-        
-    def _build_fauxpy_command(self, python:Path , config:FauxPyConfig):
+
+    def _build_fauxpy_command(self, python: Path, config: FauxPyConfig):
         """
         Helper function to build FauxPy commands from FauxPy-Config object
         """
-        cmd = [str(python), "-m" , "pytest" , *config.test_targets ,
-               "--src", config.src , 
-                "--family" , config.family , 
-                "--granularity" , config.granularity ]
+        cmd = [
+            str(python),
+            "-m",
+            "pytest",
+            *config.test_targets,
+            "--src",
+            config.src,
+            "--family",
+            config.family,
+            "--granularity",
+            config.granularity,
+        ]
         if config.top_n is not None:
             cmd += ["--top-n", str(config.top_n)]
         if config.failing_tests:
@@ -562,8 +593,7 @@ def parse_fauxpy_output(
     *,
     metric_filter: None = None,
     top_n: int | None = None,
-) -> dict[str, list[RankedLocation]]:
-    ...
+) -> dict[str, list[RankedLocation]]: ...
 
 
 @overload
@@ -572,8 +602,7 @@ def parse_fauxpy_output(
     *,
     metric_filter: str,
     top_n: int | None = None,
-) -> list[RankedLocation]:
-    ...
+) -> list[RankedLocation]: ...
 
 
 def parse_fauxpy_output(
@@ -613,9 +642,13 @@ def parse_fauxpy_output(
         if current_metric is None or current_rows is None:
             continue
 
-        if not line.strip() or line.lstrip().startswith("-") or line.strip().startswith("|"):
+        if (
+            not line.strip()
+            or line.lstrip().startswith("-")
+            or line.strip().startswith("|")
+        ):
             continue
-    
+
         if line.strip().startswith("File"):
             continue
 
@@ -650,10 +683,7 @@ def parse_fauxpy_output(
     if metric_filter is None:
         if top_n is None:
             return metric_tables
-        return {
-            metric: rows[:top_n]
-            for metric, rows in metric_tables.items()
-        }
+        return {metric: rows[:top_n] for metric, rows in metric_tables.items()}
 
     selected_metric = _resolve_metric_name(metric_tables, metric_filter)
     if selected_metric is None:

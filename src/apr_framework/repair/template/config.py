@@ -32,7 +32,9 @@ class TemplateRepairConfig:
 
     budget: int = 200
     top_n_locations: int = 5
-    enabled_operators: list[str] = field(default_factory=lambda: list(_DEFAULT_OPERATORS))
+    enabled_operators: list[str] = field(
+        default_factory=lambda: list(_DEFAULT_OPERATORS)
+    )
     timeout_per_test: int = 120
     stop_on_first: bool = False
     regression_check: bool = True

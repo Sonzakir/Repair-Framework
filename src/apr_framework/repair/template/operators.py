@@ -79,8 +79,10 @@ class ArithmeticOperatorReplacer(_LineTargetedTransformer):
                         if (
                             isinstance(variant_node, ast.BinOp)
                             and isinstance(variant_node.op, original_cls)
-                            and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
-                            and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                            and getattr(variant_node, "lineno", None)
+                            == getattr(node, "lineno", None)
+                            and getattr(variant_node, "col_offset", None)
+                            == getattr(node, "col_offset", None)
                         ):
                             variant_node.op = replacement_cls()
                             break
@@ -128,8 +130,10 @@ class ComparisonOperatorReplacer(_LineTargetedTransformer):
                         for variant_node in ast.walk(variant):
                             if (
                                 isinstance(variant_node, ast.Compare)
-                                and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
-                                and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                                and getattr(variant_node, "lineno", None)
+                                == getattr(node, "lineno", None)
+                                and getattr(variant_node, "col_offset", None)
+                                == getattr(node, "col_offset", None)
                                 and len(variant_node.ops) > op_idx
                                 and isinstance(variant_node.ops[op_idx], original_cls)
                             ):
@@ -143,6 +147,7 @@ class ComparisonOperatorReplacer(_LineTargetedTransformer):
 # ---------------------------------------------------------------------------
 # obo — off-by-one replacement
 # ---------------------------------------------------------------------------
+
 
 class OffByOneReplacer(_LineTargetedTransformer):
     """Emits n+1 and n-1 variants for integer constants and range() upper bounds."""
@@ -167,8 +172,10 @@ class OffByOneReplacer(_LineTargetedTransformer):
                         if (
                             isinstance(variant_node, ast.Constant)
                             and isinstance(variant_node.value, int)
-                            and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
-                            and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                            and getattr(variant_node, "lineno", None)
+                            == getattr(node, "lineno", None)
+                            and getattr(variant_node, "col_offset", None)
+                            == getattr(node, "col_offset", None)
                         ):
                             variant_node.value = node.value + delta
                             break
@@ -184,7 +191,9 @@ class OffByOneReplacer(_LineTargetedTransformer):
                 and not node.keywords
             ):
                 last_arg = node.args[-1]
-                if isinstance(last_arg, ast.Constant) and isinstance(last_arg.value, int):
+                if isinstance(last_arg, ast.Constant) and isinstance(
+                    last_arg.value, int
+                ):
                     for delta in (+1, -1):
                         variant = copy.deepcopy(tree_copy)
                         for variant_node in ast.walk(variant):
@@ -193,8 +202,10 @@ class OffByOneReplacer(_LineTargetedTransformer):
                                 and isinstance(variant_node.func, ast.Name)
                                 and variant_node.func.id == "range"
                                 and variant_node.args
-                                and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
-                                and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                                and getattr(variant_node, "lineno", None)
+                                == getattr(node, "lineno", None)
+                                and getattr(variant_node, "col_offset", None)
+                                == getattr(node, "col_offset", None)
                             ):
                                 variant_range_arg = variant_node.args[-1]
                                 if isinstance(variant_range_arg, ast.Constant):
@@ -209,6 +220,7 @@ class OffByOneReplacer(_LineTargetedTransformer):
 # ---------------------------------------------------------------------------
 # bool — boolean operator replacement
 # ---------------------------------------------------------------------------
+
 
 class BooleanOperatorReplacer(_LineTargetedTransformer):
     """Swaps And<->Or in BoolOp nodes on the target line."""
@@ -227,8 +239,10 @@ class BooleanOperatorReplacer(_LineTargetedTransformer):
                 if (
                     isinstance(variant_node, ast.BoolOp)
                     and type(variant_node.op) is type(node.op)
-                    and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
-                    and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                    and getattr(variant_node, "lineno", None)
+                    == getattr(node, "lineno", None)
+                    and getattr(variant_node, "col_offset", None)
+                    == getattr(node, "col_offset", None)
                 ):
                     variant_node.op = replacement_op_cls()
                     break
@@ -240,6 +254,7 @@ class BooleanOperatorReplacer(_LineTargetedTransformer):
 # ---------------------------------------------------------------------------
 # negate — condition negation
 # ---------------------------------------------------------------------------
+
 
 class ConditionNegator(_LineTargetedTransformer):
     """Wraps the test of If/While nodes in Not() on the target line."""
@@ -261,10 +276,14 @@ class ConditionNegator(_LineTargetedTransformer):
                 if (
                     isinstance(variant_node, (ast.If, ast.While))
                     and type(variant_node) is type(node)
-                    and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
-                    and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                    and getattr(variant_node, "lineno", None)
+                    == getattr(node, "lineno", None)
+                    and getattr(variant_node, "col_offset", None)
+                    == getattr(node, "col_offset", None)
                 ):
-                    negated = ast.UnaryOp(op=ast.Not(), operand=copy.deepcopy(variant_node.test))
+                    negated = ast.UnaryOp(
+                        op=ast.Not(), operand=copy.deepcopy(variant_node.test)
+                    )
                     ast.copy_location(negated, variant_node.test)
                     variant_node.test = negated
                     break
@@ -276,6 +295,7 @@ class ConditionNegator(_LineTargetedTransformer):
 # ---------------------------------------------------------------------------
 # return — return value mutation
 # ---------------------------------------------------------------------------
+
 
 class ReturnValueMutator(_LineTargetedTransformer):
     """Mutates return statements: True<->False, non-None value -> None."""
@@ -297,8 +317,10 @@ class ReturnValueMutator(_LineTargetedTransformer):
                 for variant_node in ast.walk(variant):
                     if (
                         isinstance(variant_node, ast.Return)
-                        and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
-                        and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                        and getattr(variant_node, "lineno", None)
+                        == getattr(node, "lineno", None)
+                        and getattr(variant_node, "col_offset", None)
+                        == getattr(node, "col_offset", None)
                         and isinstance(variant_node.value, ast.Constant)
                         and variant_node.value.value is True
                     ):
@@ -314,8 +336,10 @@ class ReturnValueMutator(_LineTargetedTransformer):
                 for variant_node in ast.walk(variant):
                     if (
                         isinstance(variant_node, ast.Return)
-                        and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
-                        and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                        and getattr(variant_node, "lineno", None)
+                        == getattr(node, "lineno", None)
+                        and getattr(variant_node, "col_offset", None)
+                        == getattr(node, "col_offset", None)
                         and isinstance(variant_node.value, ast.Constant)
                         and variant_node.value.value is False
                     ):
@@ -326,13 +350,17 @@ class ReturnValueMutator(_LineTargetedTransformer):
                 results.append(variant)
 
             # non-None return → return None
-            elif return_value is not None and not (isinstance(return_value, ast.Constant) and return_value.value is None):
+            elif return_value is not None and not (
+                isinstance(return_value, ast.Constant) and return_value.value is None
+            ):
                 variant = copy.deepcopy(tree_copy)
                 for variant_node in ast.walk(variant):
                     if (
                         isinstance(variant_node, ast.Return)
-                        and getattr(variant_node, "lineno", None) == getattr(node, "lineno", None)
-                        and getattr(variant_node, "col_offset", None) == getattr(node, "col_offset", None)
+                        and getattr(variant_node, "lineno", None)
+                        == getattr(node, "lineno", None)
+                        and getattr(variant_node, "col_offset", None)
+                        == getattr(node, "col_offset", None)
                     ):
                         variant_node.value = ast.Constant(value=None)
                         ast.copy_location(variant_node.value, return_value)
