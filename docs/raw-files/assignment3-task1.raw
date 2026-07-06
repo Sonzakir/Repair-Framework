@@ -643,4 +643,152 @@ Plausible:     0 patch(es)
 Correct:       0 patch(es)
 1st plausible: n/a
 Total time:    25.5s
+[?2004hroot@50a075fe5d89:/workspace# [7mpython -m apr_framework repair --project black --bug 1 --fl-mode auto --fl-family sbfl[27m[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[Cpython -m apr_framework repair --project black --bug 1 --fl-mode auto --fl-family sbfl
+[?2004l
+Run directory: /workspace/runs/run_205
+Project:       black
+Bug ID:        1
+Status:        failed
+Generated:     8 candidate(s)
+Validated:     8 candidate(s)
+Plausible:     0 patch(es)
+Correct:       0 patch(es)
+1st plausible: n/a
+Total time:    12.2s
+[?2004hroot@50a075fe5d89:/workspace# [7mpython -m apr_framework repair --project black --bug 1 --fl-mode perfect[27m[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[Cpython -m apr_framework repair --project black --bug 1 --fl-mode perfect
+[?2004l
+Run directory: /workspace/runs/run_206
+Project:       black
+Bug ID:        1
+Status:        no_patch
+Generated:     0 candidate(s)
+Validated:     0 candidate(s)
+Plausible:     0 patch(es)
+Correct:       0 patch(es)
+1st plausible: n/a
+Total time:    1.1s
+[?2004hroot@50a075fe5d89:/workspace# python -m apr_framework repair --project black --bug 1 --fl-mode perfect[C[C[C[C[C[C[C[C[1@2
+[?2004lRegression check disabled: baseline suite produced no usable results (rc=0). Falling back to trigger-test plausibility only.
+
+Run directory: /workspace/runs/run_207
+Project:       black
+Bug ID:        12
+Status:        failed
+Generated:     14 candidate(s)
+Validated:     14 candidate(s)
+Plausible:     0 patch(es)
+Correct:       0 patch(es)
+1st plausible: n/a
+Total time:    4.0s
+[?2004hroot@50a075fe5d89:/workspace# python -m apr_framework repair --project black --bug 12 --fl-mode perfect[1P[1P[1P[1P[1P[1@t[1@o[1@r[1@n[1@a[1@e[1P[1@d[1@e[1P[1@o[C[C[C[C[C[C[C[C[C[1P[1@4
+[?2004l
+Run directory: /workspace/runs/run_208
+Project:       tornado
+Bug ID:        14
+Status:        correct
+Generated:     6 candidate(s)
+Validated:     6 candidate(s)
+Plausible:     1 patch(es)
+Correct:       1 patch(es)
+1st plausible: 0.7s
+Total time:    1.2s
+[?2004hroot@50a075fe5d89:/workspace# [7mpython -m apr_framework repair --project black --bug 1 --fl-mode auto --fl-family sbf[27m[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[Cpython -m apr_framework repair --project black --bug 1 --fl-mode auto --fl-family sbf[C[C[C[C[C[C[C[C[C[C[Cl[C[1@4[C[1P[1P[1P[1P[1P[1@t[1@o[1@r[1@n[1@a[1@d[1@o[1@i[1P
+[?2004lError: FauxPy is not installed in the project environment and installation failed. Collecting fauxpy==0.7.0
+  Using cached fauxpy-0.7.0-py3-none-any.whl.metadata (3.6 kB)
+Collecting pytest>=3.1.2 (from fauxpy==0.7.0)
+  Using cached pytest-7.4.4-py3-none-any.whl.metadata (7.9 kB)
+Collecting coverage>=6.2 (from fauxpy==0.7.0)
+  Using cached coverage-7.2.7-cp37-cp37m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl.metadata (9.7 kB)
+Collecting cosmic-ray==8.3.5 (from fauxpy==0.7.0)
+  Using cached cosmic_ray-8.3.5-py3-none-any.whl.metadata (3.6 kB)
+Collecting astor~=0.8.1 (from fauxpy==0.7.0)
+  Using cached astor-0.8.1-py2.py3-none-any.whl.metadata (4.2 kB)
+Collecting pytest-timeout==2.1.0 (from fauxpy==0.7.0)
+  Using cached pytest_timeout-2.1.0-py3-none-any.whl.metadata (16 kB)
+Requirement already satisfied: wheel in ./env/lib/python3.7/site-packages (from fauxpy==0.7.0) (0.42.0)
+Collecting pyllmut (from fauxpy==0.7.0)
+  Using cached pyllmut-0.6.0-py3-none-any.whl.metadata (4.4 kB)
+Collecting aiohttp (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached aiohttp-3.8.6-cp37-cp37m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl.metadata (7.7 kB)
+Collecting anybadge (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached anybadge-1.16.0-py3-none-any.whl.metadata (30 kB)
+Collecting astunparse (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached astunparse-1.6.3-py2.py3-none-any.whl.metadata (4.4 kB)
+Collecting click (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached click-8.1.8-py3-none-any.whl.metadata (2.3 kB)
+Collecting decorator (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached decorator-5.1.1-py3-none-any.whl.metadata (4.0 kB)
+Collecting exit-codes (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached exit_codes-1.3.0-py2.py3-none-any.whl.metadata (1.5 kB)
+Collecting gitpython (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached gitpython-3.1.50-py3-none-any.whl.metadata (14 kB)
+Collecting parso (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached parso-0.8.7-py2.py3-none-any.whl.metadata (8.2 kB)
+Collecting pathlib (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached pathlib-1.0.1-py3-none-any.whl.metadata (5.1 kB)
+Collecting qprompt (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached qprompt-0.16.3.tar.gz (10 kB)
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting rich (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached rich-13.8.1-py3-none-any.whl.metadata (18 kB)
+Collecting sqlalchemy (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached sqlalchemy-2.0.51-py3-none-any.whl.metadata (9.5 kB)
+Collecting stevedore (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached stevedore-3.5.2-py3-none-any.whl.metadata (2.2 kB)
+Collecting toml (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached toml-0.10.2-py2.py3-none-any.whl.metadata (7.1 kB)
+Collecting virtualenv<=16.7.10 (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached virtualenv-16.7.10-py2.py3-none-any.whl.metadata (4.0 kB)
+Collecting yattag (from cosmic-ray==8.3.5->fauxpy==0.7.0)
+  Using cached yattag-1.16.1.tar.gz (29 kB)
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting iniconfig (from pytest>=3.1.2->fauxpy==0.7.0)
+  Using cached iniconfig-2.0.0-py3-none-any.whl.metadata (2.6 kB)
+Requirement already satisfied: packaging in ./env/lib/python3.7/site-packages (from pytest>=3.1.2->fauxpy==0.7.0) (24.0)
+Collecting pluggy<2.0,>=0.12 (from pytest>=3.1.2->fauxpy==0.7.0)
+  Using cached pluggy-1.2.0-py3-none-any.whl.metadata (4.4 kB)
+Collecting exceptiongroup>=1.0.0rc8 (from pytest>=3.1.2->fauxpy==0.7.0)
+  Using cached exceptiongroup-1.3.1-py3-none-any.whl.metadata (6.7 kB)
+Collecting tomli>=1.0.0 (from pytest>=3.1.2->fauxpy==0.7.0)
+  Using cached tomli-2.0.1-py3-none-any.whl.metadata (8.9 kB)
+Collecting importlib-metadata>=0.12 (from pytest>=3.1.2->fauxpy==0.7.0)
+  Using cached importlib_metadata-6.7.0-py3-none-any.whl.metadata (4.9 kB)
+INFO: pip is looking at multiple versions of pyllmut to determine which version is compatible with other requirements. This could take a while.
+Collecting pyllmut (from fauxpy==0.7.0)
+  Using cached pyllmut-0.5.0-py3-none-any.whl.metadata (4.4 kB)
+  Using cached pyllmut-0.4.0-py3-none-any.whl.metadata (4.3 kB)
+  Using cached pyllmut-0.3.0-py3-none-any.whl.metadata (4.1 kB)
+  Using cached pyllmut-0.2.0-py3-none-any.whl.metadata (4.1 kB)
+  Using cached pyllmut-0.1.0-py3-none-any.whl.metadata (3.9 kB)
+
+The conflict is caused by:
+    pyllmut 0.6.0 depends on openai<2.0.0 and >=1.0.0
+    pyllmut 0.5.0 depends on openai<2.0.0 and >=1.0.0
+    pyllmut 0.4.0 depends on openai~=1.58.1
+    pyllmut 0.3.0 depends on openai~=1.58.1
+    pyllmut 0.2.0 depends on openai~=1.58.1
+    pyllmut 0.1.0 depends on openai~=1.58.1
+
+To fix this you could try to:
+1. loosen the range of package versions you've specified
+2. remove package versions to allow pip attempt to solve the dependency conflict
+ERROR: Cannot install fauxpy because these package versions have conflicting dependencies.
+ERROR: ResolutionImpossible: for help visit https://pip.pypa.io/en/latest/topics/dependency-resolution/#dealing-with-dependency-conflicts
+[?2004hroot@50a075fe5d89:/workspace# [7mpython -m apr_framework repair --project black --bug 1 \[27m
+[7m    --ranker weighted --ranker-weights 0.7,0.2,0.1[27m[Apython -m apr_framework repair --project black --bug 1 \
+    --ranker weighted --ranker-weights 0.7,0.2,0.1
+[?2004l
+Run directory: /workspace/runs/run_210
+Project:       black
+Bug ID:        1
+Status:        failed
+Generated:     8 candidate(s)
+Validated:     8 candidate(s)
+Plausible:     0 patch(es)
+Correct:       0 patch(es)
+1st plausible: n/a
+Total time:    11.8s
+Rank of 1st correct (ranked): n/a
 [?2004hroot@50a075fe5d89:/workspace# 

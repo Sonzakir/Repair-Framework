@@ -385,6 +385,60 @@ examples.
 
 The framework was evaluated on three real BugsInPy bugs: **fastapi#3**, **fastapi#6**, and **luigi#33**. All 8 techniques were compared against the ground-truth faulty line from each bug's patch. Full results are in [`experiment_results/README.md`](experiment_results/README.md).
 
+### Output
+
+`repair_results.json` always contains `plausible_patches` in generation order.
+When a ranker is active, it also contains `ranked_plausible_patches` -> the same
+patches reordered, each annotated with `rank_position` and per-patch
+`ranking_score` / `ranking_score_components` inside `metadata`.
+`rank_of_first_correct` (1-indexed) appears at both the top level and inside the
+`metrics` block, so Task-5 comparison scripts can read it directly.
+
+### Architecture
+
+The ranker is a fully optional component. `RepairEvaluationRunner` accepts
+`ranker: PatchRanker | None = None` in its constructor. When `None`, the pipeline
+is identical to pre-Task-4 behavior. The `PatchRanker` ABC lives in
+`repair/ranking/base.py`; `WeightedCompositeRanker` is the single current
+implementation. `create_ranker("weighted", ...)` is the factory entry point for
+adding more strategies later.
+
+---
+
+## Included evaluation artifact
+| Bug | Technique | Type | Rank | Top-10 |
+|---|---|---|---|---|
+| fastapi#3 | SBFL-Ochiai | baseline | 8 | ✓ |
+| fastapi#3 | SBFL-Tarantula | baseline | 11 | ✗ |
+| fastapi#3 | SBFL-DStar | baseline | 8 | ✓ |
+| fastapi#3 | SBFL-Jaccard | **extension** | 8 | ✓ |
+| fastapi#3 | SBFL-WSBI | **extension** | 11 | ✗ |
+| fastapi#3 | MBFL-Metallaxis | baseline | 18 | ✗ |
+| fastapi#3 | MBFL-Metallaxis-Random | **extension** | 11 | ✗ |
+| fastapi#3 | Hybrid SBFL+MBFL | **extension** | 11 | ✗ |
+| fastapi#6 | SBFL-Ochiai | baseline | 82 | ✗ |
+| fastapi#6 | SBFL-DStar | baseline | 82 | ✗ |
+| fastapi#6 | SBFL-Jaccard | **extension** | 82 | ✗ |
+| fastapi#6 | MBFL-Metallaxis | baseline | 6 | ✓ |
+| fastapi#6 | MBFL-Metallaxis-Random | **extension** | — | ✗ |
+| fastapi#6 | **Hybrid SBFL+MBFL** | **extension** | **3** | **✓ (top-5)** |
+| luigi#33 | SBFL-Ochiai | baseline | 11 | ✗ |
+| luigi#33 | SBFL-Tarantula | baseline | 191 | ✗ |
+| luigi#33 | SBFL-DStar | baseline | 11 | ✗ |
+| luigi#33 | SBFL-Jaccard | **extension** | 11 | ✗ |
+| luigi#33 | SBFL-WSBI | **extension** | 191 | ✗ |
+| luigi#33 | MBFL-Metallaxis | baseline | — | ✗ |
+| luigi#33 | Hybrid SBFL+MBFL | **extension** | 26 | ✗ |
+
+### Key findings
+
+**Jaccard (extension) matches the best SBFL baseline on fastapi#3.** Ochiai, D*, and Jaccard all rank the faulty line at position 8. Tarantula and WSBI fall to rank 11, showing that formula choice matters.
+
+**Hybrid reaches rank 3 on fastapi#6** — the only technique to enter the top 5. SBFL alone is stuck at rank 82 for this bug; MBFL alone reaches rank 6. Combining both via the weighted hybrid further improves to rank 3, demonstrating the value of the extension.
+
+**WSBI degenerates on luigi#33** (rank 191, same as Tarantula). Luigi#33 has no passing tests — when `ep = 0`, WSBI and SBI both assign score `1.0` to every executed line with no differentiation. Ochiai (`sqrt(ef/F)`) preserves a gradient across the four failing tests and correctly ranks the faulty line at 11. This is an honest limitation of the WSBI metric and motivates future work on handling the zero-passing-test edge case.
+
+
 
 
 # 3- Traditional APR
@@ -500,13 +554,14 @@ judgment and a set of tracked metrics, all surfaced in the structured JSON outpu
 
 - **Plausible** — both halves of the spec definition are enforced
   ([`repair/template/validator.py`](src/apr_framework/repair/template/validator.py)):
-  1. *the failing test now passes* — the bug's trigger test command exits cleanly
-     with zero failures/errors and ≥1 passing test (the return-code and
+  1. *the failing test now passes* -> the bug's trigger test command exits cleanly
+     with zero failures/errors and >= 1 passing test (the return-code and
      passed-count guards also reject patches that break import/collection); **and**
   2. *no previously passing test is broken* — a regression run of the bug's whole
      `test_file` introduces no new failures
      ([`repair/regression.py`](src/apr_framework/repair/regression.py)).
-- **Correct** — a *plausible* patch that also matches the developer fix
+     - ==> trigger_passed + regression_ok
+- **Correct** -> a *plausible* patch that also matches the developer fix
   (BugsInPy ground truth) at the **diff level**. Implemented in
   [`repair/correctness.py`](src/apr_framework/repair/correctness.py).
 
@@ -537,7 +592,7 @@ The correctness check compares the candidate to the reference fix
 (`projects/<project>/bugs/<id>/bug_patch.txt`, read via
 `BugsInPyAdapter.get_reference_patch`). Because the template generator reconstructs
 source with `ast.unparse` (which reformats whole files), a raw textual diff would
-never match. So we build a **reformatting-neutral minimal diff** — both the original
+never match. So we build a **reformatting-neutral minimal diff** -> both the original
 and the patched source are round-tripped through `ast.unparse`, so cosmetic noise
 cancels out — then reduce each side (candidate and reference) to its set of
 whitespace-normalized added/removed lines and require them to be equal for the
@@ -588,7 +643,7 @@ Correct:       0 patch(es)
 Total time:    1.0s
 ```
 
-## FL-guided repair & perfect FL baseline (Assignment 3 — Task 3)
+## 3.3) - FL-guided repair & perfect FL baselinex
 
 Repair quality depends heavily on the fault location it is given. To separate the
 repair algorithm's strength from the localizer's, the `repair` command runs under
@@ -596,7 +651,7 @@ repair algorithm's strength from the localizer's, the `repair` command runs unde
 
 | Mode | Flag | Fault location source |
 |---|---|---|
-| **Automated FL** | `--fl-mode auto` (default) | the Assignment-2 localizer chosen by `--fl-family {sbfl,mbfl,hybrid}` |
+| **Automated FL** | `--fl-mode auto` (default) | the (modified) FauxPy localizer chosen by `--fl-family {sbfl,mbfl,hybrid}` |
 | **Perfect FL** | `--fl-mode perfect` | the BugsInPy developer fix (`bug_patch.txt`) — the *oracle* fault location, no localizer runs |
 
 ```bash
@@ -604,7 +659,7 @@ repair algorithm's strength from the localizer's, the `repair` command runs unde
 python -m apr_framework repair --project black --bug 1 --fl-mode auto --fl-family sbfl
 
 # Perfect FL (oracle): repair targets are the exact lines the developer changed.
-python -m apr_framework repair --project black --bug 1 --fl-mode perfect
+python -m apr_framework repair --project tornado --bug 14 --fl-mode perfect
 ```
 
 **How perfect FL works.** `PerfectFaultLocalizer`
@@ -631,15 +686,11 @@ The selected mode is recorded in the result files: `config.json` and each bug's
 mode. `--fl-mode perfect` ignores `--fl-family` and `--skip-localize` (no FL is run),
 and raises a clear error if the bug has no `bug_patch.txt`.
 
-> Note: perfect FL is an *upper bound on localization*, not on operator reach — a bug
+> Note: perfect FL is an *upper bound on localization*, not on operator reach -> a bug
 > whose fix is out of the mutation operators' reach (e.g. black#1's `try/except`
-> wrapper) still yields `correct=0` even with perfect locations. See the design notes
-> in [`docs/assignment3/assignment3_task3_implementation.md`](docs/assignment3/assignment3_task3_implementation.md).
+> wrapper) still yields `correct=0` even with perfect locations.
 
-## Patch ranking (Assignment 3 — Task 4)
-
-> A detailed write-up of design decisions and refactoring pointers lives in
-> [`docs/assignment3/assignment3_task4_implementation.md`](docs/assignment3/assignment3_task4_implementation.md).
+## 3.4) - Patch ranking   
 
 When a repair run produces more than one plausible patch, the order in which
 patches are shown to a developer matters. Task 4 adds a **patch ranker** that
@@ -686,58 +737,6 @@ When a ranker is active, the CLI summary prints an extra line:
 Rank of 1st correct (ranked): 2
 ```
 
-### Output
-
-`repair_results.json` always contains `plausible_patches` in generation order.
-When a ranker is active, it also contains `ranked_plausible_patches` — the same
-patches reordered, each annotated with `rank_position` and per-patch
-`ranking_score` / `ranking_score_components` inside `metadata`.
-`rank_of_first_correct` (1-indexed) appears at both the top level and inside the
-`metrics` block, so Task-5 comparison scripts can read it directly.
-
-### Architecture
-
-The ranker is a fully optional component. `RepairEvaluationRunner` accepts
-`ranker: PatchRanker | None = None` in its constructor. When `None`, the pipeline
-is identical to pre-Task-4 behavior. The `PatchRanker` ABC lives in
-`repair/ranking/base.py`; `WeightedCompositeRanker` is the single current
-implementation. `create_ranker("weighted", ...)` is the factory entry point for
-adding more strategies later.
-
----
-
-## Included evaluation artifact
-| Bug | Technique | Type | Rank | Top-10 |
-|---|---|---|---|---|
-| fastapi#3 | SBFL-Ochiai | baseline | 8 | ✓ |
-| fastapi#3 | SBFL-Tarantula | baseline | 11 | ✗ |
-| fastapi#3 | SBFL-DStar | baseline | 8 | ✓ |
-| fastapi#3 | SBFL-Jaccard | **extension** | 8 | ✓ |
-| fastapi#3 | SBFL-WSBI | **extension** | 11 | ✗ |
-| fastapi#3 | MBFL-Metallaxis | baseline | 18 | ✗ |
-| fastapi#3 | MBFL-Metallaxis-Random | **extension** | 11 | ✗ |
-| fastapi#3 | Hybrid SBFL+MBFL | **extension** | 11 | ✗ |
-| fastapi#6 | SBFL-Ochiai | baseline | 82 | ✗ |
-| fastapi#6 | SBFL-DStar | baseline | 82 | ✗ |
-| fastapi#6 | SBFL-Jaccard | **extension** | 82 | ✗ |
-| fastapi#6 | MBFL-Metallaxis | baseline | 6 | ✓ |
-| fastapi#6 | MBFL-Metallaxis-Random | **extension** | — | ✗ |
-| fastapi#6 | **Hybrid SBFL+MBFL** | **extension** | **3** | **✓ (top-5)** |
-| luigi#33 | SBFL-Ochiai | baseline | 11 | ✗ |
-| luigi#33 | SBFL-Tarantula | baseline | 191 | ✗ |
-| luigi#33 | SBFL-DStar | baseline | 11 | ✗ |
-| luigi#33 | SBFL-Jaccard | **extension** | 11 | ✗ |
-| luigi#33 | SBFL-WSBI | **extension** | 191 | ✗ |
-| luigi#33 | MBFL-Metallaxis | baseline | — | ✗ |
-| luigi#33 | Hybrid SBFL+MBFL | **extension** | 26 | ✗ |
-
-### Key findings
-
-**Jaccard (extension) matches the best SBFL baseline on fastapi#3.** Ochiai, D*, and Jaccard all rank the faulty line at position 8. Tarantula and WSBI fall to rank 11, showing that formula choice matters.
-
-**Hybrid reaches rank 3 on fastapi#6** — the only technique to enter the top 5. SBFL alone is stuck at rank 82 for this bug; MBFL alone reaches rank 6. Combining both via the weighted hybrid further improves to rank 3, demonstrating the value of the extension.
-
-**WSBI degenerates on luigi#33** (rank 191, same as Tarantula). Luigi#33 has no passing tests — when `ep = 0`, WSBI and SBI both assign score `1.0` to every executed line with no differentiation. Ochiai (`sqrt(ef/F)`) preserves a gradient across the four failing tests and correctly ranks the faulty line at 11. This is an honest limitation of the WSBI metric and motivates future work on handling the zero-passing-test edge case.
 
 
 
@@ -761,31 +760,7 @@ docker rm -f apr-bugsinpy-executor
 python -m apr_framework bugsinpy setup
 ```
 - For windows machines Change the end of the line sequence: CRLF -> LF 
-## Summary
 
-| Content | Implementation |
-| --- | --- |
-| Benchmark interface | `BenchmarkAdapter` |
-| Fault localization interface | `FaultLocalizer` |
-| Repair interface | `RepairAlgorithm` |
-| Evaluation interface | `EvaluationRunner` |
-| Report interface | `ReportGenerator` |
-| BugsInPy list projects/bugs | `bugsinpy list-projects`, `bugsinpy list-bugs` |
-| BugsInPy checkout | `bugsinpy checkout` |
-| BugsInPy prepare environment | Safe compilation via `bugsinpy-safe-compile` and internal evaluation setup |
-| BugsInPy run tests | `bugsinpy test` |
-| Structured test results | `TestRunResult` with counts and raw output |
-| FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
-| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard` |
-| Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
-| FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
-| FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
-| FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
-| CLI entry point | `python -m apr_framework` and `apr-framework` script |
-| Dummy repair component | `DummyRepairAlgorithm` |
-| Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` , `*.zip`|
-| Patch ranking | `WeightedCompositeRanker` via `--ranker weighted` (`--ranker-weights` to override) |
-| Rank of first correct patch | `rank_of_first_correct` in `repair_results.json` metrics block |
 
 
 ## Starting the application in clean ubuntu 24.04 Container 
@@ -824,7 +799,35 @@ python -m apr_framework bugsinpy test black 1
 
 # Dummy repair evaluation (writes runs/run_xxx/)
 python -m apr_framework bugsinpy evaluate-dummy --seed 123
-````
+```
+
+## Summary
+
+| Content | Implementation |
+| --- | --- |
+| Benchmark interface | `BenchmarkAdapter` |
+| Fault localization interface | `FaultLocalizer` |
+| Repair interface | `RepairAlgorithm` |
+| Evaluation interface | `EvaluationRunner` |
+| Report interface | `ReportGenerator` |
+| BugsInPy list projects/bugs | `bugsinpy list-projects`, `bugsinpy list-bugs` |
+| BugsInPy checkout | `bugsinpy checkout` |
+| BugsInPy prepare environment | Safe compilation via `bugsinpy-safe-compile` and internal evaluation setup |
+| BugsInPy run tests | `bugsinpy test` |
+| Structured test results | `TestRunResult` with counts and raw output |
+| FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
+| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard` |
+| Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
+| FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
+| FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
+| FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
+| CLI entry point | `python -m apr_framework` and `apr-framework` script |
+| Dummy repair component | `DummyRepairAlgorithm` |
+| Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` , `*.zip`|
+| Patch ranking | `WeightedCompositeRanker` via `--ranker weighted` (`--ranker-weights` to override) |
+| Rank of first correct patch | `rank_of_first_correct` in `repair_results.json` metrics block |
+
+
 
 ## Quick Reference Table
 
@@ -847,7 +850,7 @@ python -m apr_framework bugsinpy evaluate-dummy --seed 123
 | Dummy repair component | `DummyRepairAlgorithm` |
 | Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` |
 
-## 2 - Commands 
+## Commands 
 
 ```bash
 docker compose down --remove-orphans
