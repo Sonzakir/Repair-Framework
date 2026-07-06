@@ -387,6 +387,44 @@ examples.
 
 The framework was evaluated on three real BugsInPy bugs: **fastapi#3**, **fastapi#6**, and **luigi#33**. All 8 techniques were compared against the ground-truth faulty line from each bug's patch. Full results are in [`experiment_results/README.md`](experiment_results/README.md).
 
+## Included evaluation artifact
+| Bug | Technique | Type | Rank | Top-10 |
+|---|---|---|---|---|
+| fastapi#3 | SBFL-Ochiai | baseline | 8 | ✓ |
+| fastapi#3 | SBFL-Tarantula | baseline | 11 | ✗ |
+| fastapi#3 | SBFL-DStar | baseline | 8 | ✓ |
+| fastapi#3 | SBFL-Jaccard | **extension** | 8 | ✓ |
+| fastapi#3 | SBFL-WSBI | **extension** | 11 | ✗ |
+| fastapi#3 | MBFL-Metallaxis | baseline | 18 | ✗ |
+| fastapi#3 | MBFL-Metallaxis-Random | **extension** | 11 | ✗ |
+| fastapi#3 | Hybrid SBFL+MBFL | **extension** | 11 | ✗ |
+| fastapi#6 | SBFL-Ochiai | baseline | 82 | ✗ |
+| fastapi#6 | SBFL-DStar | baseline | 82 | ✗ |
+| fastapi#6 | SBFL-Jaccard | **extension** | 82 | ✗ |
+| fastapi#6 | MBFL-Metallaxis | baseline | 6 | ✓ |
+| fastapi#6 | MBFL-Metallaxis-Random | **extension** | — | ✗ |
+| fastapi#6 | **Hybrid SBFL+MBFL** | **extension** | **3** | **✓ (top-5)** |
+| luigi#33 | SBFL-Ochiai | baseline | 11 | ✗ |
+| luigi#33 | SBFL-Tarantula | baseline | 191 | ✗ |
+| luigi#33 | SBFL-DStar | baseline | 11 | ✗ |
+| luigi#33 | SBFL-Jaccard | **extension** | 11 | ✗ |
+| luigi#33 | SBFL-WSBI | **extension** | 191 | ✗ |
+| luigi#33 | MBFL-Metallaxis | baseline | — | ✗ |
+| luigi#33 | Hybrid SBFL+MBFL | **extension** | 26 | ✗ |
+
+### Key findings
+
+**Jaccard (extension) matches the best SBFL baseline on fastapi#3.** Ochiai, D*, and Jaccard all rank the faulty line at position 8. Tarantula and WSBI fall to rank 11, showing that formula choice matters.
+
+**Hybrid reaches rank 3 on fastapi#6** — the only technique to enter the top 5. SBFL alone is stuck at rank 82 for this bug; MBFL alone reaches rank 6. Combining both via the weighted hybrid further improves to rank 3, demonstrating the value of the extension.
+
+**WSBI degenerates on luigi#33** (rank 191, same as Tarantula). Luigi#33 has no passing tests — when `ep = 0`, WSBI and SBI both assign score `1.0` to every executed line with no differentiation. Ochiai (`sqrt(ef/F)`) preserves a gradient across the four failing tests and correctly ranks the faulty line at 11. This is an honest limitation of the WSBI metric and motivates future work on handling the zero-passing-test edge case.
+
+
+
+
+
+
 ### Output
 
 `repair_results.json` always contains `plausible_patches` in generation order.
@@ -404,6 +442,7 @@ is identical to pre-Task-4 behavior. The `PatchRanker` ABC lives in
 `repair/ranking/base.py`; `WeightedCompositeRanker` is the single current
 implementation. `create_ranker("weighted", ...)` is the factory entry point for
 adding more strategies later.
+
 ---
 # 3- Traditional APR
 
@@ -1369,42 +1408,6 @@ truncating to a single traceback loses useful cross-test signal, are the questio
 observed iterations will answer.
 
 ---
-
-## Included evaluation artifact
-| Bug | Technique | Type | Rank | Top-10 |
-|---|---|---|---|---|
-| fastapi#3 | SBFL-Ochiai | baseline | 8 | ✓ |
-| fastapi#3 | SBFL-Tarantula | baseline | 11 | ✗ |
-| fastapi#3 | SBFL-DStar | baseline | 8 | ✓ |
-| fastapi#3 | SBFL-Jaccard | **extension** | 8 | ✓ |
-| fastapi#3 | SBFL-WSBI | **extension** | 11 | ✗ |
-| fastapi#3 | MBFL-Metallaxis | baseline | 18 | ✗ |
-| fastapi#3 | MBFL-Metallaxis-Random | **extension** | 11 | ✗ |
-| fastapi#3 | Hybrid SBFL+MBFL | **extension** | 11 | ✗ |
-| fastapi#6 | SBFL-Ochiai | baseline | 82 | ✗ |
-| fastapi#6 | SBFL-DStar | baseline | 82 | ✗ |
-| fastapi#6 | SBFL-Jaccard | **extension** | 82 | ✗ |
-| fastapi#6 | MBFL-Metallaxis | baseline | 6 | ✓ |
-| fastapi#6 | MBFL-Metallaxis-Random | **extension** | — | ✗ |
-| fastapi#6 | **Hybrid SBFL+MBFL** | **extension** | **3** | **✓ (top-5)** |
-| luigi#33 | SBFL-Ochiai | baseline | 11 | ✗ |
-| luigi#33 | SBFL-Tarantula | baseline | 191 | ✗ |
-| luigi#33 | SBFL-DStar | baseline | 11 | ✗ |
-| luigi#33 | SBFL-Jaccard | **extension** | 11 | ✗ |
-| luigi#33 | SBFL-WSBI | **extension** | 191 | ✗ |
-| luigi#33 | MBFL-Metallaxis | baseline | — | ✗ |
-| luigi#33 | Hybrid SBFL+MBFL | **extension** | 26 | ✗ |
-
-### Key findings
-
-**Jaccard (extension) matches the best SBFL baseline on fastapi#3.** Ochiai, D*, and Jaccard all rank the faulty line at position 8. Tarantula and WSBI fall to rank 11, showing that formula choice matters.
-
-**Hybrid reaches rank 3 on fastapi#6** — the only technique to enter the top 5. SBFL alone is stuck at rank 82 for this bug; MBFL alone reaches rank 6. Combining both via the weighted hybrid further improves to rank 3, demonstrating the value of the extension.
-
-**WSBI degenerates on luigi#33** (rank 191, same as Tarantula). Luigi#33 has no passing tests — when `ep = 0`, WSBI and SBI both assign score `1.0` to every executed line with no differentiation. Ochiai (`sqrt(ef/F)`) preserves a gradient across the four failing tests and correctly ranks the faulty line at 11. This is an honest limitation of the WSBI metric and motivates future work on handling the zero-passing-test edge case.
-
-
-
 
 
 
