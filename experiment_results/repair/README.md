@@ -9,7 +9,7 @@ Generated: ranker: `weighted-composite` · per-validation budget: 200
 
 | FL mode | Backend | Generated | Validated | Plausible | Correct | 1st plausible (s) | Total (s) | Correct rank (gen) | Correct rank (ranked) | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| auto | auto-fl | — | — | — | — | — | — | — | — | ERROR: ConfigurationError: FauxPy is not installed in the project environment and installation failed (full error in results.json) |
+| auto | auto-fl | — | — | — | — | — | — | — | — | ERROR: ConfigurationError: dependency problem |
 | perfect | perfect-fl | 6 | 6 | 1 | 1 | 0.7 | 1.2 | 1 | 1 | correct |
 
 ## scrapy bug #2
