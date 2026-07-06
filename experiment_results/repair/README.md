@@ -2,7 +2,7 @@
 
 Full template-based repair pipeline (fault localization → patch generation → validation → ranking) run on 3 BugsInPy bug(s), each under both automated FL and perfect (oracle) FL, with the patch ranker applied.
 
-Generated: 2026-07-06 19:08 UTC · ranker: `weighted-composite` · per-validation budget: 200
+Generated: ranker: `weighted-composite` · per-validation budget: 200
 
 
 ## tornado bug #14

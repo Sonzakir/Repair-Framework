@@ -709,8 +709,8 @@ the patch is surfaced first.
 
 | Component | Source | Rationale |
 |---|---|---|
-| `suspiciousness` | FL score of the targeted line (`patch.metadata["suspiciousness_score"]`), normalised by the max across the plausible batch | The most evidence-based signal — comes from running the actual tests |
-| `patch_simplicity` | `1 − (changed_lines / max_changed_lines)` — a two-line template change scores higher than a multi-line one | Smaller patches overfit less; simpler is more trustworthy |
+| `suspiciousness` | FL score of the targeted line (`patch.metadata["suspiciousness_score"]`), min-max normalised across the plausible batch (`(score − min) / (max − min)`) | The most evidence-based signal — comes from running the actual tests |
+| `patch_simplicity` | `1 − (changed_lines − min_changed_lines) / (max_changed_lines − min_changed_lines)` (min-max normalised, then inverted) — a two-line template change scores higher than a multi-line one | Smaller patches overfit less; simpler is more trustworthy |
 | `operator_priority` | Fixed tier per operator key (`obo`=1.0, `comp`=0.9, `bool`=0.7, `negate`=0.6, `arith`=0.5, `return`=0.4) | Off-by-one and comparison bugs are the most common single-statement Python fix patterns |
 
 Default weights: **w1 = 0.6, w2 = 0.25, w3 = 0.15**. These are normalised internally,
@@ -829,17 +829,22 @@ validation, and the diff-level check confirms correctness (patch preserved under
 **Did the technique benefit from better FL?** The effect is real but **mediated by
 operator reach**, and the three bugs show all three cases:
 
-- `tornado#14` is the clean win: perfect FL turns the fix into a single reachable
+- `tornado#14` is the clearest case: perfect FL turns the fix into a single reachable
   mutation and yields a correct patch, while automated FL never even runs (FauxPy is
   uninstallable on its Python 3.7.0).
 - `scrapy#2` shows better FL producing *more attempts*: perfect FL targets the
   operator-reachable oracle line and generates 5 candidates, whereas automated FL
   surfaces no reachable node in its top-N and generates 0.
-- `black#1` shows the **opposite inversion**: its developer fix wraps code in
+- `black#1` shows the reverse: its developer fix wraps code in
   `try/except` (unreachable by any operator), so perfect FL generates 0 candidates
   while automated FL's top-N happens to include operator-reachable lines and generates
   8 -> none correct.
-- Observation: On bugs that contains that contains call to external services, our framework cannot generate a plausible patches. This is most likely due to limitations of the template-based repair technique. However in the following assignments (with LLM-based repair, we believe that we are going to be able to generate plausible patches for this kind of bugs too.)
+
+Observation: for the bugs whose fix restructures control flow — `scrapy#2` adds an
+`if self.limit:` guard around a loop, `black#1` wraps code in `try/except` — the
+single-operator template technique produces no plausible patch. The LLM-based repair
+backend introduced in the next assignment is expected to handle this class of bug
+better.
 
 The takeaway: FL quality decides *whether the fault line is even attempted*, but the
 **template operator set is the dominant bottleneck**. When the real fix is not an
@@ -864,7 +869,8 @@ that ranking only distinguishes patches when at least two are plausible.
   Python 3.7.0. Such cells are reported honestly as error cells; perfect FL has no such
   dependency and always runs.
 - **Correctness is strict and syntactic.** It is a diff-level match of the normalized
-  added/removed lines against the single-file developer fix
+  added/removed lines against the single-file developer fix; a semantically-equivalent
+  but textually-different patch is not credited.
 
 ### Artifacts
 
