@@ -740,6 +740,142 @@ Rank of 1st correct (ranked): 2
 
 
 
+## 3.5) - Evaluation and comparison
+
+Task 5 runs the **whole repair pipeline** (fault localization → patch generation ->
+validation -> ranking) across a matrix of *bugs × FL modes* and aggregates the
+outcome. It adds no new repair capability -> it exercises everything Tasks 1–4 built
+and reports the metrics side by side so automated FL and perfect FL can be compared
+directly.
+
+The matrix is driven by `bugsinpy evaluate-repair`. Each *(bug, FL mode)* cell is a
+complete repair run executed by the existing `RepairEvaluationRunner` (so every cell
+gets its own `runs/run_NNN/` with logs and patch diffs); `RepairComparisonRunner`
+only orchestrates the matrix and aggregates. A localization failure in one cell
+(e.g. FauxPy uninstallable for a bug's Python) is recorded as an **error cell**
+rather than aborting the whole run.
+
+### CLI
+
+Each bug must be checked out and compiled first (the runner does not re-check-out):
+
+```bash
+# EX: Checkout and Compile on multiple bugs
+for b in "tornado 14" "scrapy 2" "black 1"; do
+  python -m apr_framework bugsinpy checkout $b
+  python -m apr_framework bugsinpy compile  $b
+done
+
+# EX: Run the evalutation pipeline on multiple bugs
+python -m apr_framework bugsinpy evaluate-repair \
+    --bugs "tornado:14,scrapy:2,black:1" \
+    --fl-modes "auto,perfect" \
+    --fl-family sbfl --localization-metric ochiai \
+    --ranker weighted \
+    --output-dir experiment_results/repair
+```
+
+Every per-cell flag of the `repair` command is also accepted here (`--budget`,
+`--top-n`, `--operators`, `--timeout`, `--granularity`, `--ranker-weights`, and the
+MBFL/hybrid knobs).
+
+### Reported metrics
+
+Per cell, written to `experiment_results/repair/results.json`:
+
+| Field | Meaning |
+|---|---|
+| `total_candidates_generated` | Patches the template generator produced. |
+| `candidates_validated` | Patches actually run against the test suite (≤ budget). |
+| `plausible_count` | Patched programs that passed the trigger test + regression check. |
+| `correct_count` | Plausible patches that also match the developer fix at the diff level. |
+| `time_to_first_plausible_seconds` | Wall-clock to the first plausible patch, or `null`. |
+| `total_wall_clock_seconds` | Wall-clock for the whole cell. |
+| `generation_rank_of_first_correct` | 1-based position of the first correct patch in **generation order** (unranked baseline). |
+| `ranked_rank_of_first_correct` | 1-based position of the first correct patch after the **ranker** reorders. |
+
+### Results
+
+The numbers below are the real output of one `evaluate-repair` run over
+`tornado:14, scrapy:2, black:1` (committed under `experiment_results/repair/`).
+
+**Per bug:**
+
+| Bug | FL mode | Generated | Plausible | Correct | Correct rank (gen → ranked) | Time to 1st plausible | Total | Outcome |
+|---|---|---|---|---|---|---|---|---|
+| tornado#14 | auto | — | — | — | — | — | — | **error** — FauxPy 0.7.0 cannot install on Python 3.7.0 (openai dependency issue) |
+| tornado#14 | perfect | 6 | 1 | **1** | 1 → 1 | 0.65s | 1.14s | **correct** |
+| scrapy#2 | auto | 0 | 0 | 0 | — | — | ~0s | no operator-reachable node in the SBFL top-N |
+| scrapy#2 | perfect | 5 | 0 | 0 | — | — | 1.12s | 5 candidates at the oracle line, none plausible |
+| black#1 | auto | 8 | 0 | 0 | — | — | 12.09s | SBFL ran; 8 candidates, none plausible |
+| black#1 | perfect | 0 | 0 | 0 | — | — | 1.08s | developer fix (try/except) is out of operator reach |
+
+**Aggregate per FL mode:**
+
+| FL mode | Generated | Plausible | Correct | Bugs repaired |
+|---|---|---|---|---|
+| auto | 8 | 0 | 0 | 0 |
+| perfect | 11 | 1 | 1 | 1 |
+
+### Discussion
+
+**Which bugs were repaired?** One: `tornado#14`, under perfect FL. Its developer fix
+is `if IOLoop.current(instance=False) is None:` -> `... is not None:` -> a single
+`Is`→`IsNot` swap, exactly what the `comp` operator emits. With the oracle pointing at
+the fault line, the generator produces the developer fix verbatim, it passes
+validation, and the diff-level check confirms correctness (patch preserved under
+`run_artifacts/`). No bug was repaired under automated FL.
+
+**Did the technique benefit from better FL?** The effect is real but **mediated by
+operator reach**, and the three bugs show all three cases:
+
+- `tornado#14` is the clean win: perfect FL turns the fix into a single reachable
+  mutation and yields a correct patch, while automated FL never even runs (FauxPy is
+  uninstallable on its Python 3.7.0).
+- `scrapy#2` shows better FL producing *more attempts*: perfect FL targets the
+  operator-reachable oracle line and generates 5 candidates, whereas automated FL
+  surfaces no reachable node in its top-N and generates 0.
+- `black#1` shows the **opposite inversion**: its developer fix wraps code in
+  `try/except` (unreachable by any operator), so perfect FL generates 0 candidates
+  while automated FL's top-N happens to include operator-reachable lines and generates
+  8 -> none correct.
+- Observation: On bugs that contains that contains call to external services, our framework cannot generate a plausible patches. This is most likely due to limitations of the template-based repair technique. However in the following assignments (with LLM-based repair, we believe that we are going to be able to generate plausible patches for this kind of bugs too.)
+
+The takeaway: FL quality decides *whether the fault line is even attempted*, but the
+**template operator set is the dominant bottleneck**. When the real fix is not an
+operator-level edit, no FL mode can repair it.
+
+**Did the ranker surface correct patches earlier?** On the only cell that produced a
+correct patch (`tornado#14`, perfect FL), the plausible set had a single element, so
+generation order and ranked order coincide (rank 1 in both). The ranker correctly
+places that patch first, but *demonstrating reordering* needs ≥2 plausible patches in
+one cell, which none of these bugs produced — consistent with the Task-4 limitation
+that ranking only distinguishes patches when at least two are plausible.
+
+### Limitations
+
+- **Operator reach dominates.** The six operators only match fixes that are themselves
+  single operator-level edits; most BugsInPy developer fixes add or restructure
+  statements and are unreachable regardless of FL. Across the packaged benchmark,
+  `tornado#14` is effectively the only pure-operator-swap fix — which is why it is the
+  single repaired bug.
+- **Automated FL is environment-sensitive.** FauxPy 0.7.0 depends (transitively via
+  `pyllmut` -> `openai`) on Python ≥ 3.7.1, so it cannot install for bugs pinned to
+  Python 3.7.0. Such cells are reported honestly as error cells; perfect FL has no such
+  dependency and always runs.
+- **Correctness is strict and syntactic.** It is a diff-level match of the normalized
+  added/removed lines against the single-file developer fix
+
+### Artifacts
+
+```
+experiment_results/repair/
+  results.json                 # machine-readable matrix (one row per cell)
+  README.md                    # generated per-bug tables + aggregate
+  run_artifacts/run_NNN/       # per-cell logs, config, repair_results.json, patch diffs
+```
+
+
 ## Troubleshooting
 
 - If Docker Compose cannot infer the host repository path, set it explicitly:
@@ -826,6 +962,8 @@ python -m apr_framework bugsinpy evaluate-dummy --seed 123
 | Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` , `*.zip`|
 | Patch ranking | `WeightedCompositeRanker` via `--ranker weighted` (`--ranker-weights` to override) |
 | Rank of first correct patch | `rank_of_first_correct` in `repair_results.json` metrics block |
+| Repair evaluation matrix | `bugsinpy evaluate-repair --bugs "tornado:14,scrapy:2,black:1" --fl-modes "auto,perfect"` |
+| Repair evaluation output | `experiment_results/repair/results.json` + `README.md` + per-cell `run_artifacts/` |
 
 
 
