@@ -46,7 +46,7 @@ Totals across all evaluated bugs. *Bugs repaired* counts bugs with at least one 
 
 So FL quality decides *whether the fault line is even attempted*, but the template operator set is the dominant bottleneck: when the real fix is not an operator-level edit, no FL mode can repair it. That is why the aggregate shows perfect FL ahead (11 generated, 1 correct vs. 8 generated, 0 correct) but only by the single bug whose fix happens to be operator-shaped.
 
-**Did the ranker surface correct patches earlier?**  On the only cell that produced a correct patch (`tornado#14`, perfect FL) the plausible set had a single element, so generation order and ranked order coincide (rank 1 → rank 1). The ranker correctly places that patch first, but *demonstrating reordering* needs ≥2 plausible patches in one cell, which none of these bugs produced. This matches the Task-4 limitation that ranking only distinguishes patches when at least two are plausible.
+**Did the ranker surface correct patches earlier?**  On the only cell that produced a correct patch (`tornado#14`, perfect FL) the plausible set had a single element, so generation order and ranked order coincide (rank 1 -> rank 1). The ranker correctly places that patch first, but *demonstrating reordering* needs ≥2 plausible patches in one cell, which none of these bugs produced. This matches the Task-4 limitation that ranking only distinguishes patches when at least two are plausible.
 
 ## General notes on the technique (not specific to this run)
 
@@ -54,5 +54,4 @@ These are properties of the approach that hold regardless of which bugs are eval
 
 1. **Operator reach dominates.** The six operators only match fixes that are themselves single operator-level edits; most BugsInPy developer fixes add or restructure statements and are unreachable regardless of FL quality. Across the packaged benchmark, `tornado#14` is effectively the only pure-operator-swap fix.
 2. **Automated FL is environment-sensitive.** FauxPy 0.7.0 depends (transitively via `pyllmut` → `openai`) on Python ≥ 3.7.1, so it cannot install for bugs pinned to Python 3.7.0; such cells are reported honestly as error cells. Perfect FL has no such dependency and always runs.
-3. **Plausibility ≠ full-suite green.** A patch is plausible if the trigger test passes and the regression check introduces no *new* failures relative to the baseline; it is not run against the project's entire suite, so a plausible patch may still be an overfit.
-4. **Correctness is strict and syntactic.** It is a diff-level match of the normalized added/removed lines against the single-file developer fix; a semantically-equivalent but textually-different patch is not credited.
+3. **Correctness is strict and syntactic.** It is a diff-level match of the normalized added/removed lines against the single-file developer fix
