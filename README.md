@@ -1659,6 +1659,77 @@ python -m apr_framework repair --project black --bug 1 \
 
 
 
+# Assignment 5
+
+
+## Task 1: LLM-based Fault Localization
+
+Task 1 adds an LLM fault-localization backend that can be selected in place of the
+Assignment-2 FauxPy SBFL/MBFL localizers. It follows the existing Assignment-1
+`FaultLocalizer` interface and returns the same ranked `file`/`line` locations as the
+other backends, so repair and evaluation can consume LLM-FL results without special-case
+pipeline changes.
+
+The localizer gathers the assignment-required evidence by running the failing trigger test
+once, reusing the Assignment-4 failing-test context builder to capture the test body,
+assertion/traceback output, and relevant project source. To keep the prompt focused, it
+combines traceback frames with symbols patched or mocked by the failing test, then sends
+line-numbered source windows to the model and asks for a strict JSON ranking of suspicious
+locations. The response parser normalizes paths, skips malformed entries, preserves the
+model rationale in metadata, and assigns deterministic rank-based scores.
+
+It is exposed through the existing `localize` CLI with `--backend llm`; GPT@RUB remains the
+default OpenAI-compatible provider, while OpenAI can be selected with `--llm-base-url` and
+`--llm-api-key-env` when GPT@RUB quota is unavailable.
+
+```bash
+# Run LLM fault localization for Black bug 1 using GPT@RUB 
+python -m apr_framework localize \
+  --backend llm \
+  --project black \
+  --bug 1 \
+  --model gpt-4.1-2025-04-14 \
+  --llm-api-key-env GPT_AT_RUB_API_KEY \
+  --temperature 0 \
+  --top-n 10
+
+# Run LLM fault localization workflow through the OpenAI API 
+python -m apr_framework localize \
+  --backend llm \
+  --project black \
+  --bug 1 \
+  --model gpt-5.4 \
+  --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY \
+  --temperature 1 \
+  --top-n 10
+
+# Print the generated LLM fault-localization prompt to stderr while running the OpenAI-backed localization command
+APR_LLM_DEBUG_PROMPT=stderr python -m apr_framework localize \
+  --backend llm \
+  --project black \
+  --bug 1 \
+  --model gpt-5.4 \
+  --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY \
+  --temperature 1 \
+  --top-n 10
+
+# Run OpenAI-backed LLM fault localization with a custom system prompt and smaller source context limits.
+python -m apr_framework localize \
+  --backend llm \
+  --project black \
+  --bug 1 \
+  --model gpt-5.4 \
+  --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY \
+  --temperature 1 \
+  --top-n 5 \
+  --fl-system-prompt fl_prompt1 \
+  --max-source-lines 400 \
+  --source-window 40
+```
+
 
 # Starting the application in clean ubuntu 24.04 Container 
 
