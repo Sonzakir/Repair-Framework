@@ -815,7 +815,7 @@ The numbers below are the real output of one `evaluate-repair` run over
 
 **Aggregate per FL mode:**
 
-| FL mode | Generated | Plausible | Correct | Bugs repaired |
+| FL mode | Generated | Plausible | Correct | Number of Distinct Bugs with Correct Patch |
 |---|---|---|---|---|
 | auto | 8 | 0 | 0 | 0 |
 | perfect | 11 | 1 | 1 | 1 |
@@ -1424,9 +1424,6 @@ obvious.
 
 ### Reflection — what test-failure information helps most
 
-> **⚠️ Draft, to be revisited once Task 5's empirical evaluation runs are available.**
-> The points below are grounded in the *design intent*; a firm answer requires observing
-> real multi-turn iterations on actual bugs, which is the separate Task 5 evaluation.
 
 Design expectation: the **traceback** — specifically the final exception type and message
 and the failing test's assertion line — should be the highest-value piece of the feedback.
@@ -1438,8 +1435,7 @@ tests while breaking others?). The full pytest transcript is deliberately **not*
 verbatim — it is large and mostly noise; only the last traceback block (capped at 60 lines)
 is included, on the hypothesis that the trailing failure is the actionable one. Whether the
 model actually benefits more from the assertion line than from the counts, and whether
-truncating to a single traceback loses useful cross-test signal, are the questions Task 5's
-observed iterations will answer.
+truncating to a single traceback loses useful cross-test signal, are the questions which we are going to address in Task 5.
 
 ---
 
@@ -1574,7 +1570,7 @@ The run used OpenAI `gpt-5.4`, `top_n=3`, `max_candidates=3`, `max_iterations=5`
 
 **Aggregate (per variant × FL mode)** — 4 bugs each:
 
-| Variant | FL mode | Queries | Generated | Plausible | Correct | Bugs repaired |
+| Variant | FL mode | Queries | Generated | Plausible | Correct | Number of Distinct Bugs with Correct Patch |
 |---|---|---|---|---|---|---|
 | single-shot | auto | 18 | 18 | 0 | 0 | 0 |
 | single-shot | perfect | 27 | 26 | 4 | 3 | 1 |

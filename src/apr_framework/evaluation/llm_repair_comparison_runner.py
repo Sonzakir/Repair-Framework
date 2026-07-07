@@ -376,11 +376,11 @@ class LLMRepairComparisonRunner:
         # --- Aggregate table ---
         lines.append("\n## Aggregate (per variant × FL mode)\n")
         lines.append(
-            "Totals across all evaluated bugs. *Bugs repaired* counts bugs with at "
-            "least one correct patch in that cell type.\n"
+            "Totals across all evaluated bugs. *Number of Distinct Bugs with Correct Patch* "
+            "counts bugs with at least one correct patch in that cell type.\n"
         )
         lines.append(
-            "| Variant | FL mode | Bugs | Queries | Generated | Plausible | Correct | Bugs repaired |"
+            "| Variant | FL mode | Bugs | Queries | Generated | Plausible | Correct | Number of Distinct Bugs with Correct Patch |"
         )
         lines.append("|---|---|---|---|---|---|---|---|")
         for variant_label in variants:

@@ -315,12 +315,12 @@ class RepairComparisonRunner:
         # --- Aggregate table ---
         lines.append("\n## Aggregate (per FL mode)\n")
         lines.append(
-            "Totals across all evaluated bugs. *Bugs repaired* counts bugs with at "
-            "least one correct patch; *bugs with plausible* counts bugs with at least "
-            "one plausible patch.\n"
+            "Totals across all evaluated bugs. *Number of Distinct Bugs with Correct Patch* "
+            "counts bugs with at least one correct patch; *bugs with plausible* counts bugs "
+            "with at least one plausible patch.\n"
         )
         lines.append(
-            "| FL mode | Bugs | Generated | Plausible | Correct | Bugs with plausible | Bugs repaired |"
+            "| FL mode | Bugs | Generated | Plausible | Correct | Bugs with plausible | Number of Distinct Bugs with Correct Patch |"
         )
         lines.append("|---|---|---|---|---|---|---|")
         for fl_mode in fl_modes:

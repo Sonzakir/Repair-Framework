@@ -28,9 +28,9 @@ Generated: ranker: `weighted-composite` · per-validation budget: 200
 
 ## Aggregate (per FL mode)
 
-Totals across all evaluated bugs. *Bugs repaired* counts bugs with at least one correct patch; *bugs with plausible* counts bugs with at least one plausible patch.
+Totals across all evaluated bugs. *Number of Distinct Bugs with Correct Patch* counts bugs with at least one correct patch; *bugs with plausible* counts bugs with at least one plausible patch.
 
-| FL mode | Bugs | Generated | Plausible | Correct | Bugs with plausible | Bugs repaired |
+| FL mode | Bugs | Generated | Plausible | Correct | Bugs with plausible | Number of Distinct Bugs with Correct Patch |
 |---|---|---|---|---|---|---|
 | auto | 3 | 8 | 0 | 0 | 0 | 0 |
 | perfect | 3 | 11 | 1 | 1 | 1 | 1 |
