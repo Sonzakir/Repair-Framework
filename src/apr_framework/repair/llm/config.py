@@ -13,7 +13,7 @@ class LLMRepairConfig:
     """Configuration for LLMRepairAlgorithm.
 
     Fields:
-        model_name:       LLM model identifier sent to the API (e.g. "codestral-22b").
+        model_name:       LLM model identifier sent to the API (e.g. "gpt-4.1-2025-04-14").
         temperature:      Sampling temperature in [0.0, 2.0].
         max_patch_count:  Number of LLM completion calls per suspicious location.
         top_n_locations:  How many top-ranked FL locations to attempt repair on.

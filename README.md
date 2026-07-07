@@ -945,11 +945,10 @@ code block. Keep the fix minimal — change as few lines as necessary.
 | Minimal-edit instruction | Reduces unnecessary refactoring; smaller patches are easier to review and less likely to introduce new bugs. |
 | Structured `##`-headed sections | Clear separation makes it easy to extend the prompt in Task 2 (context enrichment) by inserting new sections without changing the existing ones. |
 
-The optional kwargs `failing_test_source`, `error_traceback`, and `fl_score_annotation`
-are present in `build_repair_prompt`'s signature as enrichment slots. In Task 1 they are
-accepted but unused, so the rendered prompt contains only the three sections above.
-`failing_test_source` and `error_traceback` are wired up in Task 2 (see the next section);
-`fl_score_annotation` remains reserved.
+The optional kwargs `failing_test_source` and `error_traceback` are present in
+`build_repair_prompt`'s signature as enrichment slots. In Task 1 they are accepted but
+unused, so the rendered prompt contains only the three sections above. Both are wired up
+in Task 2 (see the next section).
 
 ### Example invocations
 
@@ -959,7 +958,7 @@ python -m apr_framework repair \
     --project black \
     --bug 1 \
     --technique llm \
-    --model codestral-22b \
+    --model gpt-4.1-2025-04-14 \
     --fl-mode perfect \
     --max-candidates 3 \
     --temperature 0.8
@@ -969,7 +968,7 @@ python -m apr_framework repair \
     --project black \
     --bug 1 \
     --technique llm \
-    --model codestral-22b \
+    --model gpt-4.1-2025-04-14 \
     --fl-mode auto \
     --fl-family sbfl \
     --localization-metric ochiai \
@@ -982,9 +981,21 @@ python -m apr_framework repair \
     --project black \
     --bug 1 \
     --technique llm \
-    --model codestral-22b \
+    --model gpt-4.1-2025-04-14 \
     --llm-base-url https://my.endpoint/api \
     --llm-api-key-env MY_LLM_KEY \
+    --fl-mode perfect
+
+# Use OpenAI's own API directly instead of GPT@RUB — any model your OpenAI
+# account has access to, not just the ones GPT@RUB exposes:
+export OPENAI_API_KEY="<your-openai-key>"
+python -m apr_framework repair \
+    --project black \
+    --bug 1 \
+    --technique llm \
+    --model gpt-5 \
+    --llm-base-url https://api.openai.com/v1 \
+    --llm-api-key-env OPENAI_API_KEY \
     --fl-mode perfect
 ```
 
@@ -994,12 +1005,20 @@ python -m apr_framework repair \
 export GPT_AT_RUB_API_KEY="<your-key>"
 ```
 
+`OpenAICompatibleClient` talks to any OpenAI-compatible endpoint — `--llm-base-url` and
+`--llm-api-key-env` are independent overrides, so pointing them at `https://api.openai.com/v1`
+and `OPENAI_API_KEY` (as above) calls OpenAI's own API instead of GPT@RUB. Unlike GPT@RUB,
+which currently only exposes `gpt-4.1-2025-04-14`, going directly to OpenAI lets `--model`
+be any model your OpenAI account has access to (e.g. `gpt-5`, `o3`, `gpt-4o`). Note that the
+GPT@RUB 60 req/min self-throttle in `OpenAICompatibleClient` still applies regardless of
+endpoint (see `--llm-base-url` in the flags table below).
+
 ### CLI flags (LLM-specific)
 
 | Flag | Default | Description |
 |---|---|---|
 | `--technique llm` | — | Selects the LLM backend (use alongside all existing FL/budget flags) |
-| `--model` | `codestral-22b` | Model name sent to the API |
+| `--model` | `gpt-4.1-2025-04-14` | Model name sent to the API — must be a model your GPT@RUB account exposes via `/models` (currently only `gpt-4.1-2025-04-14` is confirmed accessible) |
 | `--temperature` | `0.8` | Sampling temperature in `[0.0, 2.0]` |
 | `--max-candidates` | `5` | LLM calls per suspicious location (total candidates ≤ `top-n × max-candidates`) |
 | `--llm-provider` | `openai-compatible` | Client implementation; only `openai-compatible` currently |

@@ -319,13 +319,12 @@ def build_parser() -> argparse.ArgumentParser:
     repair_parser.add_argument(
         "--model",
         type=str,
-        default="gpt-4o-2024-05-13",
+        default="gpt-4.1-2025-04-14",
         help=(
-            "LLM model name sent to the API (default: gpt-4o-2024-05-13). "
+            "LLM model name sent to the API (default: gpt-4.1-2025-04-14). "
             "Must be a model your GPT@RUB account exposes via /models — "
-            "e.g. gpt-4o-2024-05-13, gpt-4.1-2025-04-14, "
-            "mistral-small-3-2-24b-instruct-2506, its-sl-ai-gpt-5. "
-            "An unavailable model (e.g. codestral-22b) returns HTTP 400."
+            "currently only gpt-4.1-2025-04-14 is confirmed accessible. "
+            "An unavailable model (e.g. gpt-4o-2024-05-13, codestral-22b) returns HTTP 400."
         ),
     )
     repair_parser.add_argument(

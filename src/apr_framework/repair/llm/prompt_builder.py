@@ -123,7 +123,6 @@ def build_repair_prompt(
     few_shot_examples: str | None = None,
     failing_test_source: str | None = None,
     error_traceback: str | None = None,
-    fl_score_annotation: bool = False,
 ) -> list[dict[str, str]]:
     """Build the OpenAI-style messages list for a single repair attempt.
 
@@ -139,7 +138,7 @@ def build_repair_prompt(
     ``failing_test_source`` / ``error_traceback`` are inserted between the buggy code
     and the task instruction. When all enrichment kwargs are None the rendered prompt
     is byte-identical to the un-enriched version, so the feature is invisible unless a
-    caller supplies context. ``fl_score_annotation`` remains a reserved slot.
+    caller supplies context.
 
     Args:
         location:              Suspicious location from the FL result.
@@ -152,8 +151,6 @@ def build_repair_prompt(
                                bugs (see repair/llm/few_shot.py).
         failing_test_source:    Body of a relevant failing test.
         error_traceback:        Exception traceback from the failing run.
-        fl_score_annotation:    Whether to annotate each line with its
-                               suspiciousness score as an inline comment.
 
     Returns:
         Two-entry list: [system message dict, user message dict].
