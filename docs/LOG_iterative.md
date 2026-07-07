@@ -213,3 +213,42 @@ Total time:    24.9s
 root@45ea503ed258:/workspace# exit
 exit
 %																	      fazlisonerkiraz@Soners-MacBook-Pro Repair-Framework % exit
+
+
+
+root@61dd51806391:/workspace# python -m apr_framework repair     --project black     --bug 1     --technique llm     --model gpt-5.4     --llm-base-url https://api.openai.com/v1     --llm-api-key-env OPENAI_API_KEY     --fl-mode perfect     --temperature 1
+
+Run directory: /workspace/runs/run_224
+Project:       black
+Bug ID:        1
+Status:        plausible
+Generated:     15 candidate(s)
+Validated:     15 candidate(s)
+Plausible:     6 patch(es)
+Correct:       0 patch(es)
+1st plausible: 63.3s
+Total time:    142.7s
+
+
+
+root@61dd51806391:/workspace# python -m apr_framework repair \
+    --project black \
+    --bug 1 \
+    --technique llm \
+    --model gpt-5.4 \
+    --llm-base-url https://api.openai.com/v1 \
+    --llm-api-key-env OPENAI_API_KEY \
+    --fl-mode perfect \
+    --temperature 1 \
+    --stop-on-first
+
+Run directory: /workspace/runs/run_226
+Project:       black
+Bug ID:        1
+Status:        plausible
+Generated:     15 candidate(s)
+Validated:     1 candidate(s)
+Plausible:     1 patch(es)
+Correct:       0 patch(es)
+1st plausible: 62.9s
+Total time:    62.9s
