@@ -799,5 +799,32 @@ def build_parser() -> argparse.ArgumentParser:
             "(default: 0.6,0.25,0.15). Only used when --ranker weighted."
         ),
     )
+    repair_parser.add_argument(
+        "--assess",
+        dest="assess",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Assess plausible patches with an LLM and re-rank them by semantic "
+            "quality (default: disabled)."
+        ),
+    )
+    repair_parser.add_argument(
+        "--assess-max-patches",
+        dest="assess_max_patches",
+        type=int,
+        default=None,
+        help="Maximum number of plausible patches to assess (default: all).",
+    )
+    repair_parser.add_argument(
+        "--assess-system-prompt",
+        dest="assess_system_prompt",
+        type=str,
+        default="assess_prompt1",
+        help=(
+            "Name (file stem) of the system prompt under repair/assessment/prompts/ "
+            "used for LLM patch assessment (default: assess_prompt1)."
+        ),
+    )
 
     return parser

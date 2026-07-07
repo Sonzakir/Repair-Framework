@@ -25,6 +25,7 @@ from apr_framework.core.models import (
     CheckoutResult,
     EvaluationResult,
     LocalizationResult,
+    RepairAttemptResult,
     TestRunResult,
 )
 from apr_framework.evaluation import DEFAULT_DUMMY_BUGS, DummyEvaluationRunner
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
     )
     from apr_framework.evaluation.repair_comparison_runner import RepairCellResult
     from apr_framework.repair.base import RepairAlgorithm
+    from apr_framework.repair.assessment.base import PatchAssessor
     from apr_framework.repair.ranking.base import PatchRanker
 
 
@@ -293,7 +295,7 @@ def handle_repair(
         args, adapter, checkout, writer, runs_dir
     )
 
-    repair_result, ranker = _run_repair_evaluation_and_write_results(
+    repair_result, ranker, assessor = _run_repair_evaluation_and_write_results(
         args,
         adapter,
         project_root,
@@ -303,7 +305,9 @@ def handle_repair(
         checkout,
         localization_result,
     )
-    _print_repair_summary_for_bug(checkout.bug, writer, repair_result, ranker)
+    _print_repair_summary_for_bug(
+        checkout.bug, writer, repair_result, ranker, assessor
+    )
 
     return 0
 
@@ -403,6 +407,20 @@ def _build_repair_config_data(
         )
     else:
         raise ConfigurationError(f"Unknown repair technique: {args.technique!r}")
+
+    if args.assess:
+        config_data.update(
+            {
+                "assess": True,
+                "assess_system_prompt": args.assess_system_prompt,
+                "assess_max_patches": args.assess_max_patches,
+                "assess_model": args.model,
+                "assess_temperature": args.temperature,
+                "assess_llm_provider": args.llm_provider,
+                "assess_llm_base_url": args.llm_base_url,
+                "assess_llm_api_key_env": args.llm_api_key_env,
+            }
+        )
 
     return config_data
 
@@ -607,7 +625,7 @@ def _run_repair_evaluation_and_write_results(
     writer: RunWriter,
     checkout: CheckoutResult,
     localization_result: LocalizationResult,
-) -> tuple[EvaluationResult, PatchRanker | None]:
+) -> tuple[EvaluationResult, PatchRanker | None, PatchAssessor | None]:
     """Build the technique-specific repair algorithm and persist evaluation results.
 
     Builds either a TemplateRepairAlgorithm or an LLMRepairAlgorithm depending on
@@ -636,6 +654,11 @@ def _run_repair_evaluation_and_write_results(
     else:
         config_data["ranker"] = "none"
 
+    assessor = _build_assessor(args, adapter)
+    if assessor is not None:
+        writer.log(f"Patch assessor: {assessor.name}")
+        config_data["assessor"] = assessor.name
+
     runner = RepairEvaluationRunner(
         project_root=project_root,
         runs_dir=runs_dir,
@@ -644,6 +667,7 @@ def _run_repair_evaluation_and_write_results(
         config_data=config_data,
         writer=writer,
         ranker=ranker,
+        assessor=assessor,
         localization_result=localization_result,
     )
     eval_results = runner.run([checkout.bug], adapter, algorithm)
@@ -657,7 +681,7 @@ def _run_repair_evaluation_and_write_results(
         f"elapsed={metrics.total_wall_clock_seconds:.1f}s"
     )
 
-    return repair_result, ranker
+    return repair_result, ranker, assessor
 
 
 def _print_repair_summary_for_bug(
@@ -665,6 +689,7 @@ def _print_repair_summary_for_bug(
     writer: RunWriter,
     repair_result: EvaluationResult,
     ranker: PatchRanker | None,
+    assessor: PatchAssessor | None,
 ) -> None:
     """Print the human-readable repair summary for a single bug."""
     metrics = repair_result.metrics
@@ -688,6 +713,37 @@ def _print_repair_summary_for_bug(
             else "n/a"
         )
         print(f"Rank of 1st correct (ranked): {rank_str}")
+    if assessor is not None:
+        query_count_str = (
+            str(metrics.assessment_query_count)
+            if metrics.assessment_query_count is not None
+            else "n/a"
+        )
+        print(f"Assessment LLM calls:          {query_count_str}")
+        _print_plausible_patch_assessments(repair_result.assessed_plausible_results)
+
+
+def _print_plausible_patch_assessments(
+    assessed_plausible_results: list[RepairAttemptResult] | None,
+) -> None:
+    """Print each plausible patch's LLM quality score and rationale, best first."""
+    if not assessed_plausible_results:
+        print("Assessed patches:              none")
+        return
+    print("Assessed plausible patches (by descending quality):")
+    for rank_position, attempt_result in enumerate(
+        assessed_plausible_results, start=1
+    ):
+        patch = attempt_result.patch
+        patch_id_str = patch.patch_id if patch is not None else "n/a"
+        metadata = patch.metadata if patch is not None else {}
+        quality_score = metadata.get("quality_score")
+        score_str = (
+            f"{quality_score:.2f}" if quality_score is not None else "not assessed"
+        )
+        rationale_str = metadata.get("assessment_rationale") or "—"
+        print(f"  {rank_position}. {patch_id_str}  score={score_str}")
+        print(f"     {rationale_str}")
 
 
 def _build_ranker(args: argparse.Namespace) -> PatchRanker | None:
@@ -715,6 +771,33 @@ def _build_ranker(args: argparse.Namespace) -> PatchRanker | None:
                 "--ranker-weights values must be numeric (e.g. 0.6,0.25,0.15)"
             )
     return create_ranker(args.ranker, **ranker_kwargs)
+
+
+def _build_assessor(
+    args: argparse.Namespace, adapter: BugsInPyAdapter
+) -> PatchAssessor | None:
+    """Construct a PatchAssessor from CLI args, or return None if disabled."""
+    if not args.assess:
+        return None
+    if args.llm_provider != "openai-compatible":
+        raise ConfigurationError(
+            "--assess currently supports only --llm-provider openai-compatible"
+        )
+
+    from apr_framework.repair.assessment import LLMAssessmentConfig, LLMPatchAssessor
+    from apr_framework.repair.llm import OpenAICompatibleClient
+
+    assessment_config = LLMAssessmentConfig(
+        model_name=args.model,
+        temperature=args.temperature,
+        base_url=args.llm_base_url,
+        api_key_env_var=args.llm_api_key_env,
+        system_prompt_name=args.assess_system_prompt,
+        max_patches_assessed=args.assess_max_patches,
+        timeout_seconds=args.timeout,
+    )
+    assessment_client = OpenAICompatibleClient(assessment_config)
+    return LLMPatchAssessor(assessment_config, assessment_client, adapter)
 
 
 def _build_run_writer(

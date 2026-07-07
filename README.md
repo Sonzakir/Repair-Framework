@@ -40,6 +40,8 @@ and `File | Function | Line | Score` table formats
 - **`evaluate-localization` command** — runs all 8 techniques (5 SBFL, 2 MBFL, 1 Hybrid) on a configurable set of BugsInPy bugs, ranks the ground-truth faulty line for each, and writes `experiment_results/results.json` and `experiment_results/README.md`
 - **Template-based repair backend** (`--technique template`) — AST mutation operators driven by FL, with patch ranking and an evaluation matrix (Assignment 3)
 - **LLM-based repair backend** (`--technique llm`) — FL-guided prompting against GPT@RUB, with context enrichment and few-shot examples (Assignment 4 — Tasks 1–2) and an **iterative test-failure feedback loop** (`--iterative`) that revises failed patches across a multi-turn conversation, feeding each failure's traceback back to the model (Assignment 4 — Task 3)
+- **LLM-based fault localization** (`localize --backend llm`) — asks the LLM to rank suspicious source lines from failing-test evidence and emits the same `RankedLocation` format as FauxPy
+- **LLM-based patch assessment** (`repair --assess`) — assesses plausible patches for semantic quality, records `quality_score` plus a short rationale, and writes an assessment-ranked plausible-patch list
 - Dummy repair algorithm for three BugsInPy `black` bugs (1/3/23)
 - Dummy evaluation runner that creates structured run artifacts:
   - `config.json`
@@ -251,11 +253,12 @@ python -m apr_framework bugsinpy compile black 1
 python -m apr_framework localize --project black --bug 1
 ```
 
-- The backend flag is available too. At the moment, `fauxpy` is the only
-implemented localization backend:
+- The backend flag is available too. Use `fauxpy` for SBFL/MBFL/hybrid localization
+or `llm` for Assignment-5 LLM fault localization:
 
 ```bash
 python -m apr_framework localize --backend fauxpy --project black --bug 1
+python -m apr_framework localize --backend llm --project black --bug 1
 ```
 
 - Choose the source root when automatic inference is not enough:
@@ -1044,6 +1047,9 @@ endpoint (see `--llm-base-url` in the flags table below).
 | `--llm-api-key-env` | `GPT_AT_RUB_API_KEY` | Environment variable name holding the API key |
 | `--context-enrichment` / `--no-context-enrichment` | *enabled* | Include the failing test's source + traceback in each prompt (Task 2); disable for the Task-1 prompt |
 | `--few-shot N` | `0` | Prepend N `(buggy → fixed)` example pairs from other bugs of the same project (Task 2); `0` disables. Independent of `--context-enrichment` |
+| `--assess` / `--no-assess` | *disabled* | Assess plausible patches with the LLM and emit `assessed_plausible_patches` |
+| `--assess-max-patches N` | *all* | Cap how many plausible patches are assessed |
+| `--assess-system-prompt` | `assess_prompt1` | Prompt stem under `repair/assessment/prompts/` |
 
 All existing flags (`--fl-mode`, `--fl-family`, `--budget`, `--top-n`, `--timeout`,
 `--stop-on-first`, `--no-regression-check`, `--ranker`, etc.) work identically for
@@ -1730,6 +1736,71 @@ python -m apr_framework localize \
   --source-window 40
 ```
 
+## Task 2: LLM-based Patch Assessment
+
+Task 2 adds an optional LLM assessor for plausible patches. The normal validation
+pipeline still decides plausibility by running the tests, and the existing correctness
+check still compares plausible patches against the BugsInPy developer fix. When
+`--assess` is enabled, the new assessor sends each plausible patch to the LLM with the
+original buggy function or source window when available, the unified diff, the
+previously failing test, and the original traceback. The model returns a score in
+`[0, 1]` plus a concise rationale.
+
+Assessment is deliberately separate from the existing weighted ranker. The ranker uses
+static signals such as suspiciousness and patch size; the assessor uses the LLM to judge
+semantic quality. Both can run in the same repair command, and their ranked outputs are
+recorded independently.
+
+```bash
+# Assess plausible template-repair patches
+python -m apr_framework repair \
+  --project black \
+  --bug 1 \
+  --technique template \
+  --assess \
+  --model gpt-4.1-2025-04-14 \
+  --llm-api-key-env GPT_AT_RUB_API_KEY
+
+python -m apr_framework repair \
+    --project black --bug 1 \
+    --technique llm \
+    --fl-mode perfect \
+    --assess \
+    --assess-max-patches 8 \
+    --model gpt-5.4 \
+    --llm-base-url https://api.openai.com/v1 \
+    --llm-api-key-env OPENAI_API_KEY \
+    --temperature 1 \
+    --top-n 3 \
+    --budget 20
+
+# Assess plausible LLM-repair patches through the OpenAI API
+python -m apr_framework repair \
+  --project black \
+  --bug 1 \
+  --technique llm \
+  --fl-mode perfect \
+  --assess \
+  --assess-max-patches 3 \
+  --model gpt-5.4 \
+  --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY \
+  --temperature 1
+```
+
+When assessment is enabled, `repair_results.json` gains:
+
+| Field | Meaning |
+|---|---|
+| `assessed_plausible_patches` | plausible patches sorted by descending `quality_score`, each with `rank_position` |
+| `metadata.quality_score` | LLM quality score for an assessed patch |
+| `metadata.assessment_rationale` | short natural-language explanation of the score |
+| `rank_of_first_correct_by_assessment` | 1-based rank of the first correct patch after assessment sorting, or `null` |
+| `metrics.assessment_query_count` | number of assessment LLM calls |
+
+If `--assess` is omitted, these assessment fields are absent and the repair result schema
+remains the same as before.
+
 
 # Starting the application in clean ubuntu 24.04 Container 
 
@@ -1853,4 +1924,14 @@ python -m apr_framework repair --project black --bug 1 \
   --model gpt-5.4 --llm-base-url https://api.openai.com/v1 \
   --llm-api-key-env OPENAI_API_KEY --temperature 1 \
   --top-n 3 --max-candidates 3 --budget 200
+
+python -m apr_framework localize \
+  --backend llm \
+  --project black \
+  --bug 1 \
+  --model gpt-5.4 \
+  --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY \
+  --temperature 1 \
+  --top-n 10
 ```

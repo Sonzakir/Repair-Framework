@@ -195,6 +195,16 @@ class RepairAttemptResult:
 
 
 @dataclass
+class PatchAssessment:
+    """LLM judgment for one plausible patch."""
+
+    patch_id: str
+    quality_score: float
+    rationale: str
+    raw_response: str = ""
+
+
+@dataclass
 class RepairRunMetrics:
     """
     Patch-validation metrics for one repair run on a single bug (Task 2).
@@ -229,6 +239,7 @@ class RepairRunMetrics:
     total_wall_clock_seconds: float = 0.0
     rank_of_first_correct: int | None = None
     llm_query_count: int | None = None
+    assessment_query_count: int | None = None
 
 
 @dataclass
@@ -245,6 +256,10 @@ class EvaluationResult:
     # runners (e.g. the dummy runner) so the dataclass stays backward compatible.
     metrics: "RepairRunMetrics | None" = None
     run_dir: str | None = None
+    # Optional, populated by repair runs when an LLM patch assessor is enabled:
+    # the plausible patches in assessment order, each carrying quality_score and
+    # assessment_rationale in its patch metadata. Left None when no assessor ran.
+    assessed_plausible_results: "list[RepairAttemptResult] | None" = None
 
 
 @dataclass(frozen=True)

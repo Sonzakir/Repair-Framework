@@ -22,6 +22,11 @@ MODULES = [
     "apr_framework.repair",
     "apr_framework.repair.base",
     "apr_framework.repair.dummy",
+    "apr_framework.repair.assessment",
+    "apr_framework.repair.assessment.base",
+    "apr_framework.repair.assessment.config",
+    "apr_framework.repair.assessment.llm",
+    "apr_framework.repair.assessment.response_parser",
     "apr_framework.repair.correctness",
     "apr_framework.repair.regression",
     "apr_framework.repair.run_loop",
@@ -38,4 +43,4 @@ MODULES = [
 
 @pytest.mark.parametrize("module_name", MODULES)
 def test_public_modules_import(module_name) -> None:
-    module = importlib.import_module(module_name)
+    importlib.import_module(module_name)

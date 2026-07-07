@@ -31,6 +31,11 @@ dev = [
 [tool.setuptools.packages.find]
 where=["src"]
 
+[tool.setuptools.package-data]
+"apr_framework.localization" = ["prompts/*.txt"]
+"apr_framework.repair.llm" = ["prompts/*.txt"]
+"apr_framework.repair.assessment" = ["prompts/*.txt"]
+
 [project.scripts]
 apr-framework = "apr_framework.__main__:app"
 
