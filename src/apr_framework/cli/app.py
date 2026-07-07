@@ -83,24 +83,13 @@ def _run() -> int:
     if args.command == "configure":
         return _prompt_and_save_llm_api_key(args, project_root)
 
-    # -- FauxPy --
+    # -- Localization (FauxPy and LLM-based FL) --
     if args.command == "localize":
         family = _resolve_localize_family(args)
         _validate_localize_args(args, family)
 
-        # Currently we are running FauxPy only inside the BugsInPy projects
         adapter, worktree, bug_dir = _create_adapter_and_resolve_checked_out_bug(
             args, project_root
-        )
-
-        src = args.src or _infer_fauxpy_src(worktree, args.project)
-        bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
-        bug_test_ids = extract_pytest_node_ids(bug_test_targets)
-        test_targets = (
-            _parse_fauxpy_test_targets_command(args.test_target) or bug_test_targets
-        )
-        failing_tests = (
-            _parse_fauxpy_failing_tests_command(args.failing_tests) or bug_test_ids
         )
         checkout = CheckoutResult(
             bug=BugIdentifier(
@@ -113,43 +102,14 @@ def _run() -> int:
             prepared=True,
         )
 
-        fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
-
         writer, started_at = _build_run_writer(args, project_root)
+        writer.log(f"Started {args.backend} localization for {args.project}#{args.bug}")
 
-        writer.log(f"Started fauxpy localization for {args.project}#{args.bug}")
-
-        effective_metric = resolve_effective_metric(args, family)
-        config_data = build_localize_config_data(
-            args, family, effective_metric, started_at
+        localizer, config_data = _build_localizer_and_config_data(
+            args, family, adapter, worktree, bug_dir, started_at
         )
         writer.write_json("config.json", config_data)
-        
-        if family == "hybrid":
-            localizer = _build_hybrid_localizer(
-                src, test_targets, failing_tests, args, fauxpy_toolchain
-            )
-        else:
-            # SBFL - MBFL
-            metric = resolve_effective_metric(args, family)
-            config = FauxPyConfig(
-                src=src,
-                test_targets=test_targets,
-                family=family,
-                granularity=args.granularity,
-                failing_tests=failing_tests,
-                top_n=args.top_n,
-                mutation_strategy=args.mutation_strategy,
-                mutation_budget=args.mutation_budget,
-                mutation_seed=args.seed,
-                metric=metric,
-                wsbi_alpha=args.wsbi_alpha,
-            )
-            localizer = FauxPyLocalizer(config, fauxpy_toolchain)
-
         writer.log("Running localization")
-       
-       
 
         try:
             result = run_localization(localizer, checkout, writer)
@@ -329,11 +289,19 @@ def handle_repair(
     config_data = _build_repair_config_data(args, checkout.bug, started_at)
     writer.write_json("config.json", config_data)
 
-    localization_result = _localize_for_repair(args, adapter, checkout, writer, runs_dir)
+    localization_result = _localize_for_repair(
+        args, adapter, checkout, writer, runs_dir
+    )
 
     repair_result, ranker = _run_repair_evaluation_and_write_results(
-        args, adapter, project_root, runs_dir, config_data, writer,
-        checkout, localization_result,
+        args,
+        adapter,
+        project_root,
+        runs_dir,
+        config_data,
+        writer,
+        checkout,
+        localization_result,
     )
     _print_repair_summary_for_bug(checkout.bug, writer, repair_result, ranker)
 
@@ -406,7 +374,9 @@ def _build_repair_config_data(
 
     if args.technique == "template":
         enabled_operators = [
-            operator.strip() for operator in args.operators.split(",") if operator.strip()
+            operator.strip()
+            for operator in args.operators.split(",")
+            if operator.strip()
         ]
         config_data.update(
             {
@@ -466,7 +436,9 @@ def _localize_for_repair(
             writer.log("No cached localization found — running fresh localization.")
 
     if localization_result is None:
-        localization_result = _run_fresh_fauxpy_localization(args, adapter, checkout, writer)
+        localization_result = _run_fresh_fauxpy_localization(
+            args, adapter, checkout, writer
+        )
 
     return localization_result
 
@@ -508,11 +480,15 @@ def _load_cached_localization_for_bug(
                 and cached_bug.get("bug_id") == bug.bug_id
             ):
                 from apr_framework.core.models import LocalizationResult, RankedLocation
+
                 ranked = [
-                    RankedLocation(**{
-                        k: v for k, v in loc.items()
-                        if k in RankedLocation.__dataclass_fields__
-                    })
+                    RankedLocation(
+                        **{
+                            k: v
+                            for k, v in loc.items()
+                            if k in RankedLocation.__dataclass_fields__
+                        }
+                    )
                     for loc in cached["ranked_locations"]
                 ]
                 localization_result = LocalizationResult(
@@ -521,7 +497,9 @@ def _load_cached_localization_for_bug(
                     ranked_locations=ranked,
                     metadata=cached.get("metadata", {}),
                 )
-                writer.log(f"Loaded cached localization from {rf} ({len(ranked)} locations)")
+                writer.log(
+                    f"Loaded cached localization from {rf} ({len(ranked)} locations)"
+                )
                 return localization_result
         except Exception as exc:
             writer.log(f"Could not load cached result from {rf}: {exc}")
@@ -536,7 +514,11 @@ def _run_fresh_fauxpy_localization(
     writer: RunWriter,
 ) -> LocalizationResult:
     """Run a fresh FauxPy SBFL/MBFL/hybrid localization for the bug."""
-    from apr_framework.localization import FauxPyConfig, FauxPyLocalizer, FauxPyToolchain
+    from apr_framework.localization import (
+        FauxPyConfig,
+        FauxPyLocalizer,
+        FauxPyToolchain,
+    )
 
     bug = checkout.bug
     canonical_project = bug.project
@@ -748,6 +730,106 @@ def _build_run_writer(
     return writer, started_at
 
 
+def _build_localizer_and_config_data(
+    args: argparse.Namespace,
+    family: str,
+    adapter: BugsInPyAdapter,
+    worktree: Path,
+    bug_dir: Path,
+    started_at: datetime,
+) -> tuple[FaultLocalizer, dict]:
+    """Build the localizer and its config.json payload for the chosen backend."""
+    if args.backend == "llm":
+        return _build_llm_localizer_and_config_data(args, adapter, started_at)
+    return _build_fauxpy_localizer_and_config_data(
+        args, family, adapter, worktree, bug_dir, started_at
+    )
+
+
+def _build_llm_localizer_and_config_data(
+    args: argparse.Namespace,
+    adapter: BugsInPyAdapter,
+    started_at: datetime,
+) -> tuple[FaultLocalizer, dict]:
+    """Build the LLM fault localizer and its config.json payload."""
+    from apr_framework.localization import LLMFaultLocalizer, LLMLocalizationConfig
+    from apr_framework.repair.llm import OpenAICompatibleClient
+
+    localization_config = LLMLocalizationConfig(
+        model_name=args.model,
+        temperature=args.temperature,
+        base_url=args.llm_base_url,
+        api_key_env_var=args.llm_api_key_env,
+        llm_provider=args.llm_provider,
+        system_prompt_name=args.fl_system_prompt,
+        top_n=args.top_n,
+        max_source_lines=args.max_source_lines,
+        source_window_lines=args.source_window,
+    )
+    llm_client = OpenAICompatibleClient(localization_config)
+    localizer = LLMFaultLocalizer(localization_config, llm_client, adapter)
+    config_data = {
+        "runner": "llm-localizer",
+        "backend": "llm",
+        "project": args.project,
+        "bug_id": args.bug,
+        "model": args.model,
+        "temperature": args.temperature,
+        "top_n": args.top_n,
+        "system_prompt": args.fl_system_prompt,
+        "llm_base_url": args.llm_base_url,
+        "max_source_lines": args.max_source_lines,
+        "source_window": args.source_window,
+        "started_at": started_at.isoformat(),
+    }
+    return localizer, config_data
+
+
+def _build_fauxpy_localizer_and_config_data(
+    args: argparse.Namespace,
+    family: str,
+    adapter: BugsInPyAdapter,
+    worktree: Path,
+    bug_dir: Path,
+    started_at: datetime,
+) -> tuple[FaultLocalizer, dict]:
+    """Build the FauxPy (SBFL/MBFL/hybrid) localizer and its config.json payload."""
+    source_package = args.src or _infer_fauxpy_src(worktree, args.project)
+    bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+    bug_test_ids = extract_pytest_node_ids(bug_test_targets)
+    test_targets = (
+        _parse_fauxpy_test_targets_command(args.test_target) or bug_test_targets
+    )
+    failing_tests = (
+        _parse_fauxpy_failing_tests_command(args.failing_tests) or bug_test_ids
+    )
+    fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
+
+    effective_metric = resolve_effective_metric(args, family)
+    config_data = build_localize_config_data(args, family, effective_metric, started_at)
+
+    if family == "hybrid":
+        localizer = _build_hybrid_localizer(
+            source_package, test_targets, failing_tests, args, fauxpy_toolchain
+        )
+    else:
+        fauxpy_config = FauxPyConfig(
+            src=source_package,
+            test_targets=test_targets,
+            family=family,
+            granularity=args.granularity,
+            failing_tests=failing_tests,
+            top_n=args.top_n,
+            mutation_strategy=args.mutation_strategy,
+            mutation_budget=args.mutation_budget,
+            mutation_seed=args.seed,
+            metric=effective_metric,
+            wsbi_alpha=args.wsbi_alpha,
+        )
+        localizer = FauxPyLocalizer(fauxpy_config, fauxpy_toolchain)
+    return localizer, config_data
+
+
 def _build_hybrid_localizer(
     source_package: str,
     test_targets: list[str],
@@ -868,7 +950,9 @@ def print_localize_run_summary(
         print(f"Score formula: {localization_result.metadata['score_formula']}")
     print("Ranked locations:")
     for ranked_location in localization_result.ranked_locations:
-        score_str = "" if ranked_location.score is None else f"{ranked_location.score:.4f}"
+        score_str = (
+            "" if ranked_location.score is None else f"{ranked_location.score:.4f}"
+        )
         print(
             f"{ranked_location.rank}. {ranked_location.file_path}:{ranked_location.line} {score_str}".rstrip()
         )
@@ -1081,7 +1165,7 @@ def _run_evaluate_localization(
         )
 
     def _make_mbfl(bug: BugIdentifier) -> FauxPyLocalizer:
-        """MBFL with random mutation-budget extension """
+        """MBFL with random mutation-budget extension"""
         bug_dir = patch_dir(bug)
         test_targets = load_pytest_targets(bug_dir / "run_test.sh")
         test_ids = extract_pytest_node_ids(test_targets)
@@ -1128,7 +1212,9 @@ def _run_evaluate_localization(
             FauxPyLocalizer(mbfl_cfg, fauxpy_toolchain),
         )
 
-    techniques = _build_techniques(_make_sbfl, _make_mbfl_traditional, _make_mbfl, _make_hybrid)
+    techniques = _build_techniques(
+        _make_sbfl, _make_mbfl_traditional, _make_mbfl, _make_hybrid
+    )
 
     runner = LocalizationComparisonRunner(top_ks=top_ks)
 
@@ -1411,7 +1497,9 @@ def _run_evaluate_llm_repair(
     )
 
     bugs = _parse_bug_list(args.bugs)
-    variants = [variant.strip() for variant in args.variants.split(",") if variant.strip()]
+    variants = [
+        variant.strip() for variant in args.variants.split(",") if variant.strip()
+    ]
     for variant_label in variants:
         if variant_label not in _LLM_VARIANT_TOGGLES:
             raise ConfigurationError(
@@ -1733,14 +1821,20 @@ def _build_techniques(
             return self._factory(bug).localize(bug, checkout, test_result)
 
     return [
-        ("SBFL-Ochiai (baseline)",            _BugLocalizer(lambda bug: make_sbfl(bug, "ochiai"))),
-        ("SBFL-Tarantula (baseline)",          _BugLocalizer(lambda bug: make_sbfl(bug, "tarantula"))),
-        ("SBFL-DStar (baseline)",              _BugLocalizer(lambda bug: make_sbfl(bug, "dstar"))),
-        ("SBFL-Jaccard (extension)",           _BugLocalizer(lambda bug: make_sbfl(bug, "jaccard"))),
-        ("SBFL-WSBI (extension)",              _BugLocalizer(lambda bug: make_sbfl(bug, "wsbi"))),
-        ("MBFL-Metallaxis (baseline)",         _BugLocalizer(make_mbfl_traditional)),
+        ("SBFL-Ochiai (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "ochiai"))),
+        (
+            "SBFL-Tarantula (baseline)",
+            _BugLocalizer(lambda bug: make_sbfl(bug, "tarantula")),
+        ),
+        ("SBFL-DStar (baseline)", _BugLocalizer(lambda bug: make_sbfl(bug, "dstar"))),
+        (
+            "SBFL-Jaccard (extension)",
+            _BugLocalizer(lambda bug: make_sbfl(bug, "jaccard")),
+        ),
+        ("SBFL-WSBI (extension)", _BugLocalizer(lambda bug: make_sbfl(bug, "wsbi"))),
+        ("MBFL-Metallaxis (baseline)", _BugLocalizer(make_mbfl_traditional)),
         ("MBFL-Metallaxis-Random (extension)", _BugLocalizer(make_mbfl)),
-        ("Hybrid SBFL+MBFL (extension)",       _BugLocalizer(make_hybrid)),
+        ("Hybrid SBFL+MBFL (extension)", _BugLocalizer(make_hybrid)),
     ]
 
 
@@ -1845,7 +1939,7 @@ def _infer_fauxpy_src(worktree: Path, project: str) -> str:
     """
     Helper function to find --src (source code) of the project to give the FauxPy
     """
-    # Convert project names to Python package style 
+    # Convert project names to Python package style
     package_name = project.replace("-", "_")
 
     # Enumerate real names to handle case-sensitive filesystems inside Docker

@@ -17,6 +17,8 @@ MODULES = [
     "apr_framework.localization",
     "apr_framework.localization.base",
     "apr_framework.localization.hybrid",
+    "apr_framework.localization.llm",
+    "apr_framework.localization.perfect",
     "apr_framework.repair",
     "apr_framework.repair.base",
     "apr_framework.repair.dummy",

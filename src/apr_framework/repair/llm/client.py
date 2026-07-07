@@ -7,11 +7,34 @@ import time
 from abc import ABC, abstractmethod
 from collections import deque
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from apr_framework.core.exceptions import APRFrameworkError, ConfigurationError
-from apr_framework.repair.llm.config import LLMRepairConfig
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class LLMConnectionConfig(Protocol):
+    """The connection fields ``OpenAICompatibleClient`` needs to reach an endpoint.
+
+    This is the *only* thing the client depends on. Both ``LLMRepairConfig`` and the
+    localization-side ``LLMLocalizationConfig`` satisfy it structurally, so the same
+    client transport is shared across repair and fault localization without either
+    config knowing about the other's task-specific fields.
+
+    Attributes:
+        model_name:      Model identifier sent to the API.
+        temperature:     Sampling temperature in [0.0, 2.0].
+        base_url:        Endpoint URL, or None to use the GPT@RUB default.
+        api_key_env_var: Name of the environment variable holding the API key.
+    """
+
+    model_name: str
+    temperature: float
+    base_url: str | None
+    api_key_env_var: str
+
 
 GPT_AT_RUB_DEFAULT_BASE_URL = "https://gpt.ruhr-uni-bochum.de/external/v1"
 
@@ -60,9 +83,9 @@ class OpenAICompatibleClient(LLMClient):
     Streaming is explicitly disabled — GPT@RUB does not support it.
     """
 
-    def __init__(self, repair_config: LLMRepairConfig) -> None:
-        self._repair_config = repair_config
-        self._endpoint_url = repair_config.base_url or GPT_AT_RUB_DEFAULT_BASE_URL
+    def __init__(self, connection_config: LLMConnectionConfig) -> None:
+        self._connection_config = connection_config
+        self._endpoint_url = connection_config.base_url or GPT_AT_RUB_DEFAULT_BASE_URL
         self._recent_request_timestamps: deque[float] = deque()
         # Sequential index used only to name dumped prompt files when the
         # PROMPT_DEBUG_ENV_VAR debug mode is active. Inert otherwise.
@@ -159,11 +182,11 @@ class OpenAICompatibleClient(LLMClient):
 
         self._dump_prompt_if_debugging(messages)
 
-        api_key = os.environ.get(self._repair_config.api_key_env_var)
+        api_key = os.environ.get(self._connection_config.api_key_env_var)
         if not api_key:
             raise ConfigurationError(
                 f"API key not found. Set the environment variable "
-                f"{self._repair_config.api_key_env_var!r} before running."
+                f"{self._connection_config.api_key_env_var!r} before running."
             )
 
         openai_client = openai.OpenAI(
@@ -174,17 +197,17 @@ class OpenAICompatibleClient(LLMClient):
         logger.debug(
             "Calling %s model=%s temperature=%s",
             self._endpoint_url,
-            self._repair_config.model_name,
-            self._repair_config.temperature,
+            self._connection_config.model_name,
+            self._connection_config.temperature,
         )
 
         self._wait_for_rate_limit_slot()
 
         try:
             response = openai_client.chat.completions.create(
-                model=self._repair_config.model_name,
+                model=self._connection_config.model_name,
                 messages=messages,
-                temperature=self._repair_config.temperature,
+                temperature=self._connection_config.temperature,
                 stream=False,
             )
         except openai.OpenAIError as error:

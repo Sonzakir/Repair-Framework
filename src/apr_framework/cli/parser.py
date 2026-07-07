@@ -35,7 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # FauxPy CLI commands
     localize_parser = subparsers.add_parser("localize")
-    localize_parser.add_argument("--backend", choices=["fauxpy"], default="fauxpy")
+    localize_parser.add_argument(
+        "--backend", choices=["fauxpy", "llm"], default="fauxpy"
+    )
     localize_parser.add_argument("--project", required=True)
     localize_parser.add_argument("--bug", type=int, required=True)
     localize_parser.add_argument("--src", default=None)
@@ -86,6 +88,78 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     localize_parser.add_argument("--runs-dir", default="runs")
+
+    # LLM fault-localization backend (--backend llm). Ignored for --backend fauxpy.
+    # GPT@RUB vs OpenAI is selected purely by --llm-base-url / --llm-api-key-env / --model.
+    localize_parser.add_argument(
+        "--model",
+        type=str,
+        default="gpt-4.1-2025-04-14",
+        help="LLM model name for --backend llm (default: gpt-4.1-2025-04-14)",
+    )
+    localize_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help=(
+            "LLM sampling temperature in [0.0, 2.0] for --backend llm (default: 0.0 "
+            "for stable rankings; some models such as gpt-5.* require 1.0)"
+        ),
+    )
+    localize_parser.add_argument(
+        "--llm-provider",
+        dest="llm_provider",
+        type=str,
+        default="openai-compatible",
+        help="LLM client implementation for --backend llm (default: openai-compatible)",
+    )
+    localize_parser.add_argument(
+        "--llm-base-url",
+        dest="llm_base_url",
+        type=str,
+        default=None,
+        help="Override the LLM API endpoint URL for --backend llm (default: GPT@RUB)",
+    )
+    localize_parser.add_argument(
+        "--llm-api-key-env",
+        dest="llm_api_key_env",
+        type=str,
+        default="GPT_AT_RUB_API_KEY",
+        help=(
+            "Environment variable holding the LLM API key for --backend llm "
+            "(default: GPT_AT_RUB_API_KEY)"
+        ),
+    )
+    localize_parser.add_argument(
+        "--fl-system-prompt",
+        dest="fl_system_prompt",
+        type=str,
+        default="fl_prompt1",
+        help=(
+            "Name (file stem) of the system prompt under localization/prompts/ used "
+            "for --backend llm (default: fl_prompt1)"
+        ),
+    )
+    localize_parser.add_argument(
+        "--max-source-lines",
+        dest="max_source_lines",
+        type=int,
+        default=400,
+        help=(
+            "Upper bound on numbered source lines shown to the model for --backend "
+            "llm (default: 400)"
+        ),
+    )
+    localize_parser.add_argument(
+        "--source-window",
+        dest="source_window",
+        type=int,
+        default=40,
+        help=(
+            "Lines of context above/below each traceback line shown to the model "
+            "for --backend llm (default: 40)"
+        ),
+    )
 
     ### BugsInPy CLI commands
     bugsinpy_parser = subparsers.add_parser("bugsinpy")
