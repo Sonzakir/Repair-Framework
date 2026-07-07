@@ -883,6 +883,9 @@ experiment_results/repair/
 ```
 ---
 
+# LLM-Based Repair
+
+
 ## LLM-Based Repair (Assignment 4 — Task 1)
 
 This section documents the LLM-based repair backend introduced in Assignment 4.
@@ -1601,18 +1604,66 @@ The run used OpenAI `gpt-5.4`, `top_n=3`, `max_candidates=3`, `max_iterations=5`
   produce overfit, reformatted variants — e.g. `black#1`, whose own source is auto-formatted
   by black).
 
-**Comparison with Assignment 3 (template repair):** the LLM backend **matches** the template
+**Comparison with template repair:** the LLM backend **matches** the template
 technique on `tornado#14` (both produce a correct patch under perfect FL) and has **broader
-reach** — it produces plausible patches on `black#1`, `scrapy#2`, and `fastapi#3`, where the
+reach** , it produces plausible patches on `black#1`, `scrapy#2`, and `fastapi#3`, where the
 template operators generated nothing plausible. On this bug set, though, neither technique
 exceeds a single correctly-repaired bug: the LLM's advantage here is *plausibility coverage*,
 not a higher correct-fix count.
 
-## Summary
+## Commands - OpenAI-API
+
+```
+# Single-Shot LLM Repair
+python -m apr_framework repair --project scrapy --bug 2 \
+  --technique llm --fl-mode auto --fl-family sbfl --localization-metric ochiai \
+  --no-context-enrichment --few-shot 0 \
+  --model gpt-5.4 --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY --temperature 1 \
+  --top-n 3 --max-candidates 3 --budget 200
+
+python -m apr_framework repair --project scrapy --bug 2 \
+  --technique llm --fl-mode perfect \
+  --no-context-enrichment --few-shot 0 \
+  --model gpt-5.4 --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY --temperature 1 \
+  --top-n 3 --max-candidates 3 --budget 200
+
+# Context Enrichment 
+python -m apr_framework repair --project scrapy --bug 2 \
+  --technique llm --fl-mode perfect \
+  --context-enrichment --few-shot 0 \
+  --model gpt-5.4 --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY --temperature 1 \
+  --top-n 3 --max-candidates 3 --budget 200
+
+python -m apr_framework repair --project scrapy --bug 2 \
+  --technique llm --fl-mode perfect \
+  --no-context-enrichment --few-shot 2 \
+  --model gpt-5.4 --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY --temperature 1 \
+  --top-n 3 --max-candidates 3 --budget 200
+
+# Iterative Repair
+python -m apr_framework repair --project black --bug 2 \
+  --technique llm --fl-mode auto --fl-family sbfl \
+  --iterative --max-iterations 5 --no-context-enrichment \
+  --model gpt-5.4 --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY --temperature 1 \
+  --top-n 3 --budget 200
+
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm --fl-mode perfect \
+  --iterative --max-iterations 5 --no-context-enrichment \
+  --model gpt-5.4 --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY --temperature 1 \
+  --top-n 3 --budget 200
+```
 
 
 
-## Starting the application in clean ubuntu 24.04 Container 
+
+# Starting the application in clean ubuntu 24.04 Container 
 
 ```bash
 docker run -it --rm \
@@ -1727,4 +1778,11 @@ python -m apr_framework localize \
   --show-raw-output
 
 python -m apr_framework repair --project black --bug 1
+
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm --fl-mode perfect \
+  --no-context-enrichment --few-shot 0 \
+  --model gpt-5.4 --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY --temperature 1 \
+  --top-n 3 --max-candidates 3 --budget 200
 ```
