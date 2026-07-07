@@ -16,6 +16,7 @@ from apr_framework.core.models import (
     RankedLocation,
     RepairAttemptResult,
     RepairStatus,
+    RetrievalTrace,
     TestRunResult,
 )
 from apr_framework.repair.base import RepairAlgorithm
@@ -37,6 +38,7 @@ from apr_framework.repair.llm.prompt_builder import (
     extract_function_source,
     load_system_prompt,
 )
+from apr_framework.repair.llm.retrieval_loop import run_retrieval_loop
 from apr_framework.repair.patch_applier import apply_patch_and_validate
 from apr_framework.repair.regression import RegressionContext, build_regression_context
 from apr_framework.repair.run_loop import LoopOutcome, build_loop_summary
@@ -62,6 +64,7 @@ class _LocationPrompt:
     function_start_line: int
     function_end_line: int
     messages: list[dict[str, str]]
+    retrieval_trace: RetrievalTrace | None = None
 
 
 class LLMRepairAlgorithm(RepairAlgorithm):
@@ -92,6 +95,11 @@ class LLMRepairAlgorithm(RepairAlgorithm):
         self._repair_config = repair_config
         self._llm_client = llm_client
         self._system_message_text = load_system_prompt(repair_config.system_prompt_name)
+        self._retrieval_instructions_text = (
+            load_system_prompt("retrieval_instructions")
+            if repair_config.retrieval_budget > 0
+            else None
+        )
         # Regression baseline is established once, lazily, on the first
         # validate_patch call; reused for every subsequent candidate.
         self._regression: RegressionContext | None = None
@@ -524,6 +532,10 @@ class LLMRepairAlgorithm(RepairAlgorithm):
                     "iteration": iteration_index + 1,
                 },
             )
+            if prepared_prompt.retrieval_trace is not None:
+                patch_candidate.metadata["retrieval_trace"] = (
+                    prepared_prompt.retrieval_trace
+                )
 
             # Mirror run_validation_loop's guard: one patch's unexpected failure
             # must never abort the whole run. A validation error (e.g. establishing
@@ -653,6 +665,10 @@ class LLMRepairAlgorithm(RepairAlgorithm):
                     "patched_source": extracted_patch.patched_source,
                 },
             )
+            if prepared_prompt.retrieval_trace is not None:
+                patch_candidate.metadata["retrieval_trace"] = (
+                    prepared_prompt.retrieval_trace
+                )
             location_patch_candidates.append(patch_candidate)
 
         logger.info(
@@ -712,12 +728,29 @@ class LLMRepairAlgorithm(RepairAlgorithm):
             few_shot_examples=self._few_shot_examples_for(bug),
             failing_test_source=failing_test_context.failing_test_source,
             error_traceback=failing_test_context.error_traceback,
+            retrieval_instructions=self._retrieval_instructions_text,
         )
+        retrieval_trace: RetrievalTrace | None = None
+        if self._repair_config.retrieval_budget > 0:
+            retrieval_trace = run_retrieval_loop(
+                self._llm_client,
+                messages,
+                checkout,
+                self._repair_config.retrieval_budget,
+            )
+            logger.info(
+                "Retrieval for %s:%d stopped with %s after %d step(s)",
+                source_file_path.name,
+                location.line,
+                retrieval_trace.stop_reason,
+                retrieval_trace.step_count,
+            )
         return _LocationPrompt(
             source_file_path=source_file_path,
             function_start_line=function_start_line,
             function_end_line=function_end_line,
             messages=messages,
+            retrieval_trace=retrieval_trace,
         )
 
     def _regression_context(self, checkout: CheckoutResult) -> RegressionContext:
@@ -731,9 +764,7 @@ class LLMRepairAlgorithm(RepairAlgorithm):
             )
         return self._regression
 
-    def _failing_test_context_for(
-        self, checkout: CheckoutResult
-    ) -> FailingTestContext:
+    def _failing_test_context_for(self, checkout: CheckoutResult) -> FailingTestContext:
         """Return the failing-test context, gathering it once on first use."""
         if self._failing_test_context is None:
             self._failing_test_context = build_failing_test_context(

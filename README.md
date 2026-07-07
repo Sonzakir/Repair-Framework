@@ -39,7 +39,7 @@ and `File | Function | Line | Score` table formats
 - **MBFL random-budget extension** — caps expensive mutant validation at `--budget N` mutants using random selection, making MBFL practical on large projects
 - **`evaluate-localization` command** — runs all 8 techniques (5 SBFL, 2 MBFL, 1 Hybrid) on a configurable set of BugsInPy bugs, ranks the ground-truth faulty line for each, and writes `experiment_results/results.json` and `experiment_results/README.md`
 - **Template-based repair backend** (`--technique template`) — AST mutation operators driven by FL, with patch ranking and an evaluation matrix (Assignment 3)
-- **LLM-based repair backend** (`--technique llm`) — FL-guided prompting against GPT@RUB, with context enrichment and few-shot examples (Assignment 4 — Tasks 1–2) and an **iterative test-failure feedback loop** (`--iterative`) that revises failed patches across a multi-turn conversation, feeding each failure's traceback back to the model (Assignment 4 — Task 3)
+- **LLM-based repair backend** (`--technique llm`) — FL-guided prompting against GPT@RUB, with context enrichment, few-shot examples, an **iterative test-failure feedback loop** (`--iterative`), and optional codebase context retrieval before patch generation (`--retrieval-budget`)
 - **LLM-based fault localization** (`localize --backend llm`) — asks the LLM to rank suspicious source lines from failing-test evidence and emits the same `RankedLocation` format as FauxPy
 - **LLM-based patch assessment** (`repair --assess`) — assesses plausible patches for semantic quality, records `quality_score` plus a short rationale, and writes an assessment-ranked plausible-patch list
 - Dummy repair algorithm for three BugsInPy `black` bugs (1/3/23)
@@ -1047,6 +1047,7 @@ endpoint (see `--llm-base-url` in the flags table below).
 | `--llm-api-key-env` | `GPT_AT_RUB_API_KEY` | Environment variable name holding the API key |
 | `--context-enrichment` / `--no-context-enrichment` | *enabled* | Include the failing test's source + traceback in each prompt (Task 2); disable for the Task-1 prompt |
 | `--few-shot N` | `0` | Prepend N `(buggy → fixed)` example pairs from other bugs of the same project (Task 2); `0` disables. Independent of `--context-enrichment` |
+| `--retrieval-budget N` | `0` | Allow up to N `RETRIEVE:` tool calls before LLM patch generation; `0` disables retrieval |
 | `--assess` / `--no-assess` | *disabled* | Assess plausible patches with the LLM and emit `assessed_plausible_patches` |
 | `--assess-max-patches N` | *all* | Cap how many plausible patches are assessed |
 | `--assess-system-prompt` | `assess_prompt1` | Prompt stem under `repair/assessment/prompts/` |
@@ -1064,6 +1065,9 @@ repair/llm/
     prompt_builder.py  # extract_function_source + build_repair_prompt
     context_enricher.py# failing-test source + traceback gathering (Task 2)
     few_shot.py        # (buggy → fixed) example pairs from sibling bugs (Task 2)
+    retrieval_tools.py # get_function_definition, get_class_definition, find_usages
+    retrieval_protocol.py # RETRIEVE parser and tool-result message builder
+    retrieval_loop.py  # bounded retrieval pre-phase
     patch_extractor.py # extract_patch_from_llm_response → unified diff or None
     algorithm.py       # LLMRepairAlgorithm (implements RepairAlgorithm ABC)
 repair/
@@ -1399,7 +1403,7 @@ its reason, so `runs/run_NNN/execution.log` explains why each conversation ended
 | `--max-iterations N` | `5` | Max conversation turns per FL location before giving up on it. Only meaningful with `--iterative`. |
 
 These compose with **all** the Task 1/2 LLM flags (`--model`, `--temperature`,
-`--max-candidates`, `--context-enrichment`, `--few-shot`, `--llm-base-url`,
+`--max-candidates`, `--context-enrichment`, `--few-shot`, `--retrieval-budget`, `--llm-base-url`,
 `--llm-api-key-env`) and all shared flags (`--fl-mode`, `--fl-family`, `--budget`,
 `--top-n`, `--timeout`, `--stop-on-first`, `--no-regression-check`, `--ranker`). Both
 `--iterative` and `--max-iterations` are recorded in each run's `config.json` and embedded
@@ -1801,6 +1805,59 @@ When assessment is enabled, `repair_results.json` gains:
 If `--assess` is omitted, these assessment fields are absent and the repair result schema
 remains the same as before.
 
+## Assignment 5 — Task 3: Context Retrieval for LLM Repair
+
+Task 3 adds an optional retrieval pre-phase to LLM repair. Before generating a patch,
+the model may request focused codebase information with one of three text commands:
+
+```text
+RETRIEVE: get_function_definition("name")
+RETRIEVE: get_class_definition("name")
+RETRIEVE: find_usages("name")
+```
+
+The framework parses the command, runs static analysis over the checked-out BugsInPy
+worktree, appends the result to the conversation, and lets the model continue. The loop
+ends when the model stops requesting retrieval or the configured budget is exhausted.
+
+Retrieval is controlled by `--retrieval-budget`; the default is `0`, which keeps prompts
+and output unchanged.
+
+```bash
+python -m apr_framework repair \
+  --project black \
+  --bug 1 \
+  --technique llm \
+  --fl-mode perfect \
+  --retrieval-budget 3 \
+  --model gpt-5.4 \
+  --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY \
+  --temperature 1
+```
+
+When retrieval is enabled and candidates are generated, each affected patch in
+`repair_results.json` gains a `retrieval` block:
+
+```json
+{
+  "retrieval": {
+    "steps": [
+      {
+        "tool_name": "find_usages",
+        "argument": "ProcessPoolExecutor",
+        "result_summary": "black.py:621: executor = ProcessPoolExecutor(...)"
+      }
+    ],
+    "step_count": 1,
+    "stop_reason": "model_ready"
+  }
+}
+```
+
+The same pre-phase is used by single-shot and iterative LLM repair because it runs inside
+the shared `_build_location_prompt(...)` path before either mode asks for a patch.
+
 
 # Starting the application in clean ubuntu 24.04 Container 
 
@@ -1867,6 +1924,7 @@ python -m apr_framework bugsinpy evaluate-dummy --seed 123
 | Rank of first correct patch | `rank_of_first_correct` in `repair_results.json` metrics block |
 | Repair evaluation matrix | `bugsinpy evaluate-repair --bugs "tornado:14,scrapy:2,black:1" --fl-modes "auto,perfect"` |
 | Repair evaluation output | `experiment_results/repair/results.json` + `README.md` + per-cell `run_artifacts/` |
+| LLM repair context retrieval | `repair --technique llm --retrieval-budget 3` |
 
 
 
@@ -1920,7 +1978,7 @@ python -m apr_framework repair --project black --bug 1
 
 python -m apr_framework repair --project black --bug 1 \
   --technique llm --fl-mode perfect \
-  --no-context-enrichment --few-shot 0 \
+  --no-context-enrichment --few-shot 0 --retrieval-budget 3 \
   --model gpt-5.4 --llm-base-url https://api.openai.com/v1 \
   --llm-api-key-env OPENAI_API_KEY --temperature 1 \
   --top-n 3 --max-candidates 3 --budget 200

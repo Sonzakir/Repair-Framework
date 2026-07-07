@@ -123,6 +123,7 @@ def build_repair_prompt(
     few_shot_examples: str | None = None,
     failing_test_source: str | None = None,
     error_traceback: str | None = None,
+    retrieval_instructions: str | None = None,
 ) -> list[dict[str, str]]:
     """Build the OpenAI-style messages list for a single repair attempt.
 
@@ -151,6 +152,8 @@ def build_repair_prompt(
                                bugs (see repair/llm/few_shot.py).
         failing_test_source:    Body of a relevant failing test.
         error_traceback:        Exception traceback from the failing run.
+        retrieval_instructions: Optional retrieval protocol instructions inserted
+                                before the final patch task.
 
     Returns:
         Two-entry list: [system message dict, user message dict].
@@ -169,6 +172,10 @@ def build_repair_prompt(
         user_sections.append(_build_failing_test_section(failing_test_source))
     if error_traceback is not None:
         user_sections.append(_build_error_traceback_section(error_traceback))
+    if retrieval_instructions is not None:
+        user_sections.append(
+            _build_retrieval_instructions_section(retrieval_instructions)
+        )
     user_sections.append(_build_task_section(location))
 
     user_content = "\n\n".join(user_sections)
@@ -242,6 +249,10 @@ def _build_error_traceback_section(error_traceback: str) -> str:
         "traceback:\n"
         f"```\n{error_traceback.strip()}\n```"
     )
+
+
+def _build_retrieval_instructions_section(retrieval_instructions: str) -> str:
+    return retrieval_instructions.strip()
 
 
 def _build_task_section(location: RankedLocation) -> str:

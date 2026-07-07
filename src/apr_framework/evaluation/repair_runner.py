@@ -51,9 +51,7 @@ class _BugRunResult:
     started_at: datetime
     finished_at: datetime
     ranked_plausible_results: list[RepairAttemptResult] = field(default_factory=list)
-    assessed_plausible_results: list[RepairAttemptResult] = field(
-        default_factory=list
-    )
+    assessed_plausible_results: list[RepairAttemptResult] = field(default_factory=list)
 
 
 class RepairEvaluationRunner(EvaluationRunner):
@@ -135,8 +133,8 @@ class RepairEvaluationRunner(EvaluationRunner):
         writer.log(f"Started {self.name} for {len(bugs)} bug(s)")
 
         bug_run_results: list[_BugRunResult] = []
-        
-        # Run each bug in the `bugs` and store the BugRunResult's 
+
+        # Run each bug in the `bugs` and store the BugRunResult's
         for bug in bugs:
             writer.log(f"Repairing {bug.project}#{bug.bug_id}")
             bug_run_results.append(self._run_one_bug(writer, bug, benchmark, repair))
@@ -183,6 +181,7 @@ class RepairEvaluationRunner(EvaluationRunner):
             budget=self._budget,
             stop_on_first=self._stop_on_first,
         )
+        self._log_retrieval_traces(writer, outcome.all_results)
 
         # Correctness — compare each plausible patch to the developer fix.
         reference = self._reference_patch(benchmark, bug)
@@ -382,7 +381,7 @@ class RepairEvaluationRunner(EvaluationRunner):
     @staticmethod
     def _serialise_result(result: RepairAttemptResult) -> dict[str, Any]:
         patch = result.patch
-        return {
+        payload = {
             "patch_id": patch.patch_id if patch else None,
             "status": result.status.value,
             "is_correct": result.status == RepairStatus.CORRECT,
@@ -393,8 +392,30 @@ class RepairEvaluationRunner(EvaluationRunner):
                 k: v
                 for k, v in (patch.metadata if patch else {}).items()
                 # omit large blobs: full patched source and raw pytest output
-                if k not in ("patched_source", "raw_test_output")
+                if k not in ("patched_source", "raw_test_output", "retrieval_trace")
             },
+        }
+        retrieval_trace = (patch.metadata if patch else {}).get("retrieval_trace")
+        if retrieval_trace is not None:
+            payload["retrieval"] = RepairEvaluationRunner._serialise_retrieval_trace(
+                retrieval_trace
+            )
+        return payload
+
+    @staticmethod
+    def _serialise_retrieval_trace(retrieval_trace: Any) -> dict[str, Any]:
+        steps = list(getattr(retrieval_trace, "steps", []))
+        return {
+            "steps": [
+                {
+                    "tool_name": step.tool_name,
+                    "argument": step.argument,
+                    "result_summary": step.result_summary,
+                }
+                for step in steps
+            ],
+            "step_count": getattr(retrieval_trace, "step_count", len(steps)),
+            "stop_reason": getattr(retrieval_trace, "stop_reason", ""),
         }
 
     @staticmethod
@@ -420,6 +441,27 @@ class RepairEvaluationRunner(EvaluationRunner):
         writer.log(
             f"Wrote {len(plausible_results)} plausible patch artifact(s) to {patches_dir}"
         )
+
+    @staticmethod
+    def _log_retrieval_traces(
+        writer: RunWriter, attempt_results: list[RepairAttemptResult]
+    ) -> None:
+        for attempt_result in attempt_results:
+            patch = attempt_result.patch
+            if patch is None:
+                continue
+            retrieval_trace = patch.metadata.get("retrieval_trace")
+            if retrieval_trace is None:
+                continue
+            tool_calls = [
+                f'{step.tool_name}("{step.argument}")' for step in retrieval_trace.steps
+            ]
+            tool_summary = ", ".join(tool_calls) if tool_calls else "none"
+            writer.log(
+                f"RETRIEVE trace for {patch.patch_id}: "
+                f"step_count={retrieval_trace.step_count}, "
+                f"stop_reason={retrieval_trace.stop_reason}, tools={tool_summary}"
+            )
 
     # ------------------------------------------------------------------
     # Helpers

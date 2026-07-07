@@ -305,9 +305,7 @@ def handle_repair(
         checkout,
         localization_result,
     )
-    _print_repair_summary_for_bug(
-        checkout.bug, writer, repair_result, ranker, assessor
-    )
+    _print_repair_summary_for_bug(checkout.bug, writer, repair_result, ranker, assessor)
 
     return 0
 
@@ -402,6 +400,7 @@ def _build_repair_config_data(
                 "few_shot_count": args.few_shot_count,
                 "iterative": args.iterative,
                 "max_iterations": args.max_iterations,
+                "retrieval_budget": args.retrieval_budget,
                 "timeout_seconds": args.timeout,
             }
         )
@@ -731,9 +730,7 @@ def _print_plausible_patch_assessments(
         print("Assessed patches:              none")
         return
     print("Assessed plausible patches (by descending quality):")
-    for rank_position, attempt_result in enumerate(
-        assessed_plausible_results, start=1
-    ):
+    for rank_position, attempt_result in enumerate(assessed_plausible_results, start=1):
         patch = attempt_result.patch
         patch_id_str = patch.patch_id if patch is not None else "n/a"
         metadata = patch.metadata if patch is not None else {}
@@ -1123,6 +1120,7 @@ def _build_llm_algorithm_and_log_start(
         few_shot_count=args.few_shot_count,
         iterative=args.iterative,
         max_iterations=args.max_iterations,
+        retrieval_budget=args.retrieval_budget,
     )
     llm_client = OpenAICompatibleClient(repair_config)
     algorithm = LLMRepairAlgorithm(
@@ -1135,7 +1133,8 @@ def _build_llm_algorithm_and_log_start(
         f"Repair started: budget={args.budget}, top_n={args.top_n}, "
         f"model={args.model}, temperature={args.temperature}, "
         f"max_candidates={args.max_candidates}, "
-        f"iterative={args.iterative}, max_iterations={args.max_iterations}"
+        f"iterative={args.iterative}, max_iterations={args.max_iterations}, "
+        f"retrieval_budget={args.retrieval_budget}"
     )
     return algorithm
 

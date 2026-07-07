@@ -1,0 +1,8 @@
+## Optional Code Retrieval
+Before writing the patch, you may request extra codebase information by replying with exactly one retrieval command:
+
+RETRIEVE: get_function_definition("name")
+RETRIEVE: get_class_definition("name")
+RETRIEVE: find_usages("name")
+
+Use retrieval only when additional project context is needed. After a retrieval command, you will receive the result and may request another command. When you have enough information, return the corrected function in the normal Python fenced code block format.

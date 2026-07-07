@@ -23,7 +23,7 @@ class LLMRepairConfig:
         system_prompt_name: File stem under repair/llm/prompts/ (e.g. "prompt1")
                             supplying the system message sent with every request.
         timeout_seconds:  Wall-clock seconds allowed per test-suite invocation.
-        iterative:        For loops 
+        iterative:        For loops
         max_iterations:   Max conversation turns for the iterative loop
         budget:           Max patch validations before halting (mirrors TemplateRepairConfig).
         stop_on_first:    Stop after first plausible patch.
@@ -34,6 +34,8 @@ class LLMRepairConfig:
         few_shot_count:     Number of (buggy -> fixed) example pairs from sibling bugs
                             to prepend to each prompt. 0 disables the strategy. Toggled
                             independently of ``context_enrichment``.
+        retrieval_budget:   Maximum retrieval commands the model may issue before
+                            patch generation. 0 disables retrieval.
     """
 
     model_name: str
@@ -55,6 +57,7 @@ class LLMRepairConfig:
     regression_check: bool = True
     context_enrichment: bool = True
     few_shot_count: int = 0
+    retrieval_budget: int = 0
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.temperature <= 2.0):
@@ -84,5 +87,11 @@ class LLMRepairConfig:
             raise ConfigurationError(
                 f"few_shot_count must be >= 0, got {self.few_shot_count}"
             )
+        if self.retrieval_budget < 0:
+            raise ConfigurationError(
+                f"retrieval_budget must be >= 0, got {self.retrieval_budget}"
+            )
         # Fail fast if the named prompt file does not exist, rather than at first LLM call.
         load_system_prompt(self.system_prompt_name)
+        if self.retrieval_budget > 0:
+            load_system_prompt("retrieval_instructions")

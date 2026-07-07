@@ -205,6 +205,28 @@ class PatchAssessment:
 
 
 @dataclass
+class RetrievalStep:
+    """One retrieval command executed before asking the model for a patch."""
+
+    tool_name: str
+    argument: str
+    result_summary: str
+
+
+@dataclass
+class RetrievalTrace:
+    """Recorded retrieval commands for one repair prompt."""
+
+    steps: list[RetrievalStep] = field(default_factory=list)
+    stop_reason: str = ""
+
+    @property
+    def step_count(self) -> int:
+        """Return how many retrieval commands were executed."""
+        return len(self.steps)
+
+
+@dataclass
 class RepairRunMetrics:
     """
     Patch-validation metrics for one repair run on a single bug (Task 2).

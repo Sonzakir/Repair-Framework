@@ -645,6 +645,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     repair_parser.add_argument(
+        "--retrieval-budget",
+        dest="retrieval_budget",
+        type=int,
+        default=0,
+        help=(
+            "Maximum RETRIEVE tool calls before LLM patch generation "
+            "(default: 0 = disabled). LLM technique only."
+        ),
+    )
+    repair_parser.add_argument(
         "--llm-base-url",
         dest="llm_base_url",
         type=str,
