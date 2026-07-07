@@ -5,7 +5,7 @@ import getpass
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
 
@@ -292,6 +292,9 @@ def _run() -> int:
 
         if args.bugsinpy_command == "evaluate-repair":
             return _run_evaluate_repair(args, project_root, adapter)
+
+        if args.bugsinpy_command == "evaluate-llm-repair":
+            return _run_evaluate_llm_repair(args, project_root, adapter)
 
     # -- Repair --
 
@@ -1323,6 +1326,287 @@ def _run_evaluate_repair(
     print(f"README: {readme_path}")
     _print_repair_summary(cells)
     return 0
+
+
+# Each LLM variant differs from the bare baseline by exactly one factor, so the
+# evaluation isolates the effect of enrichment and of the iterative loop.
+_LLM_VARIANT_TOGGLES: dict[str, dict[str, Any]] = {
+    "single-shot": {
+        "context_enrichment": False,
+        "iterative": False,
+        "few_shot_count": 0,
+    },
+    "context-enriched": {
+        "context_enrichment": True,
+        "iterative": False,
+        "few_shot_count": 0,
+    },
+    "iterative": {
+        "context_enrichment": False,
+        "iterative": True,
+        "few_shot_count": 0,
+    },
+}
+
+
+def _build_llm_algorithm_for_variant(
+    args: argparse.Namespace,
+    localization_result: LocalizationResult,
+    variant_label: str,
+    adapter: BugsInPyAdapter,
+) -> RepairAlgorithm:
+    """Build a fresh LLM algorithm + client for one matrix cell's variant.
+
+    A fresh ``OpenAICompatibleClient`` per call keeps that cell's LLM-query
+    counter isolated from every other cell.
+    """
+    from apr_framework.repair.llm import (
+        LLMRepairAlgorithm,
+        LLMRepairConfig,
+        OpenAICompatibleClient,
+    )
+
+    variant_toggles = _LLM_VARIANT_TOGGLES[variant_label]
+    repair_config = LLMRepairConfig(
+        model_name=args.model,
+        temperature=args.temperature,
+        max_patch_count=args.max_candidates,
+        top_n_locations=args.top_n,
+        llm_provider=args.llm_provider,
+        base_url=args.llm_base_url,
+        api_key_env_var=args.llm_api_key_env,
+        system_prompt_name=args.system_prompt,
+        timeout_seconds=args.timeout,
+        budget=args.budget,
+        stop_on_first=args.stop_on_first,
+        regression_check=args.regression_check,
+        context_enrichment=variant_toggles["context_enrichment"],
+        few_shot_count=variant_toggles["few_shot_count"],
+        iterative=variant_toggles["iterative"],
+        max_iterations=args.max_iterations,
+    )
+    llm_client = OpenAICompatibleClient(repair_config)
+    return LLMRepairAlgorithm(
+        localization_result=localization_result,
+        adapter=adapter,
+        repair_config=repair_config,
+        llm_client=llm_client,
+    )
+
+
+def _run_evaluate_llm_repair(
+    args: argparse.Namespace, project_root: Path, adapter: BugsInPyAdapter
+) -> int:
+    """Run the LLM repair comparison: each bug x variant x FL mode, aggregated."""
+    from apr_framework.core.models import CheckoutResult
+    from apr_framework.evaluation.llm_repair_comparison_runner import (
+        LLMRepairComparisonRunner,
+    )
+    from apr_framework.localization import (
+        FauxPyConfig,
+        FauxPyLocalizer,
+        FauxPyToolchain,
+        HybridFaultLocalizer,
+        PerfectFaultLocalizer,
+    )
+
+    bugs = _parse_bug_list(args.bugs)
+    variants = [variant.strip() for variant in args.variants.split(",") if variant.strip()]
+    for variant_label in variants:
+        if variant_label not in _LLM_VARIANT_TOGGLES:
+            raise ConfigurationError(
+                f"Invalid variant {variant_label!r} — expected one of "
+                f"{', '.join(_LLM_VARIANT_TOGGLES)}."
+            )
+    fl_modes = [mode.strip() for mode in args.fl_modes.split(",") if mode.strip()]
+    for fl_mode in fl_modes:
+        if fl_mode not in ("auto", "perfect"):
+            raise ConfigurationError(
+                f"Invalid FL mode {fl_mode!r} — expected 'auto' or 'perfect'."
+            )
+
+    # Automated FL needs FauxPy; skip the install when only perfect FL is requested.
+    if "auto" in fl_modes:
+        adapter.toolchain.ensure_installed()
+
+    output_dir = Path(args.output_dir)
+    if not output_dir.is_absolute():
+        output_dir = project_root / output_dir
+    runs_dir = Path(args.runs_dir)
+    if not runs_dir.is_absolute():
+        runs_dir = project_root / runs_dir
+
+    fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
+    projects_dir = adapter.toolchain.repo_dir / "projects"
+
+    # Resolve and validate every bug's checkout up front, keyed by canonical bug.
+    canonical_bug_list: list[BugIdentifier] = []
+    checkouts: dict[BugIdentifier, CheckoutResult] = {}
+    for bug in bugs:
+        canonical_project = adapter.resolve_project(bug.project)
+        canonical_bug = BugIdentifier(
+            benchmark="bugsinpy", project=canonical_project, bug_id=bug.bug_id
+        )
+        worktree = (
+            project_root
+            / ".workspace"
+            / "bugsinpy"
+            / f"{canonical_project}_{bug.bug_id}"
+            / canonical_project
+        )
+        if not worktree.exists():
+            raise BenchmarkError(
+                f"No checkout found for {bug.project} #{bug.bug_id} at {worktree}. "
+                f"Run `python -m apr_framework bugsinpy checkout {bug.project} {bug.bug_id}` "
+                "and then `compile` before evaluating."
+            )
+        canonical_bug_list.append(canonical_bug)
+        checkouts[canonical_bug] = CheckoutResult(
+            bug=canonical_bug, worktree=worktree, success=True, prepared=True
+        )
+
+    def _auto_localizer(canonical_bug: BugIdentifier) -> FaultLocalizer:
+        worktree = checkouts[canonical_bug].worktree
+        source_package = _infer_fauxpy_src(worktree, canonical_bug.project)
+        bug_dir = (
+            projects_dir / canonical_bug.project / "bugs" / str(canonical_bug.bug_id)
+        )
+        bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        bug_test_ids = extract_pytest_node_ids(bug_test_targets)
+
+        def _make_sbfl() -> FauxPyLocalizer:
+            return FauxPyLocalizer(
+                FauxPyConfig(
+                    src=source_package,
+                    test_targets=bug_test_targets,
+                    family="sbfl",
+                    granularity=args.granularity,
+                    failing_tests=bug_test_ids,
+                    metric=args.localization_metric,
+                ),
+                fauxpy_toolchain,
+            )
+
+        def _make_mbfl() -> FauxPyLocalizer:
+            return FauxPyLocalizer(
+                FauxPyConfig(
+                    src=source_package,
+                    test_targets=bug_test_targets,
+                    family="mbfl",
+                    granularity=args.granularity,
+                    failing_tests=bug_test_ids,
+                    metric=args.mbfl_metric,
+                    mutation_strategy="random",
+                    mutation_budget=args.mutation_budget,
+                    mutation_seed=args.seed,
+                ),
+                fauxpy_toolchain,
+            )
+
+        if args.fl_family == "sbfl":
+            return _make_sbfl()
+        if args.fl_family == "mbfl":
+            return _make_mbfl()
+        return HybridFaultLocalizer(_make_sbfl(), _make_mbfl())
+
+    perfect_localizer = PerfectFaultLocalizer(adapter)
+
+    def localization_provider(
+        canonical_bug: BugIdentifier, fl_mode: str
+    ) -> LocalizationResult:
+        checkout = checkouts[canonical_bug]
+        if fl_mode == "perfect":
+            return perfect_localizer.localize(canonical_bug, checkout)
+        return _auto_localizer(canonical_bug).localize(canonical_bug, checkout)
+
+    def repair_algorithm_factory(
+        localization_result: LocalizationResult, variant_label: str
+    ) -> RepairAlgorithm:
+        return _build_llm_algorithm_for_variant(
+            args, localization_result, variant_label, adapter
+        )
+
+    ranker = _build_ranker(args)
+    repair_config_data = {
+        "technique": "llm",
+        "model": args.model,
+        "temperature": args.temperature,
+        "max_candidates": args.max_candidates,
+        "top_n_locations": args.top_n,
+        "max_iterations": args.max_iterations,
+        "budget": args.budget,
+        "timeout_per_test": args.timeout,
+        "stop_on_first": args.stop_on_first,
+        "regression_check": args.regression_check,
+        "llm_provider": args.llm_provider,
+        "llm_base_url": args.llm_base_url,
+        "fl_family": args.fl_family,
+        "localization_metric": args.localization_metric,
+        "granularity": args.granularity,
+    }
+
+    runner = LLMRepairComparisonRunner(
+        project_root=project_root,
+        runs_dir=runs_dir,
+        ranker=ranker,
+        repair_config_data=repair_config_data,
+        budget=args.budget,
+        stop_on_first=args.stop_on_first,
+    )
+
+    print(
+        f"Evaluating {len(bugs)} bug(s) x {len(variants)} variant(s) "
+        f"({', '.join(variants)}) x {len(fl_modes)} FL mode(s) "
+        f"({', '.join(fl_modes)}) with model={args.model}..."
+    )
+    cells = runner.run(
+        bugs=canonical_bug_list,
+        variants=variants,
+        fl_modes=fl_modes,
+        benchmark=adapter,
+        localization_provider=localization_provider,
+        repair_algorithm_factory=repair_algorithm_factory,
+        output_dir=output_dir,
+    )
+
+    readme_path = runner.write_results(cells, output_dir)
+    runner.copy_run_artifacts(cells, output_dir)
+    print(f"\nResults written to: {output_dir}")
+    print(f"README: {readme_path}")
+    _print_llm_repair_summary(cells)
+    return 0
+
+
+def _print_llm_repair_summary(cells: list) -> None:
+    """Print a compact per-cell summary table of the LLM repair matrix."""
+    print("\n=== LLM repair comparison summary ===")
+    header = (
+        f"{'Bug':<14} {'Variant':<17} {'FL':<8} {'Q':>4} {'Gen':>4} "
+        f"{'Plaus':>6} {'Corr':>5}"
+    )
+    print(header)
+    print("-" * len(header))
+    for cell in cells:
+        bug_label = f"{cell.bug.project}#{cell.bug.bug_id}"
+        if cell.error:
+            short_error = " ".join(
+                part.strip() for part in cell.error.splitlines() if part.strip()
+            )
+            if len(short_error) > 90:
+                short_error = short_error[:90].rstrip() + " …"
+            print(
+                f"{bug_label:<14} {cell.variant_label:<17} {cell.fl_mode:<8} "
+                f"ERROR: {short_error}"
+            )
+            continue
+        query_count = (
+            str(cell.llm_query_count) if cell.llm_query_count is not None else "-"
+        )
+        print(
+            f"{bug_label:<14} {cell.variant_label:<17} {cell.fl_mode:<8} "
+            f"{query_count:>4} {cell.total_candidates_generated:>4} "
+            f"{cell.plausible_count:>6} {cell.correct_count:>5}"
+        )
 
 
 def _parse_args_and_resolve_project_root() -> tuple[argparse.Namespace, Path]:

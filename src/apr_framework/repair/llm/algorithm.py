@@ -107,6 +107,10 @@ class LLMRepairAlgorithm(RepairAlgorithm):
     def name(self) -> str:
         return "llm-repair"
 
+    def llm_query_count(self) -> int | None:
+        """Report how many LLM API calls the client has made for this run."""
+        return self._llm_client.completion_count
+
     # ------------------------------------------------------------------
     # RepairAlgorithm ABC
     # ------------------------------------------------------------------

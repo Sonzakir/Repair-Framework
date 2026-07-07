@@ -214,6 +214,7 @@ class RepairEvaluationRunner(EvaluationRunner):
             time_to_first_plausible_seconds=outcome.time_to_first_plausible_seconds,
             total_wall_clock_seconds=outcome.total_wall_clock_seconds,
             rank_of_first_correct=rank_of_first_correct,
+            llm_query_count=repair.llm_query_count(),
         )
 
         # Overall bug status: correct > plausible > (failed/no_patch from the loop).
@@ -284,11 +285,11 @@ class RepairEvaluationRunner(EvaluationRunner):
                 )
             ]
 
-        return {
+        bug_payload = {
             "project": bug_result.bug.project,
             "bug_id": bug_result.bug.bug_id,
             # Hoisted from config so the FL mode used is recorded at the top level
-            # of every result file (Task 4), not only nested under "config".
+            # of every result file, not only nested under "config".
             "fl_mode": self._config_data.get("fl_mode"),
             "fl_backend": self._config_data.get("fl_backend"),
             "status": bug_result.status.value,
@@ -320,6 +321,15 @@ class RepairEvaluationRunner(EvaluationRunner):
                 for attempt_result in bug_result.outcome.all_results
             ],
         }
+
+        # LLM backends report an API-call count; template runs report None, in which
+        # case the key is omitted so their result files are unchanged.
+        if bug_result.metrics.llm_query_count is not None:
+            bug_payload["metrics"]["llm_query_count"] = (
+                bug_result.metrics.llm_query_count
+            )
+
+        return bug_payload
 
     @staticmethod
     def _serialise_result(result: RepairAttemptResult) -> dict[str, Any]:

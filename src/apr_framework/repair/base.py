@@ -92,3 +92,12 @@ class RepairAlgorithm(ABC):
         return run_validation_loop(
             self, bug, checkout, budget=budget, stop_on_first=stop_on_first
         )
+
+    def llm_query_count(self) -> int | None:
+        """Number of LLM API calls this algorithm made during the last repair run.
+
+        Default is ``None`` for algorithms that issue no LLM queries (e.g. the
+        template backend), so their result files carry no query-count field.
+        Backends driven by a language model override this to report their count.
+        """
+        return None

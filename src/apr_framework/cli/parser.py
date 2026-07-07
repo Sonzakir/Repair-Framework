@@ -296,6 +296,182 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for per-cell run artifacts (default: runs).",
     )
 
+    ## bugsinpy-evaluate-llm-repair (LLM repair evaluation & comparison)
+    eval_llm_parser = bugsinpy_subparsers.add_parser(
+        "evaluate-llm-repair",
+        help=(
+            "Run the LLM repair pipeline on a set of bugs across the "
+            "{single-shot, context-enriched, iterative} x {auto FL, perfect FL} "
+            "matrix, and write an aggregated comparison report."
+        ),
+    )
+    eval_llm_parser.add_argument(
+        "--bugs",
+        default="black:1,tornado:14,scrapy:2,fastapi:3",
+        help=(
+            "Comma-separated project:bug_id pairs to evaluate "
+            "(default: black:1,tornado:14,scrapy:2,fastapi:3)."
+        ),
+    )
+    eval_llm_parser.add_argument(
+        "--variants",
+        default="single-shot,context-enriched,iterative",
+        help=(
+            "Comma-separated LLM variants to run per bug. Choices: single-shot "
+            "(bare prompt), context-enriched (failing-test + traceback), iterative "
+            "(multi-turn feedback loop). "
+            "Default: single-shot,context-enriched,iterative."
+        ),
+    )
+    eval_llm_parser.add_argument(
+        "--fl-modes",
+        dest="fl_modes",
+        default="auto,perfect",
+        help="Comma-separated FL modes to run per bug (default: auto,perfect).",
+    )
+    eval_llm_parser.add_argument(
+        "--model",
+        default="gpt-5.4",
+        help="LLM model name used for every cell (default: gpt-5.4).",
+    )
+    eval_llm_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="Sampling temperature (default: 1.0).",
+    )
+    eval_llm_parser.add_argument(
+        "--llm-provider",
+        dest="llm_provider",
+        default="openai-compatible",
+        help="LLM provider adapter (default: openai-compatible).",
+    )
+    eval_llm_parser.add_argument(
+        "--llm-base-url",
+        dest="llm_base_url",
+        default="https://api.openai.com/v1",
+        help="Base URL of the OpenAI-compatible endpoint (default: OpenAI).",
+    )
+    eval_llm_parser.add_argument(
+        "--llm-api-key-env",
+        dest="llm_api_key_env",
+        default="OPENAI_API_KEY",
+        help="Env var holding the API key (default: OPENAI_API_KEY).",
+    )
+    eval_llm_parser.add_argument(
+        "--system-prompt",
+        dest="system_prompt",
+        default="prompt1",
+        help="Name of the system prompt file to use (default: prompt1).",
+    )
+    eval_llm_parser.add_argument(
+        "--max-candidates",
+        dest="max_candidates",
+        type=int,
+        default=3,
+        help="Max candidate patches per FL location (default: 3).",
+    )
+    eval_llm_parser.add_argument(
+        "--top-n",
+        dest="top_n",
+        type=int,
+        default=3,
+        help="Top-N suspicious locations to attempt (default: 3).",
+    )
+    eval_llm_parser.add_argument(
+        "--max-iterations",
+        dest="max_iterations",
+        type=int,
+        default=5,
+        help="Max conversation turns per location in the iterative variant (default: 5).",
+    )
+    eval_llm_parser.add_argument(
+        "--budget",
+        type=int,
+        default=200,
+        help="Max patch validations per cell (default: 200).",
+    )
+    eval_llm_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="Seconds allowed per test-suite invocation (default: 120).",
+    )
+    eval_llm_parser.add_argument(
+        "--fl-family",
+        dest="fl_family",
+        choices=["sbfl", "mbfl", "hybrid"],
+        default="sbfl",
+        help="Fault-localization family used in automated FL mode (default: sbfl).",
+    )
+    eval_llm_parser.add_argument(
+        "--localization-metric",
+        dest="localization_metric",
+        default="ochiai",
+        help="SBFL metric used in automated FL mode (default: ochiai).",
+    )
+    eval_llm_parser.add_argument(
+        "--mbfl-metric",
+        dest="mbfl_metric",
+        default="metallaxis",
+        help="MBFL metric for automated FL mode (default: metallaxis).",
+    )
+    eval_llm_parser.add_argument(
+        "--mutation-budget",
+        dest="mutation_budget",
+        type=int,
+        default=50,
+        help="Max mutants per bug for MBFL/hybrid automated FL (default: 50).",
+    )
+    eval_llm_parser.add_argument(
+        "--seed", type=int, default=0, help="Random seed for MBFL mutation selection."
+    )
+    eval_llm_parser.add_argument(
+        "--granularity",
+        choices=["statement", "function"],
+        default="statement",
+        help="Localization granularity for automated FL (default: statement).",
+    )
+    eval_llm_parser.add_argument(
+        "--stop-on-first",
+        dest="stop_on_first",
+        action="store_true",
+        help="Stop validating a cell after the first plausible patch.",
+    )
+    eval_llm_parser.add_argument(
+        "--no-regression-check",
+        dest="regression_check",
+        action="store_false",
+        help="Skip the regression half of plausibility (faster).",
+    )
+    eval_llm_parser.set_defaults(regression_check=True)
+    eval_llm_parser.add_argument(
+        "--ranker",
+        choices=["weighted", "none"],
+        default="none",
+        help="Patch ranking strategy applied to plausible patches (default: none).",
+    )
+    eval_llm_parser.add_argument(
+        "--ranker-weights",
+        dest="ranker_weights",
+        default=None,
+        help="Comma-separated weights for the weighted ranker (default: 0.6,0.25,0.15).",
+    )
+    eval_llm_parser.add_argument(
+        "--output-dir",
+        default="experiment_results/llm_repair/task5",
+        help=(
+            "Directory for results.json and README.md "
+            "(default: experiment_results/llm_repair/task5)."
+        ),
+    )
+    eval_llm_parser.add_argument(
+        "--runs-dir",
+        dest="runs_dir",
+        default="runs",
+        help="Directory for per-cell run artifacts (default: runs).",
+    )
+
     # Repair command
     repair_parser = subparsers.add_parser(
         "repair",

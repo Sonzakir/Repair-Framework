@@ -34,6 +34,11 @@ GPT_AT_RUB_RATE_LIMIT_WINDOW_SECONDS = 60.0
 class LLMClient(ABC):
     """Provider-agnostic interface for LLM completion calls."""
 
+    @property
+    def completion_count(self) -> int:
+        """Number of completions issued so far. Default 0 for clients that do not count."""
+        return 0
+
     @abstractmethod
     def complete(self, messages: list[dict[str, str]]) -> str:
         """Send an OpenAI-style messages list and return the response text.
@@ -62,6 +67,15 @@ class OpenAICompatibleClient(LLMClient):
         # Sequential index used only to name dumped prompt files when the
         # PROMPT_DEBUG_ENV_VAR debug mode is active. Inert otherwise.
         self._prompt_debug_count = 0
+        # Number of completed API calls this client has made — the "queries made"
+        # figure the evaluation reports. One client is built per repair run, so the
+        # count is naturally scoped to that run.
+        self._completion_count = 0
+
+    @property
+    def completion_count(self) -> int:
+        """Number of successful ``complete`` calls issued by this client."""
+        return self._completion_count
 
     def _wait_for_rate_limit_slot(self) -> None:
         """Block until issuing another request would stay within the per-minute cap."""
@@ -179,6 +193,7 @@ class OpenAICompatibleClient(LLMClient):
             ) from error
 
         response_text = response.choices[0].message.content
+        self._completion_count += 1
         logger.debug("LLM response received (%d chars)", len(response_text or ""))
         return response_text or ""
 

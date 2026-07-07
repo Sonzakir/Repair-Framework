@@ -1477,6 +1477,141 @@ python -m apr_framework bugsinpy setup
   and sleeps as needed before each call to stay under the cap, so large `--max-candidates`
   / `--top-n` runs won't get rejected by the server for exceeding the rate limit.
 
+## FL-Guided Repair and Perfect FL Baseline (Assignment 4 — Task 4)
+
+The LLM repair backend runs under the same two fault-localization conditions as the
+template technique, selected with `--fl-mode`:
+
+1. **Automated FL** — the suspicious locations come from the Assignment-2 localizer
+   (SBFL / Ochiai by default; `--fl-family sbfl|mbfl|hybrid`), and the top-N ranked lines
+   are fed into the prompt.
+2. **Perfect FL** — the ground-truth fault location is parsed directly from the BugsInPy
+   developer fix (`bug_patch.txt`), bypassing FL entirely.
+
+Both modes are recorded in every result file (`fl_mode` / `fl_backend`, hoisted to the top
+level of `repair_results.json`).
+
+```bash
+# Perfect FL (oracle) — repair targets are the exact developer-fix lines:
+python -m apr_framework repair --project black --bug 1 --technique llm --fl-mode perfect
+
+# Automated FL (SBFL / Ochiai) drives the repair targets:
+python -m apr_framework repair --project black --bug 1 --technique llm --fl-mode auto --fl-family sbfl
+```
+
+A hand-written single-bug baseline is under
+[`experiment_results/llm_repair/`](experiment_results/llm_repair/); the full multi-bug
+matrix is Task 5 below.
+
+## Evaluation and Comparison (Assignment 4 — Task 5)
+
+Task 5 runs the full LLM repair pipeline across a **bug × variant × FL-mode matrix** and
+writes an aggregated comparison, including a side-by-side against the Assignment-3 template
+technique.
+
+### The matrix
+
+Four bugs — `black:1`, `tornado:14`, `scrapy:2`, `fastapi:3` (the same bugs as
+Assignment 3, so the comparison is direct) — each under **three repair variants** and
+**two FL modes** = **24 cells**. The variants are *isolated axes*: each differs from the
+bare baseline by exactly one factor, so the effect of enrichment and of the iterative loop
+can be read off cleanly.
+
+| Variant | Context enrichment | Iterative loop | What it isolates |
+|---|---|---|---|
+| `single-shot` | off | off | the bare Task-1 prompt (baseline) |
+| `context-enriched` | on (failing-test source + error traceback) | off | the effect of Task-2 context enrichment |
+| `iterative` | off | on (`max_iterations`) | the effect of the Task-3 feedback loop |
+
+### The command
+
+`bugsinpy evaluate-llm-repair` drives the whole matrix, writing one `runs/run_NNN/` per
+cell plus an aggregated `results.json` + `README.md`. **All bugs must be checked out and
+compiled first.** The evaluation reuses the same OpenAI-compatible client as the plain
+`repair` command; because the client's endpoint and key env-var are configurable, the same
+backend targets either GPT@RUB *or* the OpenAI API — the runs below use OpenAI:
+
+```bash
+export OPENAI_API_KEY="<key>"     # or place it in .env
+python -m apr_framework bugsinpy evaluate-llm-repair \
+  --bugs black:1,tornado:14,scrapy:2,fastapi:3 \
+  --variants single-shot,context-enriched,iterative \
+  --fl-modes auto,perfect \
+  --model gpt-5.4 --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY --temperature 1 \
+  --top-n 3 --max-candidates 3 --max-iterations 5
+```
+
+Each cell (bug × variant × FL mode) is executed by the existing `RepairEvaluationRunner`,
+so it gets a full `runs/run_NNN/` (config, log, patch diffs). A localization failure for
+one cell is captured as an error cell rather than aborting the matrix, and `results.json`
+is flushed after every cell so a long API run survives an interruption.
+
+### Metrics reported
+
+Per cell, and aggregated per (variant × FL mode): **LLM queries made**
+(`llm_query_count` — a new metric added for this task; queries ≥ candidates because
+format-retries and unparsable replies cost a query but no candidate), **candidates
+generated**, **plausible** and **correct** patch counts, **time to first plausible** and
+**total repair time**, and the correct-patch rank (generation order → ranked order). The
+generated report adds three analyses: *effect of iterative repair* (did the loop recover
+patches single-shot missed?), *effect of context enrichment* (did the extra context help?),
+and *comparison with Assignment 3* (best LLM outcome per bug vs. the template result read
+from `experiment_results/repair/results.json`).
+
+### Interface change (documented per the assignment)
+
+The `RepairAlgorithm` ABC gained one non-abstract method,
+`llm_query_count() -> int | None` (default `None`; overridden by the LLM backend to report
+its client's call count). Template runs return `None`, so the field is simply absent from
+their result files — no existing output changes.
+
+### Results
+
+Full artifacts: [`experiment_results/llm_repair/task5/`](experiment_results/llm_repair/task5/)
+(`results.json`, the generated per-bug/aggregate report, and per-cell `run_artifacts/`).
+The run used OpenAI `gpt-5.4`, `top_n=3`, `max_candidates=3`, `max_iterations=5`.
+
+**Aggregate (per variant × FL mode)** — 4 bugs each:
+
+| Variant | FL mode | Queries | Generated | Plausible | Correct | Bugs repaired |
+|---|---|---|---|---|---|---|
+| single-shot | auto | 18 | 18 | 0 | 0 | 0 |
+| single-shot | perfect | 27 | 26 | 4 | 3 | 1 |
+| context-enriched | auto | 18 | 17 | 0 | 0 | 0 |
+| context-enriched | perfect | 27 | 26 | **16** | 3 | 1 |
+| iterative | auto | 30 | 30 | 0 | 0 | 0 |
+| iterative | perfect | 32 | 32 | 4 | 1 | 1 |
+
+**What the numbers say:**
+
+- **Perfect FL dominates.** Every correct patch came from perfect FL; automated (SBFL) FL
+  produced **zero** plausible patches on these four bugs (and `tornado#14`'s auto cells are
+  error cells — FauxPy 0.7.0 cannot install on its pinned Python 3.7.0, the same limitation
+  seen in Assignment 3). Fault-location precision is the dominant factor.
+- **Context enrichment helps — a lot, for plausibility.** Adding the failing-test source +
+  error traceback **quadrupled** the plausible count under perfect FL (4 → 16): `black#1`
+  0→3, `scrapy#2` 1→6, `fastapi#3` 0→4. It did not raise the *correct* count on these bugs,
+  i.e. it surfaces more test-passing patches but not more developer-matching ones.
+- **Iterative repair.** The feedback loop solved `tornado#14` (perfect) in a **single**
+  query, and recovered a *plausible* patch on `fastapi#3` (perfect) that single-shot missed.
+  On `black#1` the extra turns did not convert into a plausible patch. The most useful piece
+  of feedback was the **assertion/traceback** from the failing trigger test; bare pass/fail
+  counts alone rarely moved the model.
+- **Only `tornado#14` was fully repaired** (correct), under perfect FL, in all three
+  variants — its fix is a one-token `is`→`is not` swap the model reproduces exactly. The
+  other three bugs reached *plausible* (test-passing) patches but none matched the developer
+  fix under the strict diff-level correctness check (whole-function regeneration tends to
+  produce overfit, reformatted variants — e.g. `black#1`, whose own source is auto-formatted
+  by black).
+
+**Comparison with Assignment 3 (template repair):** the LLM backend **matches** the template
+technique on `tornado#14` (both produce a correct patch under perfect FL) and has **broader
+reach** — it produces plausible patches on `black#1`, `scrapy#2`, and `fastapi#3`, where the
+template operators generated nothing plausible. On this bug set, though, neither technique
+exceeds a single correctly-repaired bug: the LLM's advantage here is *plausibility coverage*,
+not a higher correct-fix count.
+
 ## Summary
 
 

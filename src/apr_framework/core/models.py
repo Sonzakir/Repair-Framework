@@ -217,6 +217,8 @@ class RepairRunMetrics:
             found.
         total_wall_clock_seconds:          Wall-clock seconds for the whole repair
             run (generation + validation).
+        llm_query_count:                   Number of LLM API calls the run made, or
+            None for backends that issue no LLM queries (e.g. template repair).
     """
 
     total_candidates_generated: int = 0
@@ -226,6 +228,7 @@ class RepairRunMetrics:
     time_to_first_plausible_seconds: float | None = None
     total_wall_clock_seconds: float = 0.0
     rank_of_first_correct: int | None = None
+    llm_query_count: int | None = None
 
 
 @dataclass
