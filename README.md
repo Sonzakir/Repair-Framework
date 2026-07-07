@@ -1504,6 +1504,8 @@ matrix is Task 5 below.
 
 ## Evaluation and Comparison (Assignment 4 — Task 5)
 
+Important Disclaimer: Since the token budget in GPT@RUB was exhausted while completing Task 4, the evaluation for Task 5 had to be performed using the OpenAI API.
+
 Task 5 runs the full LLM repair pipeline across a **bug × variant × FL-mode matrix** and
 writes an aggregated comparison, including a side-by-side against the Assignment-3 template
 technique.
@@ -1597,12 +1599,7 @@ The run used OpenAI `gpt-5.4`, `top_n=3`, `max_candidates=3`, `max_iterations=5`
   On `black#1` the extra turns did not convert into a plausible patch. The most useful piece
   of feedback was the **assertion/traceback** from the failing trigger test; bare pass/fail
   counts alone rarely moved the model.
-- **Only `tornado#14` was fully repaired** (correct), under perfect FL, in all three
-  variants — its fix is a one-token `is`→`is not` swap the model reproduces exactly. The
-  other three bugs reached *plausible* (test-passing) patches but none matched the developer
-  fix under the strict diff-level correctness check (whole-function regeneration tends to
-  produce overfit, reformatted variants — e.g. `black#1`, whose own source is auto-formatted
-  by black).
+
 
 **Comparison with template repair:** the LLM backend **matches** the template
 technique on `tornado#14` (both produce a correct patch under perfect FL) and has **broader
