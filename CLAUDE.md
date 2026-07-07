@@ -98,13 +98,18 @@ python -m apr_framework repair --project <project> --bug <bug_id> \
   [--ranker weighted|none] [--ranker-weights w1,w2,w3] \
   [--runs-dir runs]
 
+# Store an LLM API key in the local .env (interactive prompt)
+python -m apr_framework configure [--llm-api-key-env OPENAI_API_KEY]
+
 # LLM-based repair (Assignment 4)
-# Requires: export GPT_AT_RUB_API_KEY="<key>"
+# Requires: export OPENAI_API_KEY="<key>"  (or run `configure` above)
 python -m apr_framework repair --project <project> --bug <bug_id> \
   --technique llm \
-  [--model codestral-22b] [--temperature 0.8] [--max-candidates 5] \
-  [--llm-provider openai-compatible] [--llm-base-url <url>] \
-  [--llm-api-key-env GPT_AT_RUB_API_KEY] \
+  [--model gpt-4.1-2025-04-14] [--temperature 0.8] [--max-candidates 5] \
+  [--llm-provider openai-compatible] [--llm-base-url https://api.openai.com/v1] \
+  [--llm-api-key-env OPENAI_API_KEY] [--system-prompt prompt1] \
+  [--context-enrichment | --no-context-enrichment] [--few-shot N] \
+  [--iterative | --no-iterative] [--max-iterations 5] \
   [--budget N] [--top-n N] [--timeout N] \
   [--stop-on-first] [--no-regression-check] \
   [--fl-mode auto|perfect] [--fl-family sbfl|mbfl|hybrid] \
@@ -123,14 +128,32 @@ python -m apr_framework bugsinpy evaluate-localization \
   [--bugs black:1,black:3,black:7] [--granularity statement|function] \
   [--budget N] [--seed N] [--top-ks 1,5,10] \
   [--output-dir experiment_results]
+
+# LLM repair evaluation matrix (Task 5): bugs x {single-shot, context-enriched, iterative} x {auto, perfect}
+python -m apr_framework bugsinpy evaluate-llm-repair \
+  [--bugs black:1,tornado:14,scrapy:2,fastapi:3] \
+  [--variants single-shot,context-enriched,iterative] \
+  [--fl-modes auto,perfect] \
+  [--model gpt-5.4] [--temperature 1.0] \
+  [--llm-provider openai-compatible] [--llm-base-url https://api.openai.com/v1] \
+  [--llm-api-key-env OPENAI_API_KEY] [--system-prompt prompt1] \
+  [--max-candidates 3] [--top-n 3] [--max-iterations 5] \
+  [--budget 200] [--timeout 120] \
+  [--fl-family sbfl|mbfl|hybrid] [--localization-metric ochiai] [--mbfl-metric metallaxis] \
+  [--mutation-budget 50] [--seed 0] [--granularity statement|function] \
+  [--stop-on-first] [--no-regression-check] \
+  [--ranker weighted|none] [--ranker-weights w1,w2,w3] \
+  [--output-dir experiment_results/llm_repair/task5] [--runs-dir runs]
 ```
 
 `--test-target` is repeatable (`action="append"`); pass it once per pytest target. When `--metric` is omitted for SBFL/MBFL the family default applies; for hybrid runs use `--sbfl-metric`/`--mbfl-metric` instead.
 
-`--ranker none` is the default — no ranking, output identical to pre-Task-4 behavior. `--ranker weighted` opts in to ranking; `--ranker-weights` then overrides the three component weights (suspiciousness, simplicity, operator_priority) — only relative magnitudes matter, they are normalised internally. When ranking is off, `ranked_plausible_patches` is absent (`null`) from the JSON.
+`--ranker none` is the default — no ranking, output identical to pre-Task-4 behavior. `--ranker weighted` opts in to ranking; `--ranker-weights` then overrides the three component weights (suspiciousness, simplicity, operator_priority) — only relative magnitudes matter, they are normalised internally. When ranking is off, `ranked_plausible_patches` is absent (`null`) from the JSON. Note `evaluate-llm-repair`'s `--ranker` default is `none`, unlike `evaluate-repair`'s default of `weighted`.
 `evaluate-localization` runs all 8 techniques (3 SBFL baselines, 2 SBFL extensions, 1 MBFL baseline, 1 MBFL-random extension, 1 Hybrid) on each specified bug and compares their rankings against the ground-truth faulty lines parsed from `bug_patch.txt`. All bugs must be checked out and compiled before running.
 
-For `--technique llm`: `--operators` and `--skip-localize` are ignored (LLM backend generates free-form patches, not AST mutations). All other shared flags (`--budget`, `--top-n`, `--fl-mode`, `--fl-family`, `--ranker`, etc.) behave identically. LLM-specific flags (`--model`, `--temperature`, `--max-candidates`, `--llm-base-url`, `--llm-api-key-env`) are silently ignored when `--technique template` is selected.
+For `--technique llm`: `--operators` and `--skip-localize` are ignored (LLM backend generates free-form patches, not AST mutations). All other shared flags (`--budget`, `--top-n`, `--fl-mode`, `--fl-family`, `--ranker`, etc.) behave identically. LLM-specific flags (`--model`, `--temperature`, `--max-candidates`, `--llm-base-url`, `--llm-api-key-env`, `--system-prompt`, `--context-enrichment`, `--few-shot`, `--iterative`, `--max-iterations`) are silently ignored when `--technique template` is selected. `--few-shot N` is independent of `--context-enrichment`/`--iterative` and works in single-shot mode too, but `evaluate-llm-repair`'s three built-in `--variants` (`single-shot`, `context-enriched`, `iterative`) never enable few-shot — it's only reachable via the plain `repair` command.
+
+> The project's LLM provider is OpenAI (not GPT@RUB) — use `OPENAI_API_KEY`, `--llm-base-url https://api.openai.com/v1`, and a real OpenAI model name. Only `gpt-4.1-2025-04-14`-family models have been confirmed to work end-to-end; `codestral-22b` and similarly-named GPT@RUB-only models are not valid here.
 
 ## Architecture
 
@@ -176,11 +199,18 @@ src/apr_framework/
       patch_generator.py  # generate_patches_for_location — builds PatchCandidate list
       validator.py   # plausibility check (trigger + regression)
     llm/
-      algorithm.py   # LLMRepairAlgorithm — implements RepairAlgorithm ABC
-      client.py      # LLMClient ABC + OpenAICompatibleClient (GPT@RUB / OpenAI API)
-      config.py      # LLMRepairConfig — model, temperature, max_patch_count, top_n_locations, etc.
-      patch_extractor.py  # extract_patch_from_llm_response — fence extraction, syntax check, unified diff
+      algorithm.py   # LLMRepairAlgorithm — implements RepairAlgorithm ABC; single-shot + iterative repair_loop
+      client.py      # LLMClient ABC + OpenAICompatibleClient (OpenAI API, non-streaming)
+      config.py      # LLMRepairConfig — model, temperature, max_patch_count, top_n_locations,
+                     # iterative, max_iterations, context_enrichment, few_shot_count, etc.
+      patch_extractor.py  # extract_patch_with_source (ExtractedPatch: diff_text + patched_source);
+                          # extract_patch_from_llm_response kept as thin diff-only wrapper
       prompt_builder.py   # build_repair_prompt, extract_function_source — system+user message construction
+      context_enricher.py # build_failing_test_context — best-effort failing-test source + traceback for the prompt
+      few_shot.py          # build_few_shot_examples — buggy→fixed pairs from sibling bugs in the same project
+      feedback.py          # build_test_failure_feedback_message, build_format_retry_message,
+                           # is_no_improvement_signal — iterative-loop turn construction and stop conditions
+      traceback_utils.py   # extract_last_traceback — shared by context_enricher.py and feedback.py
     patch_applier.py # apply_patch_and_validate — shared try/finally helper used by LLM (and future) backends
   evaluation/
     base.py          # EvaluationRunner ABC
@@ -195,6 +225,8 @@ src/apr_framework/
                             # against ground truth, writes results.json + README.md;
                             # LocalizationTechniqueResult holds ranked_locations + top_k_hits per run
     repair_comparison_runner.py  # RepairComparisonRunner (Task 5) — drives bug x FL-mode repair matrix, aggregates results.json + README.md
+    llm_repair_comparison_runner.py  # LLMRepairComparisonRunner — bug x variant x FL-mode matrix for LLM repair,
+                                     # tracks llm_query_count/time_to_first_plausible/rank metrics, writes results.json + README.md
   reporting/
     base.py          # ReportGenerator ABC
     archive.py       # ArchiveReportGenerator — writes report.md summary + zips run artifacts
@@ -227,9 +259,15 @@ Both patches use `replace_once` helpers that are idempotent (safe to re-apply). 
 **Patch ranking is optional and non-destructive.** `RepairEvaluationRunner` accepts an optional `ranker: PatchRanker | None`. When provided, it reorders plausible results after the correctness check and writes both orderings into `repair_results.json`: `plausible_patches` (generation order, the baseline) and `ranked_plausible_patches` (ranked order). `rank_of_first_correct` (1-indexed) is stored in `RepairRunMetrics` and emitted at the top level of each bug's JSON payload. The `PatchRanker` ABC lives in `repair/ranking/base.py`; the only current implementation is `WeightedCompositeRanker` (`repair/ranking/weighted.py`), which combines a suspiciousness score, patch simplicity, and operator priority using a configurable weighted sum. Enabled by default with `--ranker weighted`; disabled with `--ranker none`.
 
 **Repair evaluation matrix (Task 5).** `bugsinpy evaluate-repair` runs the full repair pipeline on a set of bugs under both `auto` and `perfect` FL with the ranker applied, then writes an aggregated `experiment_results/repair/{results.json,README.md}` (per-bug tables, aggregate, generated discussion). `RepairComparisonRunner` (`evaluation/repair_comparison_runner.py`) only orchestrates the matrix and aggregates — each (bug, FL mode) cell is executed by the existing `RepairEvaluationRunner` and gets its own `runs/run_NNN` directory (logs + patch diffs preserved as artifacts). A localization failure for one cell (e.g. FauxPy uninstallable on a bug's Python) is captured as an error cell rather than aborting the matrix. This mirrors the `evaluate-localization` / `LocalizationComparisonRunner` pattern.
+
+**LLM repair evaluation matrix (Assignment 4, Task 5).** `bugsinpy evaluate-llm-repair` runs the same style of matrix as `evaluate-repair` but over `bugs × variants × fl_modes`, where `variants` ∈ `{single-shot, context-enriched, iterative}` map to `LLMRepairConfig` toggle presets in `_LLM_VARIANT_TOGGLES` (`cli/app.py`) — none of the three enable few-shot, since few-shot is only reachable via the plain `repair --few-shot N` flag. `LLMRepairComparisonRunner` (`evaluation/llm_repair_comparison_runner.py`) builds a fresh `LLMRepairAlgorithm` + `OpenAICompatibleClient` per cell (keeps each cell's `llm_query_count` isolated), writes incremental `results.json` after every cell (crash-safe against long LLM runs), and generates a `README.md` with per-bug tables plus three auto-written analyses: iterative-vs-single-shot effect, context-enrichment effect, and a side-by-side comparison against the Assignment-3 template results. Output defaults to `experiment_results/llm_repair/task5/`.
 **`LocalizationComparisonRunner`** (`evaluation/localization_runner.py`) runs the full 8-technique comparison matrix and emits a markdown report with per-bug tables, an aggregate Top-k accuracy table, and an auto-generated discussion section. The technique list is built in `app._build_techniques()` and covers: SBFL (Ochiai/Tarantula/D*/Jaccard/WSBI), MBFL-Metallaxis (exhaustive baseline), MBFL-Metallaxis-Random (budget-capped extension), and Hybrid. Ground-truth matching via `_files_match` is path-flexible — it handles FauxPy's short relative paths against git-diff absolute paths by comparing suffixes and, as a last resort, filenames.
 
-**LLM-based repair (Assignment 4).** `LLMRepairAlgorithm` (`repair/llm/algorithm.py`) implements the `RepairAlgorithm` ABC and plugs into the same `run_validation_loop` / `RepairEvaluationRunner` pipeline as the template backend. The algorithm iterates over the top-N FL locations, calls `extract_function_source` to isolate the enclosing function (with a ±25-line window fallback), builds a structured system + user prompt via `build_repair_prompt`, and samples up to `max_patch_count` candidate patches from the LLM. `extract_patch_from_llm_response` finds a fenced code block in the response, validates its syntax with `ast.parse`, splices the replacement into the original file lines, and produces a `unified_diff` with absolute paths as `fromfile`/`tofile`. Validation uses `subprocess.run(["patch", "-p0"], ...)` (absolute paths require `-p0`, not `-p1`) inside the shared `apply_patch_and_validate` helper (`repair/patch_applier.py`), which guarantees file restoration in a `try/finally` block regardless of test outcome. `OpenAICompatibleClient` (`repair/llm/client.py`) reads the API key from the environment at call time and uses `stream=False` (GPT@RUB does not support streaming). Selected via `--technique llm`; the client is constructed in `_build_llm_algorithm` in `cli/app.py`.
+**LLM-based repair (Assignment 4).** `LLMRepairAlgorithm` (`repair/llm/algorithm.py`) implements the `RepairAlgorithm` ABC and plugs into the same `RepairEvaluationRunner` pipeline as the template backend, but still generates and validates **whole-function** replacements, not SEARCH/REPLACE edit blocks (`patch_extractor.py` has no edit-block support — this was explored in [docs/CHUNKS_FIX.md](docs/CHUNKS_FIX.md) but never landed). The algorithm iterates over the top-N FL locations, calls `extract_function_source` to isolate the enclosing function (with a ±25-line window fallback), builds a structured system + user prompt via `build_repair_prompt` (optionally injecting failing-test context and few-shot examples — see below), and samples up to `max_patch_count` candidate patches from the LLM. `extract_patch_with_source` finds a fenced code block in the response, validates its syntax with `ast.parse`, splices the replacement into the original file lines, and returns an `ExtractedPatch` (`diff_text` + `patched_source`, the latter stashed in `PatchCandidate.metadata["patched_source"]` so `is_correct_patch` can diff LLM patches). Validation uses `subprocess.run(["patch", "-p0"], ...)` (absolute paths require `-p0`, not `-p1`) inside the shared `apply_patch_and_validate` helper (`repair/patch_applier.py`), which guarantees file restoration in a `try/finally` block regardless of test outcome. `OpenAICompatibleClient` (`repair/llm/client.py`) reads the API key from the environment at call time and uses `stream=False`. Selected via `--technique llm`; the client is constructed in `_build_llm_algorithm_and_log_start` in `cli/app.py`.
+
+**`repair_loop` extension point (Assignment 4, Task 3).** `RepairAlgorithm.repair_loop(bug, checkout, *, budget, stop_on_first) -> LoopOutcome` (`repair/base.py`) is a non-abstract hook whose default implementation delegates to the shared `run_validation_loop` — every existing backend (template, single-shot LLM) inherits this unchanged. `LLMRepairAlgorithm.repair_loop` overrides it only when `LLMRepairConfig.iterative=True`, dispatching to `_run_iterative_loop`, which walks the top-N FL locations and runs one multi-turn `[system, user, assistant, user, ...]` conversation per location via `_run_conversation_for_location` (up to `max_iterations` turns), sharing one global `budget` (test-suite executions) across all locations. A failed turn appends `build_test_failure_feedback_message` (from `feedback.py`, branching on trigger vs. regression failure) as the next user turn; `is_no_improvement_signal` and unparsable-reply retries (capped at 2) end a location's conversation early. Both loop shapes converge on the same `build_loop_summary` helper, so downstream JSON output is shape-independent. `RepairAlgorithm.llm_query_count() -> int | None` (default `None`) lets backends report how many LLM calls a run made; the runner surfaces it in evaluation output.
+
+**Context enrichment and few-shot (Assignment 4, Task 2).** `LLMRepairConfig.context_enrichment` (default `True`) and `.few_shot_count` (default `0`) are independent toggles consumed inside `_build_location_prompt`, shared by both the single-shot and iterative paths. `context_enricher.build_failing_test_context` reads the trigger test's source from the checkout and runs it once unpatched to capture a traceback (via `extract_last_traceback`); any failure degrades to an empty context rather than raising. `few_shot.build_few_shot_examples` reconstructs up to N buggy→fixed pairs from *other* bugs in the same BugsInPy project by parsing their `bug_patch.txt` diffs — deterministic, offline, and independent of the current bug's checkout state.
 
 ### Directory conventions
 ```
