@@ -568,8 +568,12 @@ judgment and a set of tracked metrics, all surfaced in the structured JSON outpu
      ([`repair/regression.py`](src/apr_framework/repair/regression.py)).
      - ==> trigger_passed + regression_ok
 - **Correct** -> a *plausible* patch that also matches the developer fix
-  (BugsInPy ground truth) at the **diff level**. Implemented in
-  [`repair/correctness.py`](src/apr_framework/repair/correctness.py).
+  (BugsInPy ground truth). Judged by **two independent, complementary metrics** in
+  [`repair/correctness.py`](src/apr_framework/repair/correctness.py) — an **exact
+  diff match** (boolean) and a **context similarity score** (graded, `0.0`–`1.0`).
+  Both are recorded per patch; the exact match remains the *sole* driver of
+  `RepairStatus.CORRECT` and `correct_count` (pre-existing behavior is unchanged).
+  See "The two correctness metrics" below.
 
 #### Regression check (the "no previously passing test broken" half)
 
@@ -594,15 +598,69 @@ prepared environment is reused by temporarily swapping the checkout's
 on by default and can be skipped for speed with `--no-regression-check`, in which
 case plausibility falls back to the trigger test only.
 
-The correctness check compares the candidate to the reference fix
+#### The two correctness metrics
+
+Both metrics compare the candidate to the reference fix
 (`projects/<project>/bugs/<id>/bug_patch.txt`, read via
-`BugsInPyAdapter.get_reference_patch`). Because the template generator reconstructs
+`BugsInPyAdapter.get_reference_patch`), and both start from the same
+**reformatting-neutral minimal diff**: because the template generator reconstructs
 source with `ast.unparse` (which reformats whole files), a raw textual diff would
-never match. So we build a **reformatting-neutral minimal diff** -> both the original
-and the patched source are round-tripped through `ast.unparse`, so cosmetic noise
-cancels out — then reduce each side (candidate and reference) to its set of
-whitespace-normalized added/removed lines and require them to be equal for the
-touched file. This is a deliberately strict, purely syntactic check.
+never match, so both the original and the patched source are round-tripped through
+`ast.unparse` and the cosmetic noise cancels out. What they *do* with that diff
+differs.
+
+**Metric 1 — exact diff match** (`is_correct_patch`, unchanged). A **boolean**:
+reduce each side (candidate and reference) to its set of whitespace-normalized
+added/removed lines and require them to be **equal** for the touched file. This is a
+deliberately strict, purely syntactic check — it is the one that sets
+`RepairStatus.CORRECT` and feeds `correct_count`.
+
+> **Why keep such a strict metric?** Because a byte-exact match is itself a useful
+> signal. When an LLM keeps reproducing the developer's fix *1:1*, that is evidence
+> of **overfitting to — or memorising (data contamination of) — the benchmark's
+> public fixes** rather than reasoning to a fix independently. A high exact-match
+> rate is therefore something to *watch for*, not just celebrate.
+
+**Metric 2 — context similarity score** (`context_similarity_score`, new). A
+**float in `[0.0, 1.0]`** saying *how close* the candidate's edit is to the
+developer's, **including the surrounding context lines** the exact metric discards.
+
+*How it is measured, intuitively:* the exact metric throws away the unchanged lines
+around an edit and only asks "are the changed lines identical?". The similarity
+metric instead keeps each edit as a **hunk** — its added/removed lines **plus a few
+unchanged context lines around them** — lines the candidate's hunk up against the
+developer's hunk, and measures their textual overlap with Python's
+`difflib.SequenceMatcher` (the standard "how similar are these two pieces of text?"
+ratio). We compare *hunk-to-hunk* (not whole files) so that a one-line fix in a
+2000-line file is judged on its neighbourhood, not drowned out by the thousands of
+identical untouched lines. When the developer fix has several hunks, each candidate
+hunk is paired with its most-similar reference hunk and the best pairing wins.
+
+The score reads as:
+
+| Score | Meaning |
+|---|---|
+| `1.0` | identical edit in an identical neighbourhood (same fix, same place) |
+| high, below `1.0` | the fix lands in the same place and is *nearly* the same — e.g. a renamed local variable. The exact metric calls this `False`; the score rewards the near-miss |
+| low | a plausible patch that fixes the bug a *different* way than the developer — it shares only the surrounding context, so the score stays small |
+
+A worked example (`total > self.limit` → `total >= self.limit`):
+
+| Candidate | exact match | context similarity |
+|---|:---:|:---:|
+| identical to developer fix | `True` | `1.00` |
+| same `>=` fix, local variable renamed | `False` | `~0.85` |
+| different valid fix (early-return guard) | `False` | `~0.71` |
+
+Where the exact metric collapses the last two into the same `False` bucket, the
+similarity score **separates** them — so across a run you can report, e.g., "exact
+matches 20% of the time, but ≥0.85 similarity 60% of the time". A **cluster of exact
+`1.0`s** is the memorisation/contamination signal; a **spread of high-but-sub-1.0
+scores** is what independent reasoning-to-the-same-region looks like.
+
+Both metrics degrade gracefully (missing patch metadata, unreadable source, or a
+missing hunk yields `False` / `0.0`, never an exception), and neither is fooled by
+`ast.unparse` cosmetics.
 
 ### Tracked metrics
 
@@ -614,11 +672,13 @@ Every repair run records these in `repair_results.json` under a `"metrics"` bloc
 | `total_candidates_generated` | candidate patches produced before budget capping |
 | `candidates_validated` | candidates actually run against the test suite |
 | `plausible_count` | candidates whose patched program passed all tests |
-| `correct_count` | plausible candidates that match the developer fix |
+| `correct_count` | plausible candidates that **exactly** match the developer fix (Metric 1) |
 | `time_to_first_plausible_seconds` | wall-clock to the first plausible patch (`null` if none) |
 | `total_wall_clock_seconds` | wall-clock for the whole repair run |
 
-Each entry in `all_results` / `plausible_patches` also carries an `is_correct` flag.
+Each entry in `all_results` / `plausible_patches` also carries an `is_correct` flag
+(Metric 1, boolean) and a `context_similarity_score` (Metric 2, `0.0`–`1.0` for
+plausible patches; `null` for candidates that were never scored).
 
 ### Architecture: `RepairEvaluationRunner`
 

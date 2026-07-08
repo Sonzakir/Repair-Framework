@@ -32,7 +32,10 @@ from apr_framework.evaluation.base import EvaluationRunner
 from apr_framework.evaluation.run_writer import RunWriter
 from apr_framework.localization.base import FaultLocalizer
 from apr_framework.repair.base import RepairAlgorithm
-from apr_framework.repair.correctness import is_correct_patch
+from apr_framework.repair.correctness import (
+    context_similarity_score,
+    is_correct_patch,
+)
 from apr_framework.repair.assessment.base import PatchAssessor
 from apr_framework.repair.ranking.base import PatchRanker
 from apr_framework.repair.run_loop import LoopOutcome
@@ -195,6 +198,12 @@ class RepairEvaluationRunner(EvaluationRunner):
         for result in outcome.plausible_results:
             if result.patch is None or reference is None:
                 continue
+            # Metric 2 (context similarity) — graded closeness to the developer fix,
+            # recorded alongside the exact-diff verdict without altering it.
+            result.patch.metadata["context_similarity_score"] = (
+                context_similarity_score(result.patch, reference)
+            )
+            # Metric 1 (exact diff match) — unchanged.
             if is_correct_patch(result.patch, reference):
                 result.status = RepairStatus.CORRECT
                 result.validation_summary += " Matches the developer fix (correct)."
@@ -385,14 +394,26 @@ class RepairEvaluationRunner(EvaluationRunner):
             "patch_id": patch.patch_id if patch else None,
             "status": result.status.value,
             "is_correct": result.status == RepairStatus.CORRECT,
+            # Graded closeness to the developer fix (0.0–1.0); None for non-plausible
+            # patches, which are never scored. Independent of the is_correct verdict.
+            "context_similarity_score": (patch.metadata if patch else {}).get(
+                "context_similarity_score"
+            ),
             "summary": patch.summary if patch else None,
             "validation_summary": result.validation_summary,
             "diff_text": patch.diff_text if patch else None,
             "metadata": {
                 k: v
                 for k, v in (patch.metadata if patch else {}).items()
-                # omit large blobs: full patched source and raw pytest output
-                if k not in ("patched_source", "raw_test_output", "retrieval_trace")
+                # omit large blobs and the similarity score (surfaced above as a
+                # top-level key): full patched source and raw pytest output
+                if k
+                not in (
+                    "patched_source",
+                    "raw_test_output",
+                    "retrieval_trace",
+                    "context_similarity_score",
+                )
             },
         }
         retrieval_trace = (patch.metadata if patch else {}).get("retrieval_trace")
