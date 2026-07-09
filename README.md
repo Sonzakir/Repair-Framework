@@ -38,7 +38,7 @@ and `File | Function | Line | Score` table formats
 - **Hybrid SBFL+MBFL localizer** — min-max normalises and combines scores from both families with configurable weights; locations found by both backends receive a tiebreak bonus
 - **MBFL random-budget extension** — caps expensive mutant validation at `--budget N` mutants using random selection, making MBFL practical on large projects
 - **`evaluate-localization` command** — runs all 8 techniques (5 SBFL, 2 MBFL, 1 Hybrid) on a configurable set of BugsInPy bugs, ranks the ground-truth faulty line for each, and writes `experiment_results/results.json` and `experiment_results/README.md`
-- **Template-based repair backend** (`--technique template`) — AST mutation operators driven by FL, with patch ranking and an evaluation matrix (Assignment 3)
+- **Template-based repair backend** (`--technique template`) — AST mutation operators driven by FL, with patch ranking and an evaluation matrix (Iteration 3)
 - **LLM-based repair backend** (`--technique llm`) — FL-guided prompting against GPT@RUB, with context enrichment, few-shot examples, an **iterative test-failure feedback loop** (`--iterative`), and optional codebase context retrieval before patch generation (`--retrieval-budget`)
 - **LLM-based fault localization** (`localize --backend llm`) — asks the LLM to rank suspicious source lines from failing-test evidence and emits the same `RankedLocation` format as FauxPy
 - **LLM-based patch assessment** (`repair --assess`) — assesses plausible patches for semantic quality, records `quality_score` plus a short rationale, and writes an assessment-ranked plausible-patch list
@@ -254,7 +254,7 @@ python -m apr_framework localize --project black --bug 1
 ```
 
 - The backend flag is available too. Use `fauxpy` for SBFL/MBFL/hybrid localization
-or `llm` for Assignment-5 LLM fault localization:
+or `llm` for Iteration-5 LLM fault localization:
 
 ```bash
 python -m apr_framework localize --backend fauxpy --project black --bug 1
@@ -528,7 +528,7 @@ Docker `exec` call, and a timed-out run is treated as a failed (non-plausible)
 candidate (exit code 124) instead of hanging the loop.
 
 **Fault-localization family is selectable.**
-`--fl-family sbfl|mbfl|hybrid` chooses which Assignment-2 localizer ranks the repair
+`--fl-family sbfl|mbfl|hybrid` chooses which Iteration-2 localizer ranks the repair
 targets (SBFL via `--localization-metric`, MBFL via `--mbfl-metric`/`--mutation-budget`/`--seed`,
 or a weighted `HybridFaultLocalizer` via `--sbfl-weight`/`--mbfl-weight`).
 
@@ -551,7 +551,7 @@ The command creates the next `runs/run_NNN/` directory and writes:
 - Only projects whose `run_test.sh` invokes pytest directly are supported (same restriction as the `localize` command).
 - Requires Python 3.9+ inside the framework container (for `ast.unparse()`).
 
-## 3.2) Patch validation pipeline 
+## Iteration 3 - Task 2 Patch validation pipeline 
 
 Task 2 turns repair into a proper **patch-validation pipeline** with two levels of
 judgment and a set of tracked metrics, all surfaced in the structured JSON output.
@@ -743,7 +743,7 @@ plausible patches; `null` for candidates that were never scored).
 
 The pipeline is implemented as a dedicated
 [`RepairEvaluationRunner`](src/apr_framework/evaluation/repair_runner.py) that
-implements the Assignment-1 `EvaluationRunner` ABC. It drives the shared
+implements the Iteration-1 `EvaluationRunner` ABC. It drives the shared
 generate-and-validate loop ([`repair/run_loop.py`](src/apr_framework/repair/run_loop.py)),
 runs the correctness check on plausible patches, assembles the metrics
 (`RepairRunMetrics` in `core/models.py`), and writes all run artifacts.
@@ -754,7 +754,7 @@ runs the correctness check on plausible patches, assembles the metrics
 > (`generate_patches` / `validate_patch`). Both the algorithm's convenience
 > `repair()` and the runner call it, so there is a single loop implementation and a
 > future LLM repair backend works with the runner unchanged. `RepairStatus.CORRECT`
-> (already defined in Assignment 1) is now actually used.
+> (already defined in Iteration 1) is now actually used.
 
 No new CLI flags are required — `python -m apr_framework repair ...` now prints and
 persists the validation metrics, e.g.:
@@ -768,7 +768,7 @@ Correct:       0 patch(es)
 Total time:    1.0s
 ```
 
-## 3.3) - FL-guided repair & perfect FL baselinex
+## Iteration 3 - Task 3 - FL-guided repair & perfect FL baseline
 
 Repair quality depends heavily on the fault location it is given. To separate the
 repair algorithm's strength from the localizer's, the `repair` command runs under
@@ -815,7 +815,7 @@ and raises a clear error if the bug has no `bug_patch.txt`.
 > whose fix is out of the mutation operators' reach (e.g. black#1's `try/except`
 > wrapper) still yields `correct=0` even with perfect locations.
 
-## 3.4) - Patch ranking   
+## Iteration 3 - Task4 - Patch ranking   
 
 When a repair run produces more than one plausible patch, the order in which
 patches are shown to a developer matters. Task 4 adds a **patch ranker** that
@@ -865,7 +865,7 @@ Rank of 1st correct (ranked): 2
 
 
 
-## 3.5) - Evaluation and comparison
+## Iteration 3 - Task 5 - Evaluation and comparison
 
 Task 5 runs the **whole repair pipeline** (fault localization → patch generation ->
 validation -> ranking) across a matrix of *bugs × FL modes* and aggregates the
@@ -967,7 +967,7 @@ operator reach**, and the three bugs show all three cases:
 
 Observation: for the bugs whose fix restructures control flow / or the bugs who makes calls to external services the
 single-operator template technique produces no plausible patch. We believe that the LLM-based repair
-backend introduced in the next assignment is expected to handle this class of bug
+backend introduced in the next iteration is expected to handle this class of bug
 better.
 
 The takeaway: FL quality decides *whether the fault line is even attempted*, but the
@@ -1008,9 +1008,9 @@ experiment_results/repair/
 # LLM-Based Repair
 
 
-## LLM-Based Repair (Assignment 4 — Task 1)
+## LLM-Based Repair (Iteration 4 — Task 1)
 
-This section documents the LLM-based repair backend introduced in Assignment 4.
+This section documents the LLM-based repair backend introduced in Iteration 4.
 It conforms to the same `RepairAlgorithm` ABC as the template backend and slots
 into the existing `RepairEvaluationRunner` pipeline without any changes.
 
@@ -1224,7 +1224,7 @@ untouched.
 
 ---
 
-## Context enrichment (Assignment 4 — Task 2)
+## Context enrichment (Iteration 4 — Task 2)
 
 ### Why this was needed
 
@@ -1402,7 +1402,7 @@ write (e.g. a bad path) is logged and ignored, never aborting the repair run.
 
 ---
 
-## Iterative Repair with Test-Failure Feedback (Assignment 4 — Task 3)
+## Iterative Repair with Test-Failure Feedback (Iteration 4 — Task 3)
 
 ### Why a single LLM query often isn't enough
 
@@ -1434,7 +1434,7 @@ still apply), then extends turn by turn:
 | **Conversation budget** | `--max-iterations` | **Per location** | Max conversation turns (LLM calls) spent on one location before giving up on it. Format-retry turns count toward this, so a location can never loop forever. |
 | **Validation budget** | `--budget` | **Global** | Max test-suite executions across the whole bug (same meaning as template and single-shot LLM repair). Decremented only when a syntactically valid patch is actually validated. |
 
-**Interface extension — the `repair_loop` ABC method (documented change).** The assignment
+**Interface extension — the `repair_loop` ABC method (documented change).** The iteration
 sheet asks that any interface change needed to accommodate LLM-specific behavior be made
 and documented. Here is why one was necessary. The real evaluation path
 (`RepairEvaluationRunner`) does **not** call an algorithm's `repair()`; it called the
@@ -1496,7 +1496,7 @@ the regression run's output out of the shared validation helper — noted as fol
 ### Stop conditions
 
 A location's conversation ends as soon as **any** of these holds — matching the
-assignment's Task 3 bullet list:
+iteration's Task 3 bullet list:
 
 - **A plausible patch is found** (all tests pass, no regressions).
 - **`--max-iterations` is exhausted** (conversation-turn budget for this location).
@@ -1605,12 +1605,12 @@ python -m apr_framework bugsinpy setup
   and sleeps as needed before each call to stay under the cap, so large `--max-candidates`
   / `--top-n` runs won't get rejected by the server for exceeding the rate limit.
 
-## FL-Guided Repair and Perfect FL Baseline (Assignment 4 — Task 4)
+## FL-Guided Repair and Perfect FL Baseline (Iteration 4 — Task 4)
 
 The LLM repair backend runs under the same two fault-localization conditions as the
 template technique, selected with `--fl-mode`:
 
-1. **Automated FL** — the suspicious locations come from the Assignment-2 localizer
+1. **Automated FL** — the suspicious locations come from the Iteration-2 localizer
    (SBFL / Ochiai by default; `--fl-family sbfl|mbfl|hybrid`), and the top-N ranked lines
    are fed into the prompt.
 2. **Perfect FL** — the ground-truth fault location is parsed directly from the BugsInPy
@@ -1631,18 +1631,18 @@ A hand-written single-bug baseline is under
 [`experiment_results/llm_repair/`](experiment_results/llm_repair/); the full multi-bug
 matrix is Task 5 below.
 
-## Evaluation and Comparison (Assignment 4 — Task 5)
+## Evaluation and Comparison (Iteration 4 — Task 5)
 
 Important Disclaimer: Since the token budget in GPT@RUB was exhausted while completing Task 4, the evaluation for Task 5 had to be performed using the OpenAI API.
 
 Task 5 runs the full LLM repair pipeline across a **bug × variant × FL-mode matrix** and
-writes an aggregated comparison, including a side-by-side against the Assignment-3 template
+writes an aggregated comparison, including a side-by-side against the Iteration-3 template
 technique.
 
 ### The matrix
 
 Four bugs — `black:1`, `tornado:14`, `scrapy:2`, `fastapi:3` (the same bugs as
-Assignment 3, so the comparison is direct) — each under **three repair variants** and
+Iteration 3, so the comparison is direct) — each under **three repair variants** and
 **two FL modes** = **24 cells**. The variants are *isolated axes*: each differs from the
 bare baseline by exactly one factor, so the effect of enrichment and of the iterative loop
 can be read off cleanly.
@@ -1686,10 +1686,10 @@ generated**, **plausible** and **correct** patch counts, **time to first plausib
 **total repair time**, and the correct-patch rank (generation order → ranked order). The
 generated report adds three analyses: *effect of iterative repair* (did the loop recover
 patches single-shot missed?), *effect of context enrichment* (did the extra context help?),
-and *comparison with Assignment 3* (best LLM outcome per bug vs. the template result read
+and *comparison with Iteration 3* (best LLM outcome per bug vs. the template result read
 from `experiment_results/repair/results.json`).
 
-### Interface change (documented per the assignment)
+### Interface change (documented per the iteration)
 
 The `RepairAlgorithm` ABC gained one non-abstract method,
 `llm_query_count() -> int | None` (default `None`; overridden by the LLM backend to report
@@ -1718,7 +1718,7 @@ The run used OpenAI `gpt-5.4`, `top_n=3`, `max_candidates=3`, `max_iterations=5`
 - **Perfect FL dominates.** Every correct patch came from perfect FL; automated (SBFL) FL
   produced **zero** plausible patches on these four bugs (and `tornado#14`'s auto cells are
   error cells — FauxPy 0.7.0 cannot install on its pinned Python 3.7.0, the same limitation
-  seen in Assignment 3). Fault-location precision is the dominant factor.
+  seen in Iteration 3). Fault-location precision is the dominant factor.
 - **Context enrichment helps — a lot, for plausibility.** Adding the failing-test source +
   error traceback **quadrupled** the plausible count under perfect FL (4 → 16): `black#1`
   0→3, `scrapy#2` 1→6, `fastapi#3` 0→4. It did not raise the *correct* count on these bugs,
@@ -1788,19 +1788,19 @@ python -m apr_framework repair --project black --bug 1 \
 
 
 
-# Assignment 5
+# Iteration 5
 
 
 ## Task 1: LLM-based Fault Localization
 
 Task 1 adds an LLM fault-localization backend that can be selected in place of the
-Assignment-2 FauxPy SBFL/MBFL localizers. It follows the existing Assignment-1
+Iteration-2 FauxPy SBFL/MBFL localizers. It follows the existing Iteration-1
 `FaultLocalizer` interface and returns the same ranked `file`/`line` locations as the
 other backends, so repair and evaluation can consume LLM-FL results without special-case
 pipeline changes.
 
-The localizer gathers the assignment-required evidence by running the failing trigger test
-once, reusing the Assignment-4 failing-test context builder to capture the test body,
+The localizer gathers the required evidence by running the failing trigger test
+once, reusing the Iteration-4 failing-test context builder to capture the test body,
 assertion/traceback output, and relevant project source. To keep the prompt focused, it
 combines traceback frames with symbols patched or mocked by the failing test, then sends
 line-numbered source windows to the model and asks for a strict JSON ranking of suspicious
@@ -1924,7 +1924,7 @@ When assessment is enabled, `repair_results.json` gains:
 If `--assess` is omitted, these assessment fields are absent and the repair result schema
 remains the same as before.
 
-## Assignment 5 — Task 3: Context Retrieval for LLM Repair
+## Iteration 5 — Task 3: Context Retrieval for LLM Repair
 
 Task 3 adds an optional retrieval pre-phase to LLM repair. Before generating a patch,
 the model may request focused codebase information with one of three text commands:
