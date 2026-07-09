@@ -1,7 +1,9 @@
 # Automated Debugging and Repair Framework
 
+![Framework Illustration](assets/Banner.png)
 
- 
+*Illustration generated with OpenAI DALL·E*
+
 - Architectural: benchmark-specific details are hidden behind framework APIs, while repair, localization, evaluation, and reporting are modeled as replaceable/extendable components.
 
 ## What is implemented
