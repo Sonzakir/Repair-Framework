@@ -836,5 +836,16 @@ def build_parser() -> argparse.ArgumentParser:
             "used for LLM patch assessment (default: assess_prompt1)."
         ),
     )
+    repair_parser.add_argument(
+        "--similarity-score",
+        dest="similarity_score",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Score each plausible patch's graded closeness to the developer fix "
+            "(0.0-1.0, plus a human-readable band) and print/record it alongside "
+            "the unchanged exact-diff 'correct' verdict (default: disabled)."
+        ),
+    )
 
     return parser

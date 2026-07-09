@@ -609,26 +609,26 @@ never match, so both the original and the patched source are round-tripped throu
 `ast.unparse` and the cosmetic noise cancels out. What they *do* with that diff
 differs.
 
-**Metric 1 — exact diff match** (`is_correct_patch`, unchanged). A **boolean**:
+**Metric 1 : exact diff match** (`is_correct_patch`, unchanged). A **boolean**:
 reduce each side (candidate and reference) to its set of whitespace-normalized
 added/removed lines and require them to be **equal** for the touched file. This is a
-deliberately strict, purely syntactic check — it is the one that sets
+deliberately strict, purely syntactic check, it is the one that sets
 `RepairStatus.CORRECT` and feeds `correct_count`.
 
 > **Why keep such a strict metric?** Because a byte-exact match is itself a useful
 > signal. When an LLM keeps reproducing the developer's fix *1:1*, that is evidence
-> of **overfitting to — or memorising (data contamination of) — the benchmark's
+> of **overfitting to , or memorising (data contamination of) , the benchmark's
 > public fixes** rather than reasoning to a fix independently. A high exact-match
 > rate is therefore something to *watch for*, not just celebrate.
 
-**Metric 2 — context similarity score** (`context_similarity_score`, new). A
+**Metric 2 : context similarity score** (`context_similarity_score`, new). A
 **float in `[0.0, 1.0]`** saying *how close* the candidate's edit is to the
 developer's, **including the surrounding context lines** the exact metric discards.
 
 *How it is measured, intuitively:* the exact metric throws away the unchanged lines
 around an edit and only asks "are the changed lines identical?". The similarity
-metric instead keeps each edit as a **hunk** — its added/removed lines **plus a few
-unchanged context lines around them** — lines the candidate's hunk up against the
+metric instead keeps each edit as a **hunk** : its added/removed lines **plus a few
+unchanged context lines around them** , lines the candidate's hunk up against the
 developer's hunk, and measures their textual overlap with Python's
 `difflib.SequenceMatcher` (the standard "how similar are these two pieces of text?"
 ratio). We compare *hunk-to-hunk* (not whole files) so that a one-line fix in a
@@ -653,7 +653,7 @@ A worked example (`total > self.limit` → `total >= self.limit`):
 | different valid fix (early-return guard) | `False` | `~0.71` |
 
 Where the exact metric collapses the last two into the same `False` bucket, the
-similarity score **separates** them — so across a run you can report, e.g., "exact
+similarity score **separates** them , so across a run you can report, e.g., "exact
 matches 20% of the time, but ≥0.85 similarity 60% of the time". A **cluster of exact
 `1.0`s** is the memorisation/contamination signal; a **spread of high-but-sub-1.0
 scores** is what independent reasoning-to-the-same-region looks like.
@@ -661,6 +661,65 @@ scores** is what independent reasoning-to-the-same-region looks like.
 Both metrics degrade gracefully (missing patch metadata, unreadable source, or a
 missing hunk yields `False` / `0.0`, never an exception), and neither is fooled by
 `ast.unparse` cosmetics.
+
+Here is an example usage of both correctness metric:
+1. Exact diff match: Baseline -> no flag
+```bash
+python -m apr_framework repair --project scrapy --bug 2 \
+  --technique llm --model gpt-5.4 --temperature 1.0 \
+  --max-candidates 3 --top-n 3 --llm-provider openai-compatible \
+  --llm-base-url https://api.openai.com/v1 --llm-api-key-env OPENAI_API_KEY \
+  --system-prompt prompt1 --context-enrichment --no-iterative \
+  --fl-mode perfect --budget 200 --timeout 120 --runs-dir runs
+apr-bugsinpy-executor
+
+Run directory: /workspace/runs/run_xxx
+Project:       scrapy
+Bug ID:        2
+Status:        plausible
+Generated:     6 candidate(s)
+Validated:     6 candidate(s)
+Plausible:     6 patch(es)
+Correct:       0 patch(es)
+1st plausible: 12.1s
+Total time:    14.0s
+```
+2. Context similarity score: requires `--similarity-score`
+```bash
+python -m apr_framework repair --project scrapy --bug 2 \
+  --technique llm --model gpt-5.4 --temperature 1.0 \
+  --max-candidates 3 --top-n 3 --llm-provider openai-compatible \
+  --llm-base-url https://api.openai.com/v1 --llm-api-key-env OPENAI_API_KEY \
+  --system-prompt prompt1 --context-enrichment --no-iterative \
+  --fl-mode perfect --budget 200 --timeout 120 --similarity-score --runs-dir runs
+
+
+Run directory: /workspace/runs/run_xxx
+Project:       scrapy
+Bug ID:        2
+Status:        plausible
+Generated:     6 candidate(s)
+Validated:     6 candidate(s)
+Plausible:     6 patch(es)
+Correct:       0 patch(es)
+1st plausible: 9.1s
+Total time:    10.9s
+###################################################################################
+# Similarity scores for plausible patches (closeness to the developer fix, 0.0-1.0):
+#  1.00        identical to the developer fix
+#  0.85-0.99   very similar (nearly the same edit)
+#  0.60-0.84   similar (recognizable overlap)
+#  0.30-0.59   loosely similar
+#  0.00-0.29   different (little in common)
+###################################################################################
+  Patch 1 (llm-1-0) -> 0.84  (similar (recognizable overlap))
+  Patch 2 (llm-1-1) -> 0.84  (similar (recognizable overlap))
+  Patch 3 (llm-1-2) -> 0.84  (similar (recognizable overlap))
+  Patch 4 (llm-2-0) -> 0.84  (similar (recognizable overlap))
+  Patch 5 (llm-2-1) -> 0.92  (very similar (nearly the same edit))
+  Patch 6 (llm-2-2) -> 0.92  (very similar (nearly the same edit))
+```
+
 
 ### Tracked metrics
 

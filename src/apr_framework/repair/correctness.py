@@ -40,7 +40,12 @@ the developer's changed region (each as a *hunk*: its added/removed lines plus t
 unchanged lines around them) and measure their textual overlap with
 ``difflib.SequenceMatcher``:
 
-  * ``1.0`` -> the two hunks are identical (same edit, same neighbourhood).
+  * ``1.0`` -> the two hunks are identical (same edit, same neighbourhood). This is
+    guaranteed, not just typical: whenever :func:`is_correct_patch` already agrees
+    the candidate is an exact match, the score short-circuits to ``1.0`` rather than
+    trusting ``SequenceMatcher`` — which can otherwise land a point or two short of
+    ``1.0`` on a true match, since ``ast.unparse`` reformatting elsewhere in the file
+    can shift *unchanged* context lines the hunk-level comparison still looks at.
   * high-but-below-1.0 —> the fix lands in the same place and is nearly the same,
     differing only in small ways (e.g. a renamed local variable). The exact metric
     would call this ``False``; the score rewards the near-miss.
@@ -285,8 +290,15 @@ def context_similarity_score(
     Returns:
         A float in ``[0.0, 1.0]``. Degrades to ``0.0`` (never raises) when patch
         metadata is missing, the source file cannot be read, or either side yields
-        no hunk — mirroring :func:`is_correct_patch`'s defensive contract.
+        no hunk — mirroring :func:`is_correct_patch`'s defensive contract. Always
+        exactly ``1.0`` when :func:`is_correct_patch` already agrees the candidate
+        is an exact match — hunk-level ``SequenceMatcher`` similarity can otherwise
+        fall short of ``1.0`` on a true match, since it also compares unchanged
+        context lines that ``ast.unparse`` can reformat elsewhere in the file.
     """
+    if is_correct_patch(candidate, reference_diff_text):
+        return 1.0
+
     patched_source = candidate.metadata.get("patched_source")
     source_path_str = candidate.metadata.get("source_path")
     if not patched_source or not source_path_str or not reference_diff_text:
@@ -320,3 +332,27 @@ def context_similarity_score(
                 best_ratio = pairing_ratio
 
     return best_ratio
+
+
+_SIMILARITY_BANDS: tuple[tuple[float, str], ...] = (
+    (1.0, "identical to the developer fix"),
+    (0.85, "very similar (nearly the same edit)"),
+    (0.6, "similar (recognizable overlap)"),
+    (0.3, "loosely similar"),
+    (0.0, "different (little in common)"),
+)
+
+
+def describe_similarity_score(score: float) -> str:
+    """Translate a :func:`context_similarity_score` value into a human-readable band.
+
+    The raw float is hard to eyeball at a glance — this maps it onto the same bands
+    used in the module docstring's worked example, so callers (the CLI, reports) can
+    show e.g. ``0.92 (very similar)`` instead of a bare number. Bounds are inclusive
+    on the low end of each band; ``1.0`` only ever occurs via
+    :func:`context_similarity_score`'s :func:`is_correct_patch` short-circuit.
+    """
+    for lower_bound, label in _SIMILARITY_BANDS:
+        if score >= lower_bound:
+            return label
+    return _SIMILARITY_BANDS[-1][1]

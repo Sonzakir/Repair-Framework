@@ -34,6 +34,7 @@ from apr_framework.localization.base import FaultLocalizer
 from apr_framework.repair.base import RepairAlgorithm
 from apr_framework.repair.correctness import (
     context_similarity_score,
+    describe_similarity_score,
     is_correct_patch,
 )
 from apr_framework.repair.assessment.base import PatchAssessor
@@ -72,6 +73,12 @@ class RepairEvaluationRunner(EvaluationRunner):
                        caller owns ``config.json`` and ``execution.log`` (e.g. the
                        CLI logs localization there before repair); otherwise the
                        runner creates a fresh run directory and writes config.json.
+        score_similarity: When True, also score each plausible patch's graded
+                       closeness to the developer fix (0.0-1.0, see
+                       ``repair/correctness.py``) and record it alongside the
+                       unchanged exact-diff ``is_correct`` verdict. Off by default —
+                       when disabled, output is identical to a build that never had
+                       this metric.
     """
 
     def __init__(
@@ -85,6 +92,7 @@ class RepairEvaluationRunner(EvaluationRunner):
         ranker: PatchRanker | None = None,
         assessor: PatchAssessor | None = None,
         localization_result: LocalizationResult | None = None,
+        score_similarity: bool = False,
     ) -> None:
         self._project_root = Path(project_root)
         self._runs_dir = self._resolve_runs_dir(runs_dir)
@@ -95,6 +103,7 @@ class RepairEvaluationRunner(EvaluationRunner):
         self._ranker = ranker
         self._assessor = assessor
         self._localization_result = localization_result
+        self._score_similarity = score_similarity
         self._last_run_dir: Path | None = None
 
     @property
@@ -157,6 +166,11 @@ class RepairEvaluationRunner(EvaluationRunner):
                     if self._assessor is not None
                     else None
                 ),
+                similarity_scored_plausible_results=(
+                    bug_result.outcome.plausible_results
+                    if self._score_similarity
+                    else None
+                ),
             )
             for bug_result in bug_run_results
         ]
@@ -199,10 +213,15 @@ class RepairEvaluationRunner(EvaluationRunner):
             if result.patch is None or reference is None:
                 continue
             # Metric 2 (context similarity) — graded closeness to the developer fix,
-            # recorded alongside the exact-diff verdict without altering it.
-            result.patch.metadata["context_similarity_score"] = (
-                context_similarity_score(result.patch, reference)
-            )
+            # recorded alongside the exact-diff verdict without altering it. Opt-in
+            # only: skipped entirely unless --similarity-score was passed, so a
+            # normal run's output is unchanged.
+            if self._score_similarity:
+                similarity_score = context_similarity_score(result.patch, reference)
+                result.patch.metadata["context_similarity_score"] = similarity_score
+                result.patch.metadata["similarity_band"] = describe_similarity_score(
+                    similarity_score
+                )
             # Metric 1 (exact diff match) — unchanged.
             if is_correct_patch(result.patch, reference):
                 result.status = RepairStatus.CORRECT
@@ -387,40 +406,44 @@ class RepairEvaluationRunner(EvaluationRunner):
 
         return bug_payload
 
-    @staticmethod
-    def _serialise_result(result: RepairAttemptResult) -> dict[str, Any]:
+    def _serialise_result(self, result: RepairAttemptResult) -> dict[str, Any]:
         patch = result.patch
+        metadata = patch.metadata if patch else {}
         payload = {
             "patch_id": patch.patch_id if patch else None,
             "status": result.status.value,
             "is_correct": result.status == RepairStatus.CORRECT,
-            # Graded closeness to the developer fix (0.0–1.0); None for non-plausible
-            # patches, which are never scored. Independent of the is_correct verdict.
-            "context_similarity_score": (patch.metadata if patch else {}).get(
-                "context_similarity_score"
-            ),
             "summary": patch.summary if patch else None,
             "validation_summary": result.validation_summary,
             "diff_text": patch.diff_text if patch else None,
             "metadata": {
                 k: v
-                for k, v in (patch.metadata if patch else {}).items()
-                # omit large blobs and the similarity score (surfaced above as a
-                # top-level key): full patched source and raw pytest output
+                for k, v in metadata.items()
+                # omit large blobs and the similarity fields (surfaced above as
+                # top-level keys when enabled): full patched source, raw pytest
+                # output
                 if k
                 not in (
                     "patched_source",
                     "raw_test_output",
                     "retrieval_trace",
                     "context_similarity_score",
+                    "similarity_band",
                 )
             },
         }
-        retrieval_trace = (patch.metadata if patch else {}).get("retrieval_trace")
-        if retrieval_trace is not None:
-            payload["retrieval"] = RepairEvaluationRunner._serialise_retrieval_trace(
-                retrieval_trace
+        if self._score_similarity:
+            # Graded closeness to the developer fix (0.0-1.0) plus a human-readable
+            # band; None for non-plausible patches, which are never scored.
+            # Independent of the is_correct verdict. Omitted entirely (not just
+            # null) unless --similarity-score was passed.
+            payload["context_similarity_score"] = metadata.get(
+                "context_similarity_score"
             )
+            payload["similarity_band"] = metadata.get("similarity_band")
+        retrieval_trace = metadata.get("retrieval_trace")
+        if retrieval_trace is not None:
+            payload["retrieval"] = self._serialise_retrieval_trace(retrieval_trace)
         return payload
 
     @staticmethod

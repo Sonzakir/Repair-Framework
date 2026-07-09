@@ -282,6 +282,10 @@ class EvaluationResult:
     # the plausible patches in assessment order, each carrying quality_score and
     # assessment_rationale in its patch metadata. Left None when no assessor ran.
     assessed_plausible_results: "list[RepairAttemptResult] | None" = None
+    # Optional, populated by repair runs when --similarity-score is enabled: the
+    # plausible patches in generation order, each carrying context_similarity_score
+    # and similarity_band in its patch metadata. Left None when the flag is off.
+    similarity_scored_plausible_results: "list[RepairAttemptResult] | None" = None
 
 
 @dataclass(frozen=True)

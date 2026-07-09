@@ -103,6 +103,7 @@ python -m apr_framework repair --project <project> --bug <bug_id> \
   [--localization-metric ochiai] [--mbfl-metric metallaxis] \
   [--skip-localize] [--granularity statement|function] \
   [--ranker weighted|none] [--ranker-weights w1,w2,w3] \
+  [--similarity-score | --no-similarity-score] \
   [--runs-dir runs]
 
 # Store an LLM API key in the local .env (interactive prompt)
@@ -122,6 +123,7 @@ python -m apr_framework repair --project <project> --bug <bug_id> \
   [--fl-mode auto|perfect] [--fl-family sbfl|mbfl|hybrid] \
   [--localization-metric ochiai] [--mbfl-metric metallaxis] \
   [--ranker weighted|none] [--ranker-weights w1,w2,w3] \
+  [--similarity-score | --no-similarity-score] \
   [--runs-dir runs]
 
 # Repair evaluation matrix (Task 5): each bug x {auto, perfect} FL + ranker
@@ -156,6 +158,8 @@ python -m apr_framework bugsinpy evaluate-llm-repair \
 `--test-target` is repeatable (`action="append"`); pass it once per pytest target. When `--metric` is omitted for SBFL/MBFL the family default applies; for hybrid runs use `--sbfl-metric`/`--mbfl-metric` instead.
 
 `--ranker none` is the default — no ranking, output identical to pre-Task-4 behavior. `--ranker weighted` opts in to ranking; `--ranker-weights` then overrides the three component weights (suspiciousness, simplicity, operator_priority) — only relative magnitudes matter, they are normalised internally. When ranking is off, `ranked_plausible_patches` is absent (`null`) from the JSON. Note `evaluate-llm-repair`'s `--ranker` default is `none`, unlike `evaluate-repair`'s default of `weighted`.
+
+`--similarity-score` is off by default — output is then byte-for-byte identical to a build that never had this metric (the `context_similarity_score`/`similarity_band` keys are omitted from `repair_results.json`, not just `null`). Pass `--similarity-score` to additionally grade each plausible patch's closeness to the developer fix on `[0.0, 1.0]` (see [docs/other_correctness_measurement.md](docs/other_correctness_measurement.md)); this prints a "Similarity scores for plausible patches" block to the terminal and adds `context_similarity_score`/`similarity_band` to every plausible/ranked/assessed/all-results entry in the JSON. It never affects the exact-diff `is_correct`/`correct_count` verdict, which stays the framework's data-contamination signal.
 `evaluate-localization` runs all 8 techniques (3 SBFL baselines, 2 SBFL extensions, 1 MBFL baseline, 1 MBFL-random extension, 1 Hybrid) on each specified bug and compares their rankings against the ground-truth faulty lines parsed from `bug_patch.txt`. All bugs must be checked out and compiled before running.
 
 For `--technique llm`: `--operators` and `--skip-localize` are ignored (LLM backend generates free-form patches, not AST mutations). All other shared flags (`--budget`, `--top-n`, `--fl-mode`, `--fl-family`, `--ranker`, etc.) behave identically. LLM-specific flags (`--model`, `--temperature`, `--max-candidates`, `--llm-base-url`, `--llm-api-key-env`, `--system-prompt`, `--context-enrichment`, `--few-shot`, `--iterative`, `--max-iterations`) are silently ignored when `--technique template` is selected. `--few-shot N` is independent of `--context-enrichment`/`--iterative` and works in single-shot mode too, but `evaluate-llm-repair`'s three built-in `--variants` (`single-shot`, `context-enriched`, `iterative`) never enable few-shot — it's only reachable via the plain `repair` command.

@@ -658,6 +658,10 @@ def _run_repair_evaluation_and_write_results(
         writer.log(f"Patch assessor: {assessor.name}")
         config_data["assessor"] = assessor.name
 
+    if args.similarity_score:
+        writer.log("Similarity scoring: enabled")
+    config_data["similarity_score"] = args.similarity_score
+
     runner = RepairEvaluationRunner(
         project_root=project_root,
         runs_dir=runs_dir,
@@ -668,6 +672,7 @@ def _run_repair_evaluation_and_write_results(
         ranker=ranker,
         assessor=assessor,
         localization_result=localization_result,
+        score_similarity=args.similarity_score,
     )
     eval_results = runner.run([checkout.bug], adapter, algorithm)
     repair_result = eval_results[0]
@@ -720,6 +725,8 @@ def _print_repair_summary_for_bug(
         )
         print(f"Assessment LLM calls:          {query_count_str}")
         _print_plausible_patch_assessments(repair_result.assessed_plausible_results)
+    if repair_result.similarity_scored_plausible_results is not None:
+        _print_similarity_scores(repair_result.similarity_scored_plausible_results)
 
 
 def _print_plausible_patch_assessments(
@@ -741,6 +748,43 @@ def _print_plausible_patch_assessments(
         rationale_str = metadata.get("assessment_rationale") or "—"
         print(f"  {rank_position}. {patch_id_str}  score={score_str}")
         print(f"     {rationale_str}")
+
+
+def _print_similarity_scores(
+    similarity_scored_plausible_results: list[RepairAttemptResult],
+) -> None:
+    """Print each plausible patch's graded closeness to the developer fix.
+
+    Shown in generation order (same order as ``plausible_patches`` in
+    ``repair_results.json``) with a human-readable band next to each score, since a
+    bare float like ``0.92`` is hard to eyeball on its own.
+    """
+    print("#"*90)
+    print(
+        "# Similarity scores for plausible patches "
+        "(closeness to the developer fix, 0.0-1.0):"
+    )
+    if not similarity_scored_plausible_results:
+        print("  none")
+        return
+    print("#  1.00        identical to the developer fix")
+    print("#  0.85-0.99   very similar (nearly the same edit)")
+    print("#  0.60-0.84   similar (recognizable overlap)")
+    print("#  0.30-0.59   loosely similar")
+    print("#  0.00-0.29   different (little in common)")
+    print("#"*90)
+    for patch_position, attempt_result in enumerate(
+        similarity_scored_plausible_results, start=1
+    ):
+        patch = attempt_result.patch
+        patch_id_str = patch.patch_id if patch is not None else "n/a"
+        metadata = patch.metadata if patch is not None else {}
+        similarity_score = metadata.get("context_similarity_score")
+        band_str = metadata.get("similarity_band", "n/a")
+        score_str = (
+            f"{similarity_score:.2f}" if similarity_score is not None else "n/a"
+        )
+        print(f"  Patch {patch_position} ({patch_id_str}) -> {score_str}  ({band_str})")
 
 
 def _build_ranker(args: argparse.Namespace) -> PatchRanker | None:
