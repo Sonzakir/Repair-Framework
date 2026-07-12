@@ -1979,6 +1979,25 @@ When retrieval is enabled and candidates are generated, each affected patch in
 The same pre-phase is used by single-shot and iterative LLM repair because it runs inside
 the shared `_build_location_prompt(...)` path before either mode asks for a patch.
 
+### Effect of the retrieval loop
+
+`black#1`, perfect FL, `--temperature 0.8 --max-candidates 5`:
+
+| Retrieval | Tools called by the model | Candidates generated | Plausible | Correct |
+|---|---|---|---|---|
+| off (`--retrieval-budget 0`) | — | 15 | 3 | 0 |
+| on (`--retrieval-budget 3`) | `get_function_definition("get_cache_file")` | 10 | **4** | 0 |
+
+With retrieval the model reached more plausible patches from fewer generated candidates —
+it pulls in the definitions it needs instead of guessing at them. (Single runs; repeated
+`black#1` runs vary by a few patches either way, so treat the margin as indicative.) On
+`ansible#3` the model retrieved `get_class_definition("DistributionFactCollector")`.
+
+Retrieval pays off only when the fault region depends on code the model cannot see; for
+self-contained regions it correctly declines to retrieve and patches directly. Set
+`APR_LLM_DEBUG_PROMPT=<dir>` (or `stderr`) to dump every prompt and inspect the retrieval
+turns. With `--retrieval-budget 0` (the default) prompts are byte-identical to Iteration 4.
+
 
 # Starting the application in clean ubuntu 24.04 Container 
 

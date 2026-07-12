@@ -13,6 +13,8 @@ _FALLBACK_WINDOW_LINES = 25
 
 _PROMPTS_DIRECTORY_PATH = Path(__file__).parent / "prompts"
 _DEFAULT_SYSTEM_PROMPT_NAME = "prompt1"
+RETRIEVAL_SYSTEM_ADDENDUM_PROMPT_NAME = "retrieval_system_addendum"
+RETRIEVAL_INSTRUCTIONS_PROMPT_NAME = "retrieval_instructions"
 
 
 def load_system_prompt(prompt_name: str) -> str:
@@ -39,6 +41,19 @@ def load_system_prompt(prompt_name: str) -> str:
             f"Available prompts: {available_prompt_names}"
         )
     return prompt_file_path.read_text(encoding="utf-8").strip()
+
+
+def build_system_message_with_retrieval_permission(
+    base_system_message_text: str,
+) -> str:
+    """Append the retrieval addendum so the system prompt allows RETRIEVE replies.
+
+    The repair system prompts forbid any output other than a fenced code block. A
+    retrieval command is not a fenced code block, so without this addendum the model
+    obeys the system prompt and never retrieves, no matter what the user message offers.
+    """
+    retrieval_addendum_text = load_system_prompt(RETRIEVAL_SYSTEM_ADDENDUM_PROMPT_NAME)
+    return f"{base_system_message_text}\n\n{retrieval_addendum_text}"
 
 
 def extract_function_source(
@@ -172,11 +187,16 @@ def build_repair_prompt(
         user_sections.append(_build_failing_test_section(failing_test_source))
     if error_traceback is not None:
         user_sections.append(_build_error_traceback_section(error_traceback))
+    retrieval_is_enabled = retrieval_instructions is not None
     if retrieval_instructions is not None:
         user_sections.append(
             _build_retrieval_instructions_section(retrieval_instructions)
         )
-    user_sections.append(_build_task_section(location))
+    user_sections.append(
+        _build_task_section_with_retrieval_option(location)
+        if retrieval_is_enabled
+        else _build_task_section(location)
+    )
 
     user_content = "\n\n".join(user_sections)
 
@@ -259,5 +279,23 @@ def _build_task_section(location: RankedLocation) -> str:
     return (
         f"## Task\n"
         f"Fix the bug at line {location.line}. Return the corrected function in a Python fenced\n"
+        "code block. Keep the fix minimal — change as few lines as necessary."
+    )
+
+
+def _build_task_section_with_retrieval_option(location: RankedLocation) -> str:
+    """Build the closing task instruction for retrieval mode.
+
+    This is the last thing the model reads, so it must offer the retrieve-or-patch
+    choice. The plain task section closes with an unconditional "return the corrected
+    function", which overrides the retrieval offer made earlier in the prompt.
+    """
+    return (
+        f"## Task\n"
+        f"Fix the bug at line {location.line}. First check the buggy region for project symbols\n"
+        "whose definitions are not shown above — helpers it calls, methods invoked on self, the\n"
+        "class it belongs to. If the fix depends on any of them, reply with a single RETRIEVE\n"
+        "command and nothing else. Only when every symbol the fix depends on is already visible\n"
+        "(or comes from the standard library), return the corrected function in a Python fenced\n"
         "code block. Keep the fix minimal — change as few lines as necessary."
     )

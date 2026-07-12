@@ -34,7 +34,9 @@ from apr_framework.repair.llm.feedback import (
 from apr_framework.repair.llm.few_shot import build_few_shot_examples
 from apr_framework.repair.llm.patch_extractor import extract_patch_with_source
 from apr_framework.repair.llm.prompt_builder import (
+    RETRIEVAL_INSTRUCTIONS_PROMPT_NAME,
     build_repair_prompt,
+    build_system_message_with_retrieval_permission,
     extract_function_source,
     load_system_prompt,
 )
@@ -94,10 +96,19 @@ class LLMRepairAlgorithm(RepairAlgorithm):
         self._adapter = adapter
         self._repair_config = repair_config
         self._llm_client = llm_client
-        self._system_message_text = load_system_prompt(repair_config.system_prompt_name)
+        base_system_message_text = load_system_prompt(repair_config.system_prompt_name)
+        retrieval_is_enabled = repair_config.retrieval_budget > 0
+        # With retrieval on, the system prompt must permit a bare RETRIEVE reply —
+        # its "fenced code block only" rule otherwise overrides the user-message
+        # protocol and the model never calls a tool.
+        self._system_message_text = (
+            build_system_message_with_retrieval_permission(base_system_message_text)
+            if retrieval_is_enabled
+            else base_system_message_text
+        )
         self._retrieval_instructions_text = (
-            load_system_prompt("retrieval_instructions")
-            if repair_config.retrieval_budget > 0
+            load_system_prompt(RETRIEVAL_INSTRUCTIONS_PROMPT_NAME)
+            if retrieval_is_enabled
             else None
         )
         # Regression baseline is established once, lazily, on the first

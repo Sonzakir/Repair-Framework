@@ -3,7 +3,11 @@
 from dataclasses import dataclass
 
 from apr_framework.core.exceptions import ConfigurationError
-from apr_framework.repair.llm.prompt_builder import load_system_prompt
+from apr_framework.repair.llm.prompt_builder import (
+    RETRIEVAL_INSTRUCTIONS_PROMPT_NAME,
+    RETRIEVAL_SYSTEM_ADDENDUM_PROMPT_NAME,
+    load_system_prompt,
+)
 
 _VALID_LLM_PROVIDERS: frozenset[str] = frozenset({"openai-compatible"})
 
@@ -94,4 +98,5 @@ class LLMRepairConfig:
         # Fail fast if the named prompt file does not exist, rather than at first LLM call.
         load_system_prompt(self.system_prompt_name)
         if self.retrieval_budget > 0:
-            load_system_prompt("retrieval_instructions")
+            load_system_prompt(RETRIEVAL_INSTRUCTIONS_PROMPT_NAME)
+            load_system_prompt(RETRIEVAL_SYSTEM_ADDENDUM_PROMPT_NAME)
