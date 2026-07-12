@@ -53,7 +53,7 @@ class LLMPatchAssessor(PatchAssessor):
         self._assessment_query_count = 0
         if not plausible_results:
             return []
-
+        # Gather the Failure Evidence once (they describe the bug not the fix)
         failing_test_source, error_traceback = self._gather_failure_evidence(checkout)
         patches_to_assess = self._select_patches_within_cap(plausible_results)
         for attempt_result in patches_to_assess:

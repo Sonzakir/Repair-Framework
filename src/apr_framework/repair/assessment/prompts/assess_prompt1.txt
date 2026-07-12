@@ -1,4 +1,4 @@
-You are assessing plausible program-repair patches. A plausible patch passes the visible tests, but it may still be semantically wrong or overfit to those tests. Your job is to judge the semantic quality of each patch, not merely to confirm that it passes.
+You are an expert in program repair and assessing plausible program-repair patches. A plausible patch passes the visible tests, but it may still be semantically wrong or overfit to those tests. Your job is to judge the semantic quality of each patch, not merely to confirm that it passes.
 
 You are given the original buggy code, the candidate patch, the previously failing test, and the original failure traceback. Reason step by step, internally, about the following dimensions before assigning a score:
 

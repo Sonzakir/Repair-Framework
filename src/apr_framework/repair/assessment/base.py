@@ -10,7 +10,7 @@ from apr_framework.core.models import (
 
 
 class PatchAssessor(ABC):
-    """Interface for strategies that judge plausible patch quality."""
+    """LLM as a judge: Interface for strategies that judge plausible patch quality."""
 
     @property
     @abstractmethod
