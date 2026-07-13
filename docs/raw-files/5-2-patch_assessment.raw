@@ -1,296 +1,0 @@
-[1m[7m%[27m[1m[0m                                                                                                                                                                                                                                    [0m[27m[24m[Jfazlisonerkiraz@eduroam-55-105-199 Repair-Framework % [K[?2004h[7mpython -m apr_framework repair \[27m
-[7m  --project black \[27m[K
-[7m  --bug 1 \[27m[K
-[7m  --technique llm \[27m[K
-[7m  --fl-mode perfect \[27m[K
-[7m  --assess \[27m[K
-[7m  --assess-max-patches 3 \[27m[K
-[7m  --model gpt-5.4 \[27m[K
-[7m  --llm-base-url https://api.openai.com/v1 \[27m[K
-[7m  --llm-api-key-env OPENAI_API_KEY \[27m[K
-[7m  --temperature 1 \[27m[K
-[7m  --max-candidates 3 \[27m[K
-[7m  --top-n 3 \[27m[K
-[7m  --budget 20[27m[K[13A[41C[27mp[27my[27mt[27mh[27mo[27mn[27m [27m-[27mm[27m [27ma[27mp[27mr[27m_[27mf[27mr[27ma[27mm[27me[27mw[27mo[27mr[27mk[27m [27mr[27me[27mp[27ma[27mi[27mr[27m [27m\[1B[27m [27m [27m-[27m-[27mp[27mr[27mo[27mj[27me[27mc[27mt[27m [27mb[27ml[27ma[27mc[27mk[27m [27m\[1B[27m [27m [27m-[27m-[27mb[27mu[27mg[27m [27m1[27m [27m\[1B[27m [27m [27m-[27m-[27mt[27me[27mc[27mh[27mn[27mi[27mq[27mu[27me[27m [27ml[27ml[27mm[27m [27m\[1B[27m [27m [27m-[27m-[27mf[27ml[27m-[27mm[27mo[27md[27me[27m [27mp[27me[27mr[27mf[27me[27mc[27mt[27m [27m\[1B[27m [27m [27m-[27m-[27ma[27ms[27ms[27me[27ms[27ms[27m [27m\[1B[27m [27m [27m-[27m-[27ma[27ms[27ms[27me[27ms[27ms[27m-[27mm[27ma[27mx[27m-[27mp[27ma[27mt[27mc[27mh[27me[27ms[27m [27m3[27m [27m\[1B[27m [27m [27m-[27m-[27mm[27mo[27md[27me[27ml[27m [27mg[27mp[27mt[27m-[27m5[27m.[27m4[27m [27m\[1B[27m [27m [27m-[27m-[27ml[27ml[27mm[27m-[27mb[27ma[27ms[27me[27m-[27mu[27mr[27ml[27m [27mh[27mt[27mt[27mp[27ms[27m:[27m/[27m/[27ma[27mp[27mi[27m.[27mo[27mp[27me[27mn[27ma[27mi[27m.[27mc[27mo[27mm[27m/[27mv[27m1[27m [27m\[1B[27m [27m [27m-[27m-[27ml[27ml[27mm[27m-[27ma[27mp[27mi[27m-[27mk[27me[27my[27m-[27me[27mn[27mv[27m [27mO[27mP[27mE[27mN[27mA[27mI[27m_[27mA[27mP[27mI[27m_[27mK[27mE[27mY[27m [27m\[1B[27m [27m [27m-[27m-[27mt[27me[27mm[27mp[27me[27mr[27ma[27mt[27mu[27mr[27me[27m [27m1[27m [27m\[1B[27m [27m [27m-[27m-[27mm[27ma[27mx[27m-[27mc[27ma[27mn[27md[27mi[27md[27ma[27mt[27me[27ms[27m [27m3[27m [27m\[1B[27m [27m [27m-[27m-[27mt[27mo[27mp[27m-[27mn[27m [27m3[27m [27m\[1B[27m [27m [27m-[27m-[27mb[27mu[27md[27mg[27me[27mt[27m [27m2[27m0[?2004l
-zsh: command not found: python
-[1m[7m%[27m[1m[0m                                                                                                                                                                                                                                    [0m[27m[24m[Jfazlisonerkiraz@eduroam-55-105-199 Repair-Framework % [K[?2004hc ddocker compose run apr-frmae   amework[?2004l
-[?25l[0G[+] create 1/1
- [32m✔[0m Network repair-framework_default [32mCreated[0m                                                                                                                                                                                     [34m0.0s[0m
-[?25h[?25l[2A[0G[+]  1/1
- [32m✔[0m Network repair-framework_default [32mCreated[0m                                                                                                                                                                                     [34m0.0s[0m
-[?25hContainer repair-framework-apr-framework-run-965c176fd616 [32mCreating[0m 
-Container repair-framework-apr-framework-run-965c176fd616 [32mCreated[0m 
-[?2004hroot@170a499953cb:/workspace# [7mpython -m apr_framework repair \[27m
-[7m  --project black \[27m
-[7m  --bug 1 \[27m
-[7m  --technique llm \[27m
-[7m  --fl-mode perfect \[27m
-[7m  --assess \[27m
-[7m  --assess-max-patches 3 \[27m
-[7m  --model gpt-5.4 \[27m
-[7m  --llm-base-url https://api.openai.com/v1 \[27m
-[7m  --llm-api-key-env OPENAI_API_KEY \[27m
-[7m  --temperature 1 \[27m
-[7m  --max-candidates 3 \[27m
-[7m  --top-n 3 \[27m
-[7m  --budget 20[27m[A[A[A[A[A[A[A[A[A[A[A[A[A[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[Cpython -m apr_framework repair \
-  --project black \
-  --bug 1 \
-  --technique llm \
-  --fl-mode perfect \
-  --assess \
-  --assess-max-patches 3 \
-  --model gpt-5.4 \
-  --llm-base-url https://api.openai.com/v1 \
-  --llm-api-key-env OPENAI_API_KEY \
-  --temperature 1 \
-  --max-candidates 3 \
-  --top-n 3 \
-  --budget 20
-[?2004lError: The BugsInPy executor container is not available. Run `python -m apr_framework bugsinpy setup` first.
-[?2004hroot@170a499953cb:/workspace# [7mpython -m apr_framework bugsinpy setup[27m[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[Cpython -m apr_framework bugsinpy setup
-[?2004l4aac30dc63139a5f1ed9d4e74dfa8e3994b069d07d9aa6526c62e3bdecceab0c
-apr-bugsinpy-executor
-BugsInPy setup successfully
-[?2004hroot@170a499953cb:/workspace# python -m apr_framework bugsinpy setuprepair   --project black   --bug 1   --technique llm   --fl-mode perfect   --assess   --assess-max-patches 3   --model gpt-5.4   --llm-base-url https://api.openai.com/v1   --llm-api-key-env OPENAI_API_KEY   --temperature 1   --max-candidates 3   --top-n 3   --budget 20
-[?2004l
-Run directory: /workspace/runs/run_269
-Project:       black
-Bug ID:        1
-Status:        plausible
-Generated:     9 candidate(s)
-Validated:     9 candidate(s)
-Plausible:     5 patch(es)
-Correct:       0 patch(es)
-1st plausible: 44.5s
-Total time:    88.9s
-Rank of 1st correct (assessed): n/a
-Assessment LLM calls:          3
-[?2004hroot@170a499953cb:/workspace#     exit
-[?2004lexit
-[1m[7m%[27m[1m[0m                                                                                                                                                                                                                                    [0m[27m[24m[Jfazlisonerkiraz@eduroam-55-105-199 Repair-Framework % [K[?2004hddocker compose down[?2004l
-[?25l[0G[+] down 0/1
- [33m⠋[0m Network repair-framework_default Removing                                                                                                                                                                                    [34m0.1s[0m
-[?25h[?25l[2A[0G[+] down 1/1
- [32m✔[0m Network repair-framework_default [32mRemoved[0m                                                                                                                                                                                     [34m0.2s[0m
-[?25h[1m[7m%[27m[1m[0m                                                                                                                                                                                                                                    [0m[27m[24m[Jfazlisonerkiraz@eduroam-55-105-199 Repair-Framework % [K[?2004hddocker compose build[?2004l
-[1A[1B[0G[?25l[+] Building 0.0s (0/1)                                                                                                                                                                                                             
- => [internal] load local bake definitions                                                                                                                                                                                     0.0s
-[?25h[1A[1A[0G[?25l[+] Building 0.2s (2/4)                                                                                                                                                                                                             
-[34m => [internal] load local bake definitions                                                                                                                                                                                     0.0s
-[0m[34m => => reading from stdin 650B                                                                                                                                                                                                 0.0s
-[0m[34m => [internal] load build definition from Dockerfile                                                                                                                                                                           0.0s
-[0m[34m => => transferring dockerfile: 923B                                                                                                                                                                                           0.0s
-[0m => [internal] load metadata for docker.io/library/python:3.12-slim                                                                                                                                                            0.2s
- => [internal] load metadata for docker.io/library/docker:27-cli                                                                                                                                                               0.2s
-[?25h[1A[1A[1A[1A[1A[1A[1A[0G[?25l[+] Building 0.4s (2/4)                                                                                                                                                                                                             
-[34m => [internal] load local bake definitions                                                                                                                                                                                     0.0s
-[0m[34m => => reading from stdin 650B                                                                                                                                                                                                 0.0s
-[0m[34m => [internal] load build definition from Dockerfile                                                                                                                                                                           0.0s
-[0m[34m => => transferring dockerfile: 923B                                                                                                                                                                                           0.0s
-[0m => [internal] load metadata for docker.io/library/python:3.12-slim                                                                                                                                                            0.3s
- => [internal] load metadata for docker.io/library/docker:27-cli                                                                                                                                                               0.3s
-[?25h[1A[1A[1A[1A[1A[1A[1A[0G[?25l[+] Building 0.5s (2/5)                                                                                                                                                                                                             
-[34m => [internal] load local bake definitions                                                                                                                                                                                     0.0s
-[0m[34m => => reading from stdin 650B                                                                                                                                                                                                 0.0s
-[0m[34m => [internal] load build definition from Dockerfile                                                                                                                                                                           0.0s
-[0m[34m => => transferring dockerfile: 923B                                                                                                                                                                                           0.0s
-[0m => [internal] load metadata for docker.io/library/python:3.12-slim                                                                                                                                                            0.4s
- => [internal] load metadata for docker.io/library/docker:27-cli                                                                                                                                                               0.4s
- => [auth] library/docker:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[?25h[1A[1A[1A[1A[1A[1A[1A[1A[0G[?25l[+] Building 0.6s (4/6)                                                                                                                                                                                                             
-[34m => [internal] load local bake definitions                                                                                                                                                                                     0.0s
-[0m[34m => => reading from stdin 650B                                                                                                                                                                                                 0.0s
-[0m[34m => [internal] load build definition from Dockerfile                                                                                                                                                                           0.0s
-[0m[34m => => transferring dockerfile: 923B                                                                                                                                                                                           0.0s
-[0m => [internal] load metadata for docker.io/library/python:3.12-slim                                                                                                                                                            0.5s
- => [internal] load metadata for docker.io/library/docker:27-cli                                                                                                                                                               0.5s
-[34m => [auth] library/docker:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[34m => [auth] library/python:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[?25h[1A[1A[1A[1A[1A[1A[1A[1A[1A[0G[?25l[+] Building 0.8s (4/6)                                                                                                                                                                                                             
-[34m => [internal] load local bake definitions                                                                                                                                                                                     0.0s
-[0m[34m => => reading from stdin 650B                                                                                                                                                                                                 0.0s
-[0m[34m => [internal] load build definition from Dockerfile                                                                                                                                                                           0.0s
-[0m[34m => => transferring dockerfile: 923B                                                                                                                                                                                           0.0s
-[0m => [internal] load metadata for docker.io/library/python:3.12-slim                                                                                                                                                            0.7s
- => [internal] load metadata for docker.io/library/docker:27-cli                                                                                                                                                               0.7s
-[34m => [auth] library/docker:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[34m => [auth] library/python:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[?25h[1A[1A[1A[1A[1A[1A[1A[1A[1A[0G[?25l[+] Building 0.9s (5/6)                                                                                                                                                                                                             
-[34m => [internal] load local bake definitions                                                                                                                                                                                     0.0s
-[0m[34m => => reading from stdin 650B                                                                                                                                                                                                 0.0s
-[0m[34m => [internal] load build definition from Dockerfile                                                                                                                                                                           0.0s
-[0m[34m => => transferring dockerfile: 923B                                                                                                                                                                                           0.0s
-[0m => [internal] load metadata for docker.io/library/python:3.12-slim                                                                                                                                                            0.8s
-[34m => [internal] load metadata for docker.io/library/docker:27-cli                                                                                                                                                               0.8s
-[0m[34m => [auth] library/docker:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[34m => [auth] library/python:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[?25h[1A[1A[1A[1A[1A[1A[1A[1A[1A[0G[?25l[+] Building 1.0s (5/6)                                                                                                                                                                                                             
-[34m => [internal] load local bake definitions                                                                                                                                                                                     0.0s
-[0m[34m => => reading from stdin 650B                                                                                                                                                                                                 0.0s
-[0m[34m => [internal] load build definition from Dockerfile                                                                                                                                                                           0.0s
-[0m[34m => => transferring dockerfile: 923B                                                                                                                                                                                           0.0s
-[0m => [internal] load metadata for docker.io/library/python:3.12-slim                                                                                                                                                            0.9s
-[34m => [internal] load metadata for docker.io/library/docker:27-cli                                                                                                                                                               0.8s
-[0m[34m => [auth] library/docker:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[34m => [auth] library/python:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[?25h[1A[1A[1A[1A[1A[1A[1A[1A[1A[0G[?25l[+] Building 1.0s (6/6)                                                                                                                                                                                                             
-[34m => [internal] load local bake definitions                                                                                                                                                                                     0.0s
-[0m[34m => => reading from stdin 650B                                                                                                                                                                                                 0.0s
-[0m[34m => [internal] load build definition from Dockerfile                                                                                                                                                                           0.0s
-[0m[34m => => transferring dockerfile: 923B                                                                                                                                                                                           0.0s
-[0m[34m => [internal] load metadata for docker.io/library/python:3.12-slim                                                                                                                                                            0.9s
-[0m[34m => [internal] load metadata for docker.io/library/docker:27-cli                                                                                                                                                               0.8s
-[0m[34m => [auth] library/docker:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[34m => [auth] library/python:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[?25h[1A[1A[1A[1A[1A[1A[1A[1A[1A[0G[?25l[+] Building 1.1s (18/18) FINISHED                                                                                                                                                                                                  
-[34m => [internal] load local bake definitions                                                                                                                                                                                     0.0s
-[0m[34m => => reading from stdin 650B                                                                                                                                                                                                 0.0s
-[0m[34m => [internal] load build definition from Dockerfile                                                                                                                                                                           0.0s
-[0m[34m => => transferring dockerfile: 923B                                                                                                                                                                                           0.0s
-[0m[34m => [internal] load metadata for docker.io/library/python:3.12-slim                                                                                                                                                            0.9s
-[0m[34m => [internal] load metadata for docker.io/library/docker:27-cli                                                                                                                                                               0.8s
-[0m[34m => [auth] library/docker:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[34m => [auth] library/python:pull token for registry-1.docker.io                                                                                                                                                                  0.0s
-[0m[34m => [internal] load .dockerignore                                                                                                                                                                                              0.0s
-[0m[34m => => transferring context: 2B                                                                                                                                                                                                0.0s
-[0m[34m => [stage-1 1/7] FROM docker.io/library/python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf                                                                                              0.0s
-[0m[34m => => resolve docker.io/library/python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf                                                                                                      0.0s
-[0m[34m => [internal] load build context                                                                                                                                                                                              0.0s
-[0m[34m => => transferring context: 42B                                                                                                                                                                                               0.0s
-[0m[34m => [docker-cli 1/1] FROM docker.io/library/docker:27-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c                                                                                              0.0s
-[0m[34m => => resolve docker.io/library/docker:27-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c                                                                                                         0.0s
-[0m[34m => CACHED [stage-1 2/7] RUN apt-get update     && apt-get install -y --no-install-recommends         bash         ca-certificates         git         patch     && rm -rf /var/lib/apt/lists/*                                0.0s
-[0m[34m => CACHED [stage-1 3/7] RUN pip install --no-cache-dir         "openai>=1.0.0"         "python-dotenv>=1.0.0"                                                                                                                 0.0s
-[0m[34m => CACHED [stage-1 4/7] COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker                                                                                                                                    0.0s
-[0m[34m => CACHED [stage-1 5/7] WORKDIR /workspace                                                                                                                                                                                    0.0s
-[0m[34m => CACHED [stage-1 6/7] COPY docker-entrypoint.sh /usr/local/bin/apr-entrypoint                                                                                                                                               0.0s
-[0m[34m => CACHED [stage-1 7/7] RUN chmod +x /usr/local/bin/apr-entrypoint                                                                                                                                                            0.0s
-[0m[34m => exporting to image                                                                                                                                                                                                         0.0s
-[0m[34m => => exporting layers                                                                                                                                                                                                        0.0s
-[0m[34m => => exporting manifest sha256:5d52ef2c30679d0c49325a182a49e7ad3a4666f799842df23e83a2f8b4661c71                                                                                                                              0.0s
-[0m[34m => => exporting config sha256:97555da65b759d71337122657cce9270dc00ac36418e3e2625a2ce5fcc54f4e9                                                                                                                                0.0s
-[0m[34m => => exporting attestation manifest sha256:996a0db5ad58add881ca68f41ec6727f1a1a7e77b713bdaf7780701c87325a0c                                                                                                                  0.0s
-[0m[34m => => exporting manifest list sha256:1ad29d3bd51fe7e54815b89dd8fa1b5f71496d7036e841617232bba8923a8d92                                                                                                                         0.0s
-[0m[34m => => naming to docker.io/library/repair-framework-apr-framework:latest                                                                                                                                                       0.0s
-[0m[34m => => unpacking to docker.io/library/repair-framework-apr-framework:latest                                                                                                                                                    0.0s
-[0m[34m => resolving provenance for metadata file                                                                                                                                                                                     0.0s
-[0m[?25h[?25l[0G[+] build 1/1
- [32m✔[0m Image repair-framework-apr-framework [32mBuilt[0m                                                                                                                                                                                   [34m1.2s[0m
-[?25h[1m[7m%[27m[1m[0m                                                                                                                                                                                                                                    [0m[27m[24m[Jfazlisonerkiraz@eduroam-55-105-199 Repair-Framework % [K[?2004hddocker compo ose run apr-framework[?2004l
-[33mWARN[0m[0000] Found orphan containers ([repair-framework-apr-framework-run-965c176fd616]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up. 
-[?25l[0G[+] create 1/1
- [32m✔[0m Network repair-framework_default [32mCreated[0m                                                                                                                                                                                     [34m0.0s[0m
-[?25h[?25l[2A[0G[+]  1/1
- [32m✔[0m Network repair-framework_default [32mCreated[0m                                                                                                                                                                                     [34m0.0s[0m
-[?25hContainer repair-framework-apr-framework-run-aebf3a682676 [32mCreating[0m 
-Container repair-framework-apr-framework-run-aebf3a682676 [32mCreated[0m 
-[?2004hroot@b1b178532eaa:/workspace# [7mpython -m apr_framework bugsinpy setup[27m[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[C[Cpython -m apr_framework bugsinpy setup
-[?2004lBugsInPy setup successfully
-[?2004hroot@b1b178532eaa:/workspace# [7mpython -m apr_framework repair \[27m
-[7m    --project black --bug 1 \[27m
-[7m    --technique llm \[27m
-[7m    --fl-mode perfect \[27m
-[7m    --assess \[27m
-[7m    --assess-max-patches 3 \[27m
-[7m    --model gpt-5.4 \[27m
-[7m    --llm-base-url https://api.openai.com/v1 \[27m
-[7m    --llm-api-key-env OPENAI_API_KEY \[27m
-[7m    --temperature 1 \[27m
-[7m    --top-n 3 \[27m
-[7m    --budget 20[27m[A[A[A[A[A[A[A[A[A[A[A[C[C[C[C[C[C[C[C[C[C[C[C[C[C[Cpython -m apr_framework repair \
-    --project black --bug 1 \
-    --technique llm \
-    --fl-mode perfect \
-    --assess \
-    --assess-max-patches 3 \
-    --model gpt-5.4 \
-    --llm-base-url https://api.openai.com/v1 \
-    --llm-api-key-env OPENAI_API_KEY \
-    --temperature 1 \
-    --top-n 3 \
-    --budget 20
-[?2004l
-
-Run directory: /workspace/runs/run_270
-Project:       black
-Bug ID:        1
-Status:        plausible
-Generated:     15 candidate(s)
-Validated:     15 candidate(s)
-Plausible:     8 patch(es)
-Correct:       0 patch(es)
-1st plausible: 103.0s
-Total time:    173.2s
-Assessment LLM calls:          3
-Assessed plausible patches (by descending quality):
-  1. llm-1-0  score=0.00
-     The patch suppresses ProcessPoolExecutor creation failure but still passes executor=None into schedule_formatting, which is not a real mono-process fallback and is likely to break or rely on unintended behavior. It avoids the crash only superficially instead of implementing the needed sequential formatting path.
-  2. llm-1-1  score=0.00
-     The patch only suppresses ProcessPoolExecutor creation failure, but still calls schedule_formatting with executor=None, which is not a real fallback to mono-process execution and is likely to break or rely on unrelated behavior. It appears test-overfitted because it avoids the immediate exception without implementing the intended sequential formatting path.
-  3. llm-1-2  score=0.00
-     The patch suppresses ProcessPoolExecutor creation failure but still passes executor=None into schedule_formatting, which is unlikely to implement the required single-process fallback and risks runtime errors or behavior changes. It masks the root cause instead of adding the intended mono-process execution path.
-  4. llm-1-3  score=not assessed
-     —
-  5. llm-1-4  score=not assessed
-     —
-  6. llm-2-1  score=not assessed
-     —
-  7. llm-2-2  score=not assessed
-     —
-  8. llm-2-3  score=not assessed
-     —
-[?2004hroot@b1b178532eaa:/workspace# 
-[?2004l[?2004hroot@b1b178532eaa:/workspace# [7mscored[27m[1Pscore[K[K[K[K[K[7mpython -m apr_framework repair \[27m
-[7m    --project black --bug 1 \[27m
-[7m    --technique llm \[27m
-[7m    --fl-mode perfect \[27m
-[7m    --assess \[27m
-[7m    --assess-max-patches 8 \[27m
-[7m    --model gpt-5.4 \[27m
-[7m    --llm-base-url https://api.openai.com/v1 \[27m
-[7m    --llm-api-key-env OPENAI_API_KEY \[27m
-[7m    --temperature 1 \[27m
-[7m    --top-n 3 \[27m
-[7m    --budget 20[27m[A[A[A[A[A[A[A[A[A[A[A[C[C[C[C[C[C[C[C[C[C[C[C[C[C[Cpython -m apr_framework repair \
-    --project black --bug 1 \
-    --technique llm \
-    --fl-mode perfect \
-    --assess \
-    --assess-max-patches 8 \
-    --model gpt-5.4 \
-    --llm-base-url https://api.openai.com/v1 \
-    --llm-api-key-env OPENAI_API_KEY \
-    --temperature 1 \
-    --top-n 3 \
-    --budget 20
-[?2004l
-Run directory: /workspace/runs/run_271
-Project:       black
-Bug ID:        1
-Status:        plausible
-Generated:     15 candidate(s)
-Validated:     15 candidate(s)
-Plausible:     7 patch(es)
-Correct:       0 patch(es)
-1st plausible: 62.8s
-Total time:    145.0s
-Assessment LLM calls:          7
-Assessed plausible patches (by descending quality):
-  1. llm-2-4  score=0.87
-     The patch addresses the real failure mode by falling back when ProcessPoolExecutor creation is unavailable, matching the intended mono-process behavior. It is slightly imperfect because the fallback path skips the surrounding finally block, so loop shutdown/executor cleanup behavior is inconsistent.
-  2. llm-2-3  score=0.86
-     The patch addresses the real failure mode by falling back when ProcessPoolExecutor creation raises OSError, allowing formatting to proceed in single-process mode. The change is small and not obviously test-specific, though the early return bypasses the shared finally block and relies on schedule_formatting/shutdown behavior remaining safe in that path.
-  3. llm-1-3  score=0.20
-     The patch suppresses ProcessPoolExecutor creation failure but leaves schedule_formatting running with executor=None, which is unlikely to provide the intended single-process fallback and may break elsewhere. It appears tailored to avoid the immediate crash rather than implementing a proper mono-process formatting path.
-  4. llm-1-0  score=0.10
-     The patch suppresses ProcessPoolExecutor creation failure but then still calls schedule_formatting with executor=None, which is unlikely to provide the intended single-process fallback and risks new runtime errors. It appears to mask the construction error rather than implement the root-cause behavior the test expects.
-  5. llm-1-1  score=0.10
-     The patch suppresses ProcessPoolExecutor creation failures but still passes executor=None into schedule_formatting, which is unlikely to implement the intended single-process fallback and risks new runtime errors. It appears to mask the constructor failure rather than fixing the root cause.
-  6. llm-1-2  score=0.10
-     The patch suppresses ProcessPoolExecutor creation failure but then still calls schedule_formatting with executor=None, which is likely not a valid fallback and risks breaking formatting or async execution semantics. It appears tailored to avoid the immediate crash rather than implementing a real single-process fallback.
-  7. llm-1-4  score=0.00
-     The patch suppresses ProcessPoolExecutor creation failure but still calls schedule_formatting with executor=None, which is likely unsupported and not a real fallback to mono-process execution. It appears to satisfy the test by avoiding the immediate crash rather than implementing the intended single-process formatting behavior.
-[?2004hroot@b1b178532eaa:/workspace# So[K[Kexit
-[?2004lexit
-[1m[7m%[27m[1m[0m                                                                                                                                                                                                                                    [0m[27m[24m[Jfazlisonerkiraz@eduroam-55-105-199 Repair-Framework % [K[?2004heexit[?2004l
