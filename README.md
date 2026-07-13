@@ -2045,49 +2045,7 @@ One model serves all three stages: `--model` / `--temperature` / `--llm-base-url
 `bugsinpy evaluate-course-comparison` runs every approach built over the course on the same
 bugs, and writes an aggregated report:
 
-The committed report was produced by two invocations — auto-FL-capable bugs under both FL
-modes, and the bugs FauxPy cannot localize under perfect FL only:
 
-```bash
-# Bugs FauxPy can localize -> the auto column is real
-python -m apr_framework bugsinpy evaluate-course-comparison \
-  --bugs black:1,black:3 \
-  --fl-modes auto,perfect --retrieval-budget 3 \
-  --model gpt-5.4 --temperature 1.0 \
-  --llm-base-url https://api.openai.com/v1 --llm-api-key-env OPENAI_API_KEY \
-  --max-candidates 3 --top-n 3
-
-# Bugs FauxPy cannot localize -> no auto cell is created at all
-python -m apr_framework bugsinpy evaluate-course-comparison \
-  --bugs tornado:14,scrapy:2 --fl-modes perfect --retrieval-budget 3 \
-  --model gpt-5.4 --temperature 1.0 \
-  --llm-base-url https://api.openai.com/v1 --llm-api-key-env OPENAI_API_KEY
-```
-
-**Why the bug set is split this way.** An `auto` cell is only meaningful on a bug FauxPy can
-actually localize. On the others it produces zeros that describe FauxPy, not the repair
-approach — so those bugs are run under perfect FL only, and no auto cell is fabricated:
-
-| Bug | Python | What `auto` FL actually does |
-|---|---|---|
-| `tornado:14` | 3.7.0 | FauxPy 0.7.0 (via `cosmic-ray` 8.3.5) **cannot install** — needs ≥3.8 |
-| `scrapy:2` | 3.8.3 | FauxPy installs and exits 0, but **ranks nothing** — empty score tables |
-| `fastapi:*` | 3.8.3 | Irreconcilable pins: installing FauxPy forces `pydantic` to 2.x and breaks fastapi's imports, while restoring fastapi's pins downgrades `typing_extensions` and breaks FauxPy's own `pyllmut`→`openai` chain. **No configuration satisfies both.** |
-
-The `black` bugs were each verified with a live `localize` run before being included, so their
-auto column reflects the repair approach rather than a broken localizer. Bugs that *no* approach
-can repair (`black:7`, `black:11` — both localize fine, neither yields a single plausible patch)
-are excluded: they grade nothing, and padding a repair comparison with them is noise. A cell whose localizer
-ranks nothing is recorded as `no_fl_locations` and excluded from cross-approach comparison,
-instead of being reported as `no_patch` — which would read as "the repair technique tried and
-found nothing", a much stronger claim than the run supports.
-
-**A caveat worth stating plainly: auto-FL-capable and repairable are nearly disjoint here.**
-`black` localizes reliably but resists repair — it lints its own source, so a patch that is not
-black-formatted passes the trigger test and then fails the regression check. The bugs that do
-yield patches (`tornado:14`, `scrapy:2`) are exactly the ones FauxPy cannot localize. The set
-above deliberately carries both kinds, because a set chosen purely for auto-FL capability would
-be almost entirely zeros and would say nothing about repair.
 
 | Approach | Technique | FL source | Toggles |
 |---|---|---|---|
