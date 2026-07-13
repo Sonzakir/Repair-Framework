@@ -2061,7 +2061,7 @@ cell is executed by the existing `RepairEvaluationRunner` and gets its own `runs
 as an error cell instead of aborting the matrix, and `results.json` is flushed after every
 cell so a long API run survives an interruption.
 
-### Why the column is called "exact diff", not "correct"
+### Why the correct(exact-diff) solution is not necessarily the optimal solution? -> 2 new metrics 
 
 **`Exact diff` counts byte-for-byte matches with the developer fix — nothing more.** A
 semantically correct fix written differently from the developer's scores 0 in that column, so
