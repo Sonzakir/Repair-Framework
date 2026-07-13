@@ -12,6 +12,8 @@ MODULES = [
     "apr_framework.core.models",
     "apr_framework.evaluation",
     "apr_framework.evaluation.base",
+    "apr_framework.evaluation.course_approaches",
+    "apr_framework.evaluation.course_comparison_runner",
     "apr_framework.evaluation.dummy_runner",
     "apr_framework.evaluation.repair_runner",
     "apr_framework.localization",

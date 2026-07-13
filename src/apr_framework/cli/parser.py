@@ -546,6 +546,240 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for per-cell run artifacts (default: runs).",
     )
 
+    ## bugsinpy-evaluate-course-comparison (all repair approaches, side by side)
+    eval_course_parser = bugsinpy_subparsers.add_parser(
+        "evaluate-course-comparison",
+        help=(
+            "Run every repair approach built over the course (template, single-shot "
+            "LLM, iterative LLM, and the full LLM pipeline) on a set of bugs, with "
+            "LLM patch assessment and context-similarity scoring on every cell, and "
+            "write an aggregated course-wide comparison report."
+        ),
+    )
+    eval_course_parser.add_argument(
+        "--bugs",
+        default="black:1,black:3,black:7,black:11",
+        help=(
+            "Comma-separated project:bug_id pairs to evaluate "
+            "(default: black:1,black:3,black:7,black:11). The default set only "
+            "contains bugs FauxPy can actually localize, so the auto-FL column means "
+            "something: FauxPy 0.7.0 cannot install on Python 3.7 bugs (tornado:14, "
+            "youtube-dl:12), conflicts irreconcilably with fastapi's pins, and ranks "
+            "nothing at all on scrapy:2. Run those bugs with '--fl-modes perfect' "
+            "instead of scoring an auto cell that never ran."
+        ),
+    )
+    eval_course_parser.add_argument(
+        "--approaches",
+        default="a3-template,a4-single-shot,a4-iterative,a5-full-llm",
+        help=(
+            "Comma-separated approaches to compare. Choices: a3-template (traditional), "
+            "a4-single-shot (bare LLM prompt), a4-iterative (multi-turn feedback loop), "
+            "a5-full-llm (LLM-FL + retrieval + assessment). "
+            "Default: all four."
+        ),
+    )
+    eval_course_parser.add_argument(
+        "--fl-modes",
+        dest="fl_modes",
+        default="auto,perfect",
+        help=(
+            "Comma-separated FL modes for the approaches that use FauxPy/oracle FL "
+            "(default: auto,perfect). The a5-full-llm approach localizes with the LLM "
+            "and ignores this flag."
+        ),
+    )
+    eval_course_parser.add_argument(
+        "--retrieval-budget",
+        dest="retrieval_budget",
+        type=int,
+        default=3,
+        help=(
+            "Max codebase-retrieval steps the model may take before proposing a patch, "
+            "for approaches that use retrieval (default: 3)."
+        ),
+    )
+    eval_course_parser.add_argument(
+        "--model",
+        default="gpt-5.4",
+        help="LLM model used for localization, repair, and assessment (default: gpt-5.4).",
+    )
+    eval_course_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="Sampling temperature (default: 1.0).",
+    )
+    eval_course_parser.add_argument(
+        "--llm-provider",
+        dest="llm_provider",
+        default="openai-compatible",
+        help="LLM provider adapter (default: openai-compatible).",
+    )
+    eval_course_parser.add_argument(
+        "--llm-base-url",
+        dest="llm_base_url",
+        default="https://api.openai.com/v1",
+        help="Base URL of the OpenAI-compatible endpoint (default: OpenAI).",
+    )
+    eval_course_parser.add_argument(
+        "--llm-api-key-env",
+        dest="llm_api_key_env",
+        default="OPENAI_API_KEY",
+        help="Env var holding the API key (default: OPENAI_API_KEY).",
+    )
+    eval_course_parser.add_argument(
+        "--system-prompt",
+        dest="system_prompt",
+        default="prompt1",
+        help="Name of the LLM repair system prompt (default: prompt1).",
+    )
+    eval_course_parser.add_argument(
+        "--fl-system-prompt",
+        dest="fl_system_prompt",
+        default="fl_prompt1",
+        help="Name of the LLM fault-localization system prompt (default: fl_prompt1).",
+    )
+    eval_course_parser.add_argument(
+        "--max-source-lines",
+        dest="max_source_lines",
+        type=int,
+        default=400,
+        help="Upper bound on source lines shown to the LLM localizer (default: 400).",
+    )
+    eval_course_parser.add_argument(
+        "--source-window",
+        dest="source_window",
+        type=int,
+        default=40,
+        help="Context lines around each anchor shown to the LLM localizer (default: 40).",
+    )
+    eval_course_parser.add_argument(
+        "--assess-system-prompt",
+        dest="assess_system_prompt",
+        default="assess_prompt1",
+        help="Name of the LLM patch-assessment system prompt (default: assess_prompt1).",
+    )
+    eval_course_parser.add_argument(
+        "--assess-max-patches",
+        dest="assess_max_patches",
+        type=int,
+        default=None,
+        help="Max plausible patches assessed per cell (default: all).",
+    )
+    eval_course_parser.add_argument(
+        "--max-candidates",
+        dest="max_candidates",
+        type=int,
+        default=3,
+        help="Max candidate patches per FL location (default: 3).",
+    )
+    eval_course_parser.add_argument(
+        "--top-n",
+        dest="top_n",
+        type=int,
+        default=3,
+        help="Top-N suspicious locations to attempt (default: 3).",
+    )
+    eval_course_parser.add_argument(
+        "--max-iterations",
+        dest="max_iterations",
+        type=int,
+        default=5,
+        help="Max conversation turns per location in the iterative approach (default: 5).",
+    )
+    eval_course_parser.add_argument(
+        "--operators",
+        default="arith,comp,obo,bool,negate,return",
+        help="Mutation operators for the template approach (default: all six).",
+    )
+    eval_course_parser.add_argument(
+        "--budget",
+        type=int,
+        default=200,
+        help="Max patch validations per cell (default: 200).",
+    )
+    eval_course_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="Seconds allowed per test-suite invocation (default: 120).",
+    )
+    eval_course_parser.add_argument(
+        "--fl-family",
+        dest="fl_family",
+        choices=["sbfl", "mbfl", "hybrid"],
+        default="sbfl",
+        help="Fault-localization family used in automated FL mode (default: sbfl).",
+    )
+    eval_course_parser.add_argument(
+        "--localization-metric",
+        dest="localization_metric",
+        default="ochiai",
+        help="SBFL metric used in automated FL mode (default: ochiai).",
+    )
+    eval_course_parser.add_argument(
+        "--mbfl-metric",
+        dest="mbfl_metric",
+        default="metallaxis",
+        help="MBFL metric for automated FL mode (default: metallaxis).",
+    )
+    eval_course_parser.add_argument(
+        "--mutation-budget",
+        dest="mutation_budget",
+        type=int,
+        default=50,
+        help="Max mutants per bug for MBFL/hybrid automated FL (default: 50).",
+    )
+    eval_course_parser.add_argument(
+        "--seed", type=int, default=0, help="Random seed for MBFL mutation selection."
+    )
+    eval_course_parser.add_argument(
+        "--granularity",
+        choices=["statement", "function"],
+        default="statement",
+        help="Localization granularity for automated FL (default: statement).",
+    )
+    eval_course_parser.add_argument(
+        "--stop-on-first",
+        dest="stop_on_first",
+        action="store_true",
+        help="Stop validating a cell after the first plausible patch.",
+    )
+    eval_course_parser.add_argument(
+        "--no-regression-check",
+        dest="regression_check",
+        action="store_false",
+        help="Skip the regression half of plausibility (faster).",
+    )
+    eval_course_parser.set_defaults(regression_check=True)
+    eval_course_parser.add_argument(
+        "--ranker",
+        choices=["weighted", "none"],
+        default="none",
+        help="Patch ranking strategy applied to plausible patches (default: none).",
+    )
+    eval_course_parser.add_argument(
+        "--ranker-weights",
+        dest="ranker_weights",
+        default=None,
+        help="Comma-separated weights for the weighted ranker (default: 0.6,0.25,0.15).",
+    )
+    eval_course_parser.add_argument(
+        "--output-dir",
+        default="experiment_results/course_comparison",
+        help=(
+            "Directory for results.json and README.md "
+            "(default: experiment_results/course_comparison)."
+        ),
+    )
+    eval_course_parser.add_argument(
+        "--runs-dir",
+        dest="runs_dir",
+        default="runs",
+        help="Directory for per-cell run artifacts (default: runs).",
+    )
+
     # Repair command
     repair_parser = subparsers.add_parser(
         "repair",
@@ -719,6 +953,47 @@ def build_parser() -> argparse.ArgumentParser:
             "(see --fl-family); 'perfect' uses the BugsInPy developer-fix lines as "
             "the oracle fault location, ignoring --fl-family and --skip-localize "
             "(default: auto)"
+        ),
+    )
+    repair_parser.add_argument(
+        "--fl-backend",
+        dest="fl_backend",
+        choices=["fauxpy", "llm"],
+        default="fauxpy",
+        help=(
+            "Fault-localization backend used when --fl-mode auto: 'fauxpy' runs the "
+            "SBFL/MBFL/hybrid localizer (see --fl-family); 'llm' asks the LLM to rank "
+            "suspicious lines. Ignored under --fl-mode perfect (default: fauxpy)"
+        ),
+    )
+    repair_parser.add_argument(
+        "--fl-system-prompt",
+        dest="fl_system_prompt",
+        type=str,
+        default="fl_prompt1",
+        help=(
+            "Name (file stem) of the system prompt under localization/prompts/ used "
+            "for --fl-backend llm (default: fl_prompt1)"
+        ),
+    )
+    repair_parser.add_argument(
+        "--max-source-lines",
+        dest="max_source_lines",
+        type=int,
+        default=400,
+        help=(
+            "Upper bound on numbered source lines shown to the model for "
+            "--fl-backend llm (default: 400)"
+        ),
+    )
+    repair_parser.add_argument(
+        "--source-window",
+        dest="source_window",
+        type=int,
+        default=40,
+        help=(
+            "Lines of context above/below each traceback line shown to the model "
+            "for --fl-backend llm (default: 40)"
         ),
     )
     repair_parser.add_argument(

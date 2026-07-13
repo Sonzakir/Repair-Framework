@@ -50,6 +50,7 @@ from apr_framework.repair import (
 from apr_framework.reporting import ArchiveReportGenerator
 
 if TYPE_CHECKING:
+    from apr_framework.evaluation.course_approaches import CourseApproach
     from apr_framework.evaluation.localization_runner import (
         LocalizationTechniqueResult,
     )
@@ -258,6 +259,9 @@ def _run() -> int:
         if args.bugsinpy_command == "evaluate-llm-repair":
             return _run_evaluate_llm_repair(args, project_root, adapter)
 
+        if args.bugsinpy_command == "evaluate-course-comparison":
+            return _run_evaluate_course_comparison(args, project_root, adapter)
+
     # -- Repair --
 
     if args.command == "repair":
@@ -352,6 +356,15 @@ def _create_run_writer_and_log_repair_start(
     return writer, runs_dir, started_at
 
 
+def _resolve_repair_fl_backend_label(args: argparse.Namespace) -> str:
+    """Name the FL source this repair run actually used, for the result files."""
+    if args.fl_mode == "perfect":
+        return "oracle"
+    if _is_llm_fault_localization_selected(args):
+        return "llm-fl"
+    return args.fl_family
+
+
 def _build_repair_config_data(
     args: argparse.Namespace, bug: BugIdentifier, started_at: datetime
 ) -> dict:
@@ -365,7 +378,8 @@ def _build_repair_config_data(
         "stop_on_first": args.stop_on_first,
         "regression_check": args.regression_check,
         "fl_mode": args.fl_mode,
-        "fl_backend": "oracle" if args.fl_mode == "perfect" else args.fl_family,
+        "fl_backend": _resolve_repair_fl_backend_label(args),
+        "fl_backend_choice": getattr(args, "fl_backend", "fauxpy"),
         "fl_family": args.fl_family,
         "localization_metric": args.localization_metric,
         "mbfl_metric": args.mbfl_metric,
@@ -407,6 +421,15 @@ def _build_repair_config_data(
     else:
         raise ConfigurationError(f"Unknown repair technique: {args.technique!r}")
 
+    if args.fl_mode == "auto" and _is_llm_fault_localization_selected(args):
+        config_data.update(
+            {
+                "fl_system_prompt": args.fl_system_prompt,
+                "fl_max_source_lines": args.max_source_lines,
+                "fl_source_window": args.source_window,
+            }
+        )
+
     if args.assess:
         config_data.update(
             {
@@ -421,6 +444,9 @@ def _build_repair_config_data(
             }
         )
 
+    if args.similarity_score:
+        config_data["similarity_score"] = True
+
     return config_data
 
 
@@ -433,14 +459,18 @@ def _localize_for_repair(
 ) -> LocalizationResult:
     """Produce the fault-localization result feeding repair.
 
-    Tries perfect (oracle) FL, then a cached result under --skip-localize, then
-    falls back to a fresh FauxPy run — matching the original precedence.
+    Precedence: perfect (oracle) FL, then a cached result under --skip-localize,
+    then a fresh LLM-FL run under --fl-backend llm, then a fresh FauxPy run.
     """
     localization_result = None
 
-    # Perfect FL (T-3): bypass any localizer and use the BugsInPy developer-fix
-    # lines as the oracle fault location. Ignores --fl-family / --skip-localize.
+    # Perfect FL: bypass any localizer and use the BugsInPy developer-fix lines as
+    # the oracle fault location. Ignores --fl-backend / --fl-family / --skip-localize.
     if args.fl_mode == "perfect":
+        if _is_llm_fault_localization_selected(args):
+            writer.log(
+                "--fl-mode perfect overrides --fl-backend llm: using oracle locations."
+            )
         localization_result = _run_perfect_localization_from_developer_fix(
             adapter, checkout, writer
         )
@@ -452,11 +482,45 @@ def _localize_for_repair(
         if localization_result is None:
             writer.log("No cached localization found — running fresh localization.")
 
+    if localization_result is None and _is_llm_fault_localization_selected(args):
+        localization_result = _run_llm_fault_localization_for_repair(
+            args, adapter, checkout, writer
+        )
+
     if localization_result is None:
         localization_result = _run_fresh_fauxpy_localization(
             args, adapter, checkout, writer
         )
 
+    return localization_result
+
+
+def _is_llm_fault_localization_selected(args: argparse.Namespace) -> bool:
+    """Report whether the caller asked for the LLM fault-localization backend."""
+    return getattr(args, "fl_backend", "fauxpy") == "llm"
+
+
+def _run_llm_fault_localization_for_repair(
+    args: argparse.Namespace,
+    adapter: BugsInPyAdapter,
+    checkout: CheckoutResult,
+    writer: RunWriter,
+) -> LocalizationResult:
+    """Localize with the LLM backend and log the evidence it was shown."""
+    writer.log(
+        f"Running LLM fault localization (model={args.model}, "
+        f"system_prompt={args.fl_system_prompt})"
+    )
+    localizer = _build_llm_fault_localizer(args, adapter)
+    localization_result = localizer.localize(checkout.bug, checkout)
+
+    # files_shown is the misfire signal: when only the test file appears, symbol
+    # anchoring found no project source and the ranking will target the test.
+    files_shown = localization_result.metadata.get("files_shown", [])
+    writer.log(
+        f"LLM FL done: {len(localization_result.ranked_locations)} ranked location(s) "
+        f"from {len(files_shown)} file(s) shown to the model: {files_shown}"
+    )
     return localization_result
 
 
@@ -870,12 +934,14 @@ def _build_localizer_and_config_data(
     )
 
 
-def _build_llm_localizer_and_config_data(
-    args: argparse.Namespace,
-    adapter: BugsInPyAdapter,
-    started_at: datetime,
-) -> tuple[FaultLocalizer, dict]:
-    """Build the LLM fault localizer and its config.json payload."""
+def _build_llm_fault_localizer(
+    args: argparse.Namespace, adapter: BugsInPyAdapter
+) -> FaultLocalizer:
+    """Build an LLMFaultLocalizer with its own OpenAI-compatible client.
+
+    Shared by the ``localize --backend llm`` command and the ``repair``/evaluation
+    commands' ``--fl-backend llm`` path, which read the same CLI dest names.
+    """
     from apr_framework.localization import LLMFaultLocalizer, LLMLocalizationConfig
     from apr_framework.repair.llm import OpenAICompatibleClient
 
@@ -891,7 +957,16 @@ def _build_llm_localizer_and_config_data(
         source_window_lines=args.source_window,
     )
     llm_client = OpenAICompatibleClient(localization_config)
-    localizer = LLMFaultLocalizer(localization_config, llm_client, adapter)
+    return LLMFaultLocalizer(localization_config, llm_client, adapter)
+
+
+def _build_llm_localizer_and_config_data(
+    args: argparse.Namespace,
+    adapter: BugsInPyAdapter,
+    started_at: datetime,
+) -> tuple[FaultLocalizer, dict]:
+    """Build the LLM fault localizer and its config.json payload."""
+    localizer = _build_llm_fault_localizer(args, adapter)
     config_data = {
         "runner": "llm-localizer",
         "backend": "llm",
@@ -1789,6 +1864,310 @@ def _run_evaluate_llm_repair(
     print(f"README: {readme_path}")
     _print_llm_repair_summary(cells)
     return 0
+
+
+def _build_algorithm_for_course_approach(
+    args: argparse.Namespace,
+    approach: "CourseApproach",
+    localization_result: LocalizationResult,
+    adapter: BugsInPyAdapter,
+) -> RepairAlgorithm:
+    """Build a fresh repair algorithm for one course-comparison cell.
+
+    Dispatches on the approach's technique. A fresh ``OpenAICompatibleClient`` per
+    LLM cell keeps that cell's query counter isolated from every other cell.
+    """
+    if approach.technique == "template":
+        enabled_operators = [
+            operator_key.strip()
+            for operator_key in args.operators.split(",")
+            if operator_key.strip()
+        ]
+        return TemplateRepairAlgorithm(
+            localization_result=localization_result,
+            adapter=adapter,
+            config=TemplateRepairConfig(
+                budget=args.budget,
+                top_n_locations=args.top_n,
+                enabled_operators=enabled_operators,
+                timeout_per_test=args.timeout,
+                stop_on_first=args.stop_on_first,
+                regression_check=args.regression_check,
+            ),
+        )
+
+    from apr_framework.repair.llm import (
+        LLMRepairAlgorithm,
+        LLMRepairConfig,
+        OpenAICompatibleClient,
+    )
+
+    repair_config = LLMRepairConfig(
+        model_name=args.model,
+        temperature=args.temperature,
+        max_patch_count=args.max_candidates,
+        top_n_locations=args.top_n,
+        llm_provider=args.llm_provider,
+        base_url=args.llm_base_url,
+        api_key_env_var=args.llm_api_key_env,
+        system_prompt_name=args.system_prompt,
+        timeout_seconds=args.timeout,
+        budget=args.budget,
+        stop_on_first=args.stop_on_first,
+        regression_check=args.regression_check,
+        context_enrichment=approach.context_enrichment,
+        few_shot_count=0,
+        iterative=approach.iterative,
+        max_iterations=args.max_iterations,
+        retrieval_budget=approach.retrieval_budget,
+    )
+    return LLMRepairAlgorithm(
+        localization_result=localization_result,
+        adapter=adapter,
+        repair_config=repair_config,
+        llm_client=OpenAICompatibleClient(repair_config),
+    )
+
+
+def _run_evaluate_course_comparison(
+    args: argparse.Namespace, project_root: Path, adapter: BugsInPyAdapter
+) -> int:
+    """Compare every course approach on each bug, assessing and scoring every cell."""
+    from apr_framework.core.models import CheckoutResult
+    from apr_framework.evaluation.course_approaches import resolve_course_approaches
+    from apr_framework.evaluation.course_comparison_runner import CourseComparisonRunner
+    from apr_framework.localization import (
+        FauxPyConfig,
+        FauxPyLocalizer,
+        FauxPyToolchain,
+        HybridFaultLocalizer,
+        PerfectFaultLocalizer,
+    )
+
+    bugs = _parse_bug_list(args.bugs)
+    approach_labels = [
+        label.strip() for label in args.approaches.split(",") if label.strip()
+    ]
+    approaches = resolve_course_approaches(approach_labels, args.retrieval_budget)
+    fl_modes = [mode.strip() for mode in args.fl_modes.split(",") if mode.strip()]
+    for fl_mode in fl_modes:
+        if fl_mode not in ("auto", "perfect"):
+            raise ConfigurationError(
+                f"Invalid FL mode {fl_mode!r} — expected 'auto' or 'perfect'."
+            )
+
+    # FauxPy is needed only when an approach actually runs automated FL; the LLM-FL
+    # approach and the perfect-FL cells do not touch it.
+    needs_fauxpy = "auto" in fl_modes and any(
+        not approach.uses_llm_fault_localization for approach in approaches
+    )
+    if needs_fauxpy:
+        adapter.toolchain.ensure_installed()
+
+    output_dir = Path(args.output_dir)
+    if not output_dir.is_absolute():
+        output_dir = project_root / output_dir
+    runs_dir = Path(args.runs_dir)
+    if not runs_dir.is_absolute():
+        runs_dir = project_root / runs_dir
+
+    fauxpy_toolchain = FauxPyToolchain(adapter.toolchain)
+    projects_dir = adapter.toolchain.repo_dir / "projects"
+
+    # Resolve and validate every bug's checkout up front, keyed by canonical bug.
+    canonical_bug_list: list[BugIdentifier] = []
+    checkouts: dict[BugIdentifier, CheckoutResult] = {}
+    for bug in bugs:
+        canonical_project = adapter.resolve_project(bug.project)
+        canonical_bug = BugIdentifier(
+            benchmark="bugsinpy", project=canonical_project, bug_id=bug.bug_id
+        )
+        worktree = (
+            project_root
+            / ".workspace"
+            / "bugsinpy"
+            / f"{canonical_project}_{bug.bug_id}"
+            / canonical_project
+        )
+        if not worktree.exists():
+            raise BenchmarkError(
+                f"No checkout found for {bug.project} #{bug.bug_id} at {worktree}. "
+                f"Run `python -m apr_framework bugsinpy checkout {bug.project} {bug.bug_id}` "
+                "and then `compile` before evaluating."
+            )
+        canonical_bug_list.append(canonical_bug)
+        checkouts[canonical_bug] = CheckoutResult(
+            bug=canonical_bug, worktree=worktree, success=True, prepared=True
+        )
+
+    def _build_auto_localizer(canonical_bug: BugIdentifier) -> FaultLocalizer:
+        worktree = checkouts[canonical_bug].worktree
+        source_package = _infer_fauxpy_src(worktree, canonical_bug.project)
+        bug_dir = (
+            projects_dir / canonical_bug.project / "bugs" / str(canonical_bug.bug_id)
+        )
+        bug_test_targets = load_pytest_targets(bug_dir / "run_test.sh")
+        bug_test_ids = extract_pytest_node_ids(bug_test_targets)
+
+        def _make_sbfl() -> FauxPyLocalizer:
+            return FauxPyLocalizer(
+                FauxPyConfig(
+                    src=source_package,
+                    test_targets=bug_test_targets,
+                    family="sbfl",
+                    granularity=args.granularity,
+                    failing_tests=bug_test_ids,
+                    metric=args.localization_metric,
+                ),
+                fauxpy_toolchain,
+            )
+
+        def _make_mbfl() -> FauxPyLocalizer:
+            return FauxPyLocalizer(
+                FauxPyConfig(
+                    src=source_package,
+                    test_targets=bug_test_targets,
+                    family="mbfl",
+                    granularity=args.granularity,
+                    failing_tests=bug_test_ids,
+                    metric=args.mbfl_metric,
+                    mutation_strategy="random",
+                    mutation_budget=args.mutation_budget,
+                    mutation_seed=args.seed,
+                ),
+                fauxpy_toolchain,
+            )
+
+        if args.fl_family == "sbfl":
+            return _make_sbfl()
+        if args.fl_family == "mbfl":
+            return _make_mbfl()
+        return HybridFaultLocalizer(_make_sbfl(), _make_mbfl())
+
+    perfect_localizer = PerfectFaultLocalizer(adapter)
+
+    def localization_provider(
+        canonical_bug: BugIdentifier, approach: "CourseApproach", fl_mode: str
+    ) -> LocalizationResult:
+        checkout = checkouts[canonical_bug]
+        if approach.uses_llm_fault_localization:
+            return _build_llm_fault_localizer(args, adapter).localize(
+                canonical_bug, checkout
+            )
+        if fl_mode == "perfect":
+            return perfect_localizer.localize(canonical_bug, checkout)
+        return _build_auto_localizer(canonical_bug).localize(canonical_bug, checkout)
+
+    def repair_algorithm_factory(
+        approach: "CourseApproach", localization_result: LocalizationResult
+    ) -> RepairAlgorithm:
+        return _build_algorithm_for_course_approach(
+            args, approach, localization_result, adapter
+        )
+
+    def assessor_factory() -> "PatchAssessor | None":
+        # Assessment is always on here: it is what makes the course-wide table's
+        # quality column comparable across approaches.
+        return _build_assessor(
+            argparse.Namespace(**{**vars(args), "assess": True}), adapter
+        )
+
+    ranker = _build_ranker(args)
+    repair_config_data = {
+        "model": args.model,
+        "temperature": args.temperature,
+        "max_candidates": args.max_candidates,
+        "top_n_locations": args.top_n,
+        "max_iterations": args.max_iterations,
+        "budget": args.budget,
+        "timeout_per_test": args.timeout,
+        "stop_on_first": args.stop_on_first,
+        "regression_check": args.regression_check,
+        "llm_provider": args.llm_provider,
+        "llm_base_url": args.llm_base_url,
+        "system_prompt": args.system_prompt,
+        "fl_system_prompt": args.fl_system_prompt,
+        "assess_system_prompt": args.assess_system_prompt,
+        "fl_family": args.fl_family,
+        "localization_metric": args.localization_metric,
+        "granularity": args.granularity,
+    }
+
+    runner = CourseComparisonRunner(
+        project_root=project_root,
+        runs_dir=runs_dir,
+        ranker=ranker,
+        repair_config_data=repair_config_data,
+        budget=args.budget,
+        stop_on_first=args.stop_on_first,
+    )
+
+    print(
+        f"Comparing {len(approaches)} approach(es) "
+        f"({', '.join(approach.label for approach in approaches)}) on {len(bugs)} bug(s) "
+        f"with model={args.model}; FL modes for the non-LLM-FL approaches: "
+        f"{', '.join(fl_modes)}..."
+    )
+    cells = runner.run(
+        bugs=canonical_bug_list,
+        approaches=approaches,
+        fl_modes=fl_modes,
+        benchmark=adapter,
+        localization_provider=localization_provider,
+        repair_algorithm_factory=repair_algorithm_factory,
+        assessor_factory=assessor_factory,
+        output_dir=output_dir,
+    )
+
+    readme_path = runner.write_results(cells, output_dir)
+    runner.copy_run_artifacts(cells, output_dir)
+    print(f"\nResults written to: {output_dir}")
+    print(f"README: {readme_path}")
+    _print_course_comparison_summary(cells)
+    return 0
+
+
+def _print_course_comparison_summary(cells: list) -> None:
+    """Print a compact per-cell summary table of the course-comparison matrix."""
+    print("\n=== Course-wide comparison summary ===")
+    header = (
+        f"{'Bug':<14} {'Approach':<16} {'FL':<8} {'Q':>4} {'Gen':>4} "
+        f"{'Plaus':>6} {'Corr':>5} {'Qual':>6} {'Sim':>6}"
+    )
+    print(header)
+    print("-" * len(header))
+    for cell in cells:
+        bug_label = f"{cell.bug.project}#{cell.bug.bug_id}"
+        if cell.error:
+            short_error = " ".join(
+                part.strip() for part in cell.error.splitlines() if part.strip()
+            )
+            if len(short_error) > 80:
+                short_error = short_error[:80].rstrip() + " …"
+            print(
+                f"{bug_label:<14} {cell.approach_label:<16} {cell.fl_mode:<8} "
+                f"ERROR: {short_error}"
+            )
+            continue
+        query_count = (
+            str(cell.llm_query_count) if cell.llm_query_count is not None else "-"
+        )
+        best_quality = (
+            f"{cell.best_quality_score:.2f}"
+            if cell.best_quality_score is not None
+            else "-"
+        )
+        best_similarity = (
+            f"{cell.best_context_similarity_score:.2f}"
+            if cell.best_context_similarity_score is not None
+            else "-"
+        )
+        print(
+            f"{bug_label:<14} {cell.approach_label:<16} {cell.fl_mode:<8} "
+            f"{query_count:>4} {cell.total_candidates_generated:>4} "
+            f"{cell.plausible_count:>6} {cell.correct_count:>5} "
+            f"{best_quality:>6} {best_similarity:>6}"
+        )
 
 
 def _print_llm_repair_summary(cells: list) -> None:

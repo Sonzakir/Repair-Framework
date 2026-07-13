@@ -106,6 +106,23 @@ python -m apr_framework repair --project <project> --bug <bug_id> \
   [--similarity-score | --no-similarity-score] \
   [--runs-dir runs]
 
+# Full LLM pipeline in one command (Assignment 5, Task 4):
+# LLM-FL -> LLM repair with context retrieval -> LLM assessment
+python -m apr_framework repair --project <project> --bug <bug_id> \
+  --technique llm --fl-backend llm --retrieval-budget 3 --assess --similarity-score \
+  --model gpt-5.4 --temperature 1.0 \
+  --llm-base-url https://api.openai.com/v1 --llm-api-key-env OPENAI_API_KEY
+
+# Course-wide comparison of all four approaches (Assignment 5, Task 4)
+# auto-FL-capable bugs (black) take --fl-modes auto,perfect; bugs FauxPy cannot
+# localize (tornado:14, scrapy:2) take --fl-modes perfect so no phantom auto cell is scored
+python -m apr_framework bugsinpy evaluate-course-comparison \
+  [--bugs black:1,black:3,black:7,black:11] \
+  [--approaches a3-template,a4-single-shot,a4-iterative,a5-full-llm] \
+  [--fl-modes auto,perfect] [--retrieval-budget 3] \
+  [--model gpt-5.4] [--temperature 1.0] \
+  [--output-dir experiment_results/course_comparison] [--runs-dir runs]
+
 # Store an LLM API key in the local .env (interactive prompt)
 python -m apr_framework configure [--llm-api-key-env OPENAI_API_KEY]
 
@@ -243,6 +260,9 @@ src/apr_framework/
     localization_runner.py  # LocalizationComparisonRunner — runs N techniques × M bugs, scores each
                             # against ground truth, writes results.json + README.md;
                             # LocalizationTechniqueResult holds ranked_locations + top_k_hits per run
+    course_approaches.py    # CourseApproach + COURSE_APPROACHES — the four course approaches as data
+    course_comparison_runner.py  # CourseComparisonRunner — bug x approach x FL-mode matrix; every cell
+                                 # runs with the assessor + score_similarity=True; writes the course-wide report
     repair_comparison_runner.py  # RepairComparisonRunner (Task 5) — drives bug x FL-mode repair matrix, aggregates results.json + README.md
     llm_repair_comparison_runner.py  # LLMRepairComparisonRunner — bug x variant x FL-mode matrix for LLM repair,
                                      # tracks llm_query_count/time_to_first_plausible/rank metrics, writes results.json + README.md
@@ -276,6 +296,19 @@ Both patches use `replace_once` helpers that are idempotent (safe to re-apply). 
 **Perfect fault localization.** `PerfectFaultLocalizer` (`localization/perfect.py`) implements `FaultLocalizer` by parsing the developer fix from `bug_patch.txt` instead of running tests. It produces a `LocalizationResult` with `backend="perfect-fl"` that flows into the same repair pipeline. Selected with `--fl-mode perfect`; the `--fl-family` flag is ignored in this mode.
 
 **LLM-based fault localization (Assignment 5, Task 1).** `LLMFaultLocalizer` (`localization/llm.py`) implements `FaultLocalizer` and emits ordinary `RankedLocation`s (`backend="llm-fl"`), so it is a drop-in replacement anywhere the pipeline consumes a `LocalizationResult` — same mental model as `PerfectFaultLocalizer`, just a different source of rankings. `localize()` runs the trigger test once (via the repair-side `build_failing_test_context`, imported lazily) to capture a traceback, then decides which project source to show the model with two combined signals: traceback frames (good for exceptions) and, importantly, the symbols the *failing test method* patches/mocks via `unittest.mock.patch` (recovered by walking only that method's AST node — scoping to the whole test file re-floods the anchor set with irrelevant symbols). Each anchored file is rendered as line-numbered, merged/elided windows capped by `max_source_lines`, non-test source first, so the token budget favors the actual fault region over the test file. `parse_llm_fl_response` defensively extracts a JSON array (raw reply, fenced block, or bracket-delimited substring) into `RankedLocation`s with synthetic descending scores (`1.0, 0.99, …`, matching `PerfectFaultLocalizer`) — malformed entries are dropped, not fatal, and an unparsable reply yields an empty list rather than raising. `OpenAICompatibleClient` (`repair/llm/client.py`) is reused unmodified for the transport; it was decoupled from `LLMRepairConfig` onto the narrow `LLMConnectionConfig` Protocol specifically so `LLMLocalizationConfig` could satisfy it without either config depending on the other's unrelated fields. Selected with `--backend llm`; debugging notes (why anchoring is scoped the way it is, what `files_shown`/`raw_llm_response` in `results.json` metadata tell you) are in [docs/Implementation5_1.md](docs/Implementation5_1.md).
+
+**End-to-end LLM pipeline and the course-wide comparison (Assignment 5, Task 4).** `repair --fl-backend {fauxpy,llm}` selects the FL *backend* independently of `--fl-mode` (which selects the FL *source*: a tool vs. the `bug_patch.txt` oracle). `_localize_for_repair` (`cli/app.py`) resolves a four-way precedence — **perfect → cached (`--skip-localize`) → llm (`--fl-backend llm`) → fauxpy** — so `--fl-mode perfect` wins over `--fl-backend llm` (and logs that it did) and the default `--fl-backend fauxpy` reproduces the original three-way behavior byte-for-byte. `_build_llm_fault_localizer(args, adapter)` was extracted out of the `localize`-only builder and is shared by `localize`, `repair`, and the evaluation matrix; this works because the `repair` subparser reuses the *same argparse dest names* as `localize` (`fl_system_prompt`, `max_source_lines`, `source_window`). Chaining `--technique llm --fl-backend llm --retrieval-budget N --assess` gives the full pipeline (LLM-FL → LLM repair with retrieval → LLM assessment) in one command. `bugsinpy evaluate-course-comparison` runs `bugs × approaches × fl_modes`, where the approaches are data (`evaluation/course_approaches.py`), not branches; an approach with `uses_llm_fault_localization=True` has one FL source and so ignores the `--fl-modes` axis. **Every cell runs with the assessor attached and `score_similarity=True`** — that is why the command *re-runs* all four approaches instead of loading the committed Assignment-3/4 JSONs: `context_similarity_score` needs `patched_source` (deliberately stripped from serialized results) and the assessor needs the patch objects, so neither metric can be retro-computed from the old artifacts. `_LLM_VARIANT_TOGGLES` / `_build_llm_algorithm_for_variant` must stay untouched — the Assignment-4 `evaluate-llm-repair` matrix has to remain retrieval-free to stay a valid baseline.
+
+**Which bugs FauxPy can actually localize (and why the bug set is what it is).** The `auto` FL mode is only worth running where FauxPy works, and three distinct failure modes disqualify a bug:
+- **Python 3.7 pins** — FauxPy 0.7.0 (via `cosmic-ray` 8.3.5) cannot install at all (`tornado:14`, `youtube-dl:12`).
+- **Dependency conflict with the project's own pins** — installing FauxPy drags in `cosmic-ray`, whose unpinned `pydantic` resolves to 2.x and overrides e.g. fastapi's `pydantic==1.5.1`, after which every fastapi test module fails to import (pydantic 2 also demands `email-validator>=2`). Reasserting the project's pins does **not** fix it: that downgrades `typing_extensions`, and FauxPy's own chain (`pyllmut` → `openai`) needs `typing_extensions>=4.5` to import, so the plugin dies instead. The two dependency sets are irreconcilable — **fastapi bugs cannot be localized with FauxPy 0.7.0**, and no toolchain patch changes that. (An earlier attempt to reinstall `bugsinpy_requirements.txt` after the FauxPy install was reverted for exactly this reason; don't re-add it.)
+- **Silent empty ranking** — FauxPy installs, exits 0, and ranks nothing (`scrapy:2`; report dirs exist on disk with empty score tables).
+
+In practice `black` bugs are the reliable auto-FL set. A cell with no ranked location generates no candidate, so its zeros describe the *localizer*, not the repair approach; comparing them against a cell that ran is meaningless. `CourseComparisonRunner` short-circuits such a cell to `NO_FL_LOCATIONS_STATUS` (`no_fl_locations`) instead of running repair against an empty ranking and reporting `no_patch`, and `_is_cell_usable` keeps those cells out of every cross-approach comparison. Bugs FauxPy cannot reach are run with `--fl-modes perfect` (no auto cell is created at all) rather than being scored as a zero. Before adding a bug to the auto set, run `localize --project P --bug N` and confirm ranked locations come back — cached FauxPy reports under `.workspace/` are *not* proof, since a later `compile` can rot the venv.
+
+**Auto-FL-capable and repairable are nearly disjoint in this benchmark.** `black` localizes reliably but resists repair — it lints its own source, so any patch that is not black-formatted passes the trigger test and then fails the regression check (see [[reference_black_self_lint]]). The bugs that actually yield plausible/exact-diff patches (`tornado:14`, `scrapy:2`) are precisely the ones FauxPy cannot localize. Expect a course-comparison report to carry both kinds of bug for that reason; a set chosen only for auto-FL capability will be almost all zeros.
+
+**The exact-diff column is not a correctness verdict.** `correct_count` counts patches whose diff matches the developer fix byte-for-byte, so a semantically correct fix written differently scores 0. The report renders it as **`Exact diff`** / "Exact-diff matches", never "Correct" — the graded `quality_score` (LLM assessor) and `context_similarity_score` carry the actual quality judgment. Keep that wording when touching the report; calling it "correct" overstates what the metric measures.
 
 **Patch ranking is optional and non-destructive.** `RepairEvaluationRunner` accepts an optional `ranker: PatchRanker | None`. When provided, it reorders plausible results after the correctness check and writes both orderings into `repair_results.json`: `plausible_patches` (generation order, the baseline) and `ranked_plausible_patches` (ranked order). `rank_of_first_correct` (1-indexed) is stored in `RepairRunMetrics` and emitted at the top level of each bug's JSON payload. The `PatchRanker` ABC lives in `repair/ranking/base.py`; the only current implementation is `WeightedCompositeRanker` (`repair/ranking/weighted.py`), which combines a suspiciousness score, patch simplicity, and operator priority using a configurable weighted sum. Enabled by default with `--ranker weighted`; disabled with `--ranker none`.
 

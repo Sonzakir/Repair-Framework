@@ -44,6 +44,8 @@ and `File | Function | Line | Score` table formats
 - **LLM-based repair backend** (`--technique llm`) — FL-guided prompting against GPT@RUB, with context enrichment, few-shot examples, an **iterative test-failure feedback loop** (`--iterative`), and optional codebase context retrieval before patch generation (`--retrieval-budget`)
 - **LLM-based fault localization** (`localize --backend llm`) — asks the LLM to rank suspicious source lines from failing-test evidence and emits the same `RankedLocation` format as FauxPy
 - **LLM-based patch assessment** (`repair --assess`) — assesses plausible patches for semantic quality, records `quality_score` plus a short rationale, and writes an assessment-ranked plausible-patch list
+- **End-to-end LLM pipeline** (`repair --technique llm --fl-backend llm --retrieval-budget N --assess`) — chains LLM fault localization, LLM repair with context retrieval, and LLM patch assessment in a single command
+- **`evaluate-course-comparison` command** — runs all four course approaches (template, single-shot LLM, iterative LLM, full LLM pipeline) on the same bugs with assessment and context-similarity scoring on every cell, and writes a course-wide comparison report
 - Dummy repair algorithm for three BugsInPy `black` bugs (1/3/23)
 - Dummy evaluation runner that creates structured run artifacts:
   - `config.json`
@@ -1998,6 +2000,197 @@ self-contained regions it correctly declines to retrieve and patches directly. S
 `APR_LLM_DEBUG_PROMPT=<dir>` (or `stderr`) to dump every prompt and inspect the retrieval
 turns. With `--retrieval-budget 0` (the default) prompts are byte-identical to Iteration 4.
 
+## Iteration 5 — Task 4: End-to-End LLM Pipeline and Course-Wide Comparison
+
+Task 4 chains the three Iteration-5 components into one fully LLM-driven pipeline and
+compares it against every approach built earlier in the course.
+
+```text
+LLM-FL  ->  LLM-Repair with context retrieval  ->  LLM-Assessment
+```
+
+### The single command
+
+The missing link was fault localization: `repair` could pick `auto` (FauxPy) or `perfect`
+(the developer-fix oracle), but not the Task-1 LLM localizer. The new **`--fl-backend`**
+flag supplies it, so the whole pipeline runs from one command:
+
+```bash
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm --fl-backend llm --retrieval-budget 3 --assess --similarity-score \
+  --model gpt-5.4 --temperature 1.0 \
+  --llm-base-url https://api.openai.com/v1 --llm-api-key-env OPENAI_API_KEY \
+  --max-candidates 3 --top-n 3
+```
+
+**`--fl-backend` vs `--fl-mode`.** They answer different questions and compose:
+`--fl-mode` asks *where do the fault locations come from — a tool, or the oracle?*, while
+`--fl-backend` asks *which tool?*.
+
+| `--fl-mode` | `--fl-backend` | FL source (`fl_backend` in the result files) |
+|---|---|---|
+| `auto` (default) | `fauxpy` (default) | SBFL / MBFL / hybrid — see `--fl-family` |
+| `auto` | `llm` | the Iteration-5 LLM localizer (`llm-fl`) |
+| `perfect` | *(ignored)* | the BugsInPy developer fix (`oracle`) |
+
+`--fl-mode perfect` wins over `--fl-backend llm` — the oracle is strictly better information
+than any localizer — and the run logs a line saying so instead of failing. With the default
+`--fl-backend fauxpy`, every pre-existing command line behaves exactly as before.
+
+One model serves all three stages: `--model` / `--temperature` / `--llm-base-url` /
+`--llm-api-key-env` are shared by the localizer, the repair backend, and the assessor.
+
+### The course-wide comparison
+
+`bugsinpy evaluate-course-comparison` runs every approach built over the course on the same
+bugs, and writes an aggregated report:
+
+The committed report was produced by two invocations — auto-FL-capable bugs under both FL
+modes, and the bugs FauxPy cannot localize under perfect FL only:
+
+```bash
+# Bugs FauxPy can localize -> the auto column is real
+python -m apr_framework bugsinpy evaluate-course-comparison \
+  --bugs black:1,black:3,black:7,black:11 \
+  --fl-modes auto,perfect --retrieval-budget 3 \
+  --model gpt-5.4 --temperature 1.0 \
+  --llm-base-url https://api.openai.com/v1 --llm-api-key-env OPENAI_API_KEY \
+  --max-candidates 3 --top-n 3
+
+# Bugs FauxPy cannot localize -> no auto cell is created at all
+python -m apr_framework bugsinpy evaluate-course-comparison \
+  --bugs tornado:14,scrapy:2 --fl-modes perfect --retrieval-budget 3 \
+  --model gpt-5.4 --temperature 1.0 \
+  --llm-base-url https://api.openai.com/v1 --llm-api-key-env OPENAI_API_KEY
+```
+
+**Why the bug set is split this way.** An `auto` cell is only meaningful on a bug FauxPy can
+actually localize. On the others it produces zeros that describe FauxPy, not the repair
+approach — so those bugs are run under perfect FL only, and no auto cell is fabricated:
+
+| Bug | Python | What `auto` FL actually does |
+|---|---|---|
+| `tornado:14` | 3.7.0 | FauxPy 0.7.0 (via `cosmic-ray` 8.3.5) **cannot install** — needs ≥3.8 |
+| `scrapy:2` | 3.8.3 | FauxPy installs and exits 0, but **ranks nothing** — empty score tables |
+| `fastapi:*` | 3.8.3 | Irreconcilable pins: installing FauxPy forces `pydantic` to 2.x and breaks fastapi's imports, while restoring fastapi's pins downgrades `typing_extensions` and breaks FauxPy's own `pyllmut`→`openai` chain. **No configuration satisfies both.** |
+
+The `black` bugs were each verified with a live `localize` run before being included, so their
+auto column reflects the repair approach rather than a broken localizer. A cell whose localizer
+ranks nothing is recorded as `no_fl_locations` and excluded from cross-approach comparison,
+instead of being reported as `no_patch` — which would read as "the repair technique tried and
+found nothing", a much stronger claim than the run supports.
+
+**A caveat worth stating plainly: auto-FL-capable and repairable are nearly disjoint here.**
+`black` localizes reliably but resists repair — it lints its own source, so a patch that is not
+black-formatted passes the trigger test and then fails the regression check. The bugs that do
+yield patches (`tornado:14`, `scrapy:2`) are exactly the ones FauxPy cannot localize. The set
+above deliberately carries both kinds, because a set chosen purely for auto-FL capability would
+be almost entirely zeros and would say nothing about repair.
+
+| Approach | Technique | FL source | Toggles |
+|---|---|---|---|
+| `a3-template` | template (Iteration 3) | auto / perfect | — |
+| `a4-single-shot` | LLM (Iteration 4) | auto / perfect | no enrichment, no retrieval |
+| `a4-iterative` | LLM (Iteration 4) | auto / perfect | iterative feedback loop |
+| `a5-full-llm` | LLM (Iteration 5) | **LLM-FL** | enrichment + context retrieval + assessment |
+
+The three earlier approaches are run under both FL modes; `a5-full-llm` localizes with the
+LLM and so has a single FL source. All bugs must be checked out and compiled first. Each
+cell is executed by the existing `RepairEvaluationRunner` and gets its own `runs/run_NNN/`
+(config, log, retrieval traces, patch diffs); a localization failure in one cell is recorded
+as an error cell instead of aborting the matrix, and `results.json` is flushed after every
+cell so a long API run survives an interruption.
+
+### Why the column is called "exact diff", not "correct"
+
+**`Exact diff` counts byte-for-byte matches with the developer fix — nothing more.** A
+semantically correct fix written differently from the developer's scores 0 in that column, so
+a 0 is *not* a claim that the patch is wrong; the metric is the framework's
+data-contamination signal. The report therefore never labels it "correct". Two graded metrics
+carry the actual quality judgment, and **every cell of every column is measured with both**:
+
+| Metric | What it adds |
+|---|---|
+| **Assessment quality score** (`0.0`–`1.0`) | The LLM assessor's judgment of whether the patch genuinely fixes the bug or just overfits the test suite — the semantic signal a pass/fail oracle cannot give. |
+| **Context similarity score** (`0.0`–`1.0`) | How close the patch's edit is to the developer's, including surrounding context. A high-but-sub-1.0 score is a near-miss that `Exact diff` reports as a flat zero. |
+
+This is also why the command **re-runs all four approaches** rather than loading the
+committed Iteration-3/4 numbers: both metrics need the patch objects (the similarity score
+rebuilds a reformatting-neutral diff from `patched_source`, which is deliberately stripped
+from the serialized results to keep them small), so they cannot be reconstructed from the
+old artifacts. Re-running is the only way to measure all four columns the same way. Because
+the model is sampled at temperature 1.0, these numbers will not reproduce the older reports
+exactly; the new report is self-contained, and the earlier ones are left untouched.
+
+The generated report gives, per bug, the assignment's comparison table plus the two extra
+metric rows, an auditable per-cell table underneath, and four discussion sections: LLM-FL vs.
+SBFL/MBFL, the effect of context retrieval, the usefulness of assessment, and where the full
+pipeline improved or regressed.
+
+### Results
+
+Real output of one 36-cell run (6 bugs × 4 approaches; the three earlier approaches under
+both FL modes on the four `black` bugs, and under perfect FL only on the two bugs FauxPy
+cannot localize) with OpenAI `gpt-5.4`, `temperature 1.0`, `top_n=3`, `max_candidates=3`,
+`--retrieval-budget 3`. Full artifacts:
+[`experiment_results/course_comparison/`](experiment_results/course_comparison/).
+
+Best cell per approach (plausible / exact-diff):
+
+| Bug | Auto FL? | A3 template | A4 simple | A4 iterative | **A5 full LLM** |
+|---|---|---|---|---|---|
+| black#1 | yes | 0 / 0 | 0 / 0 | 0 / 0 | **6 / 0** |
+| black#3 | yes | 0 / 0 | 0 / 0 | 0 / 0 | **4 / 0** |
+| black#7 | yes | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| black#11 | yes | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| tornado#14 | no | 1 / 1 | 3 / 3 | 1 / 1 | **9 / 9** |
+| scrapy#2 | no | 0 / 0 | 1 / 0 | 2 / 0 | **9 / 0** |
+
+**Did LLM-FL beat SBFL/MBFL?** On the bugs where a fair comparison is possible — the four
+`black` bugs, where FauxPy genuinely localizes — LLM-FL is the only localizer that led to any
+patch at all: `black#1` (0 → 6 plausible) and `black#3` (0 → 4). On `black#7` and `black#11`
+both localizers led nowhere. On `tornado#14` and `scrapy#2` there is no SBFL/MBFL baseline to
+compare against at all, because FauxPy cannot localize those bugs; that LLM-FL runs there is
+itself the difference.
+
+**Where the full LLM pipeline improved.** It beat the best prior approach on four of six bugs:
+`black#1` (0 → 6 plausible), `black#3` (0 → 4), `tornado#14` (3 → 9 exact-diff), and
+`scrapy#2` (2 → 9 plausible).
+
+**Where everything failed, and why that matters.** `black#7` and `black#11` defeated every
+approach, including the full pipeline. This is the honest headline of the study: **the bugs
+FauxPy can localize are the ones nobody can repair.** `black` lints its own source, so a patch
+that is not black-formatted passes the trigger test and then fails the regression check —
+which is precisely why the `black` rows are almost all zeros while `tornado#14` (which FauxPy
+cannot even localize) is the one bug where three of four approaches land the developer's exact
+fix.
+
+**Did the extra metrics earn their place?** Yes, in both directions:
+
+- On `scrapy#2` the pipeline's 9 plausible patches score **0 exact-diff** but reach **0.92
+  context similarity** — the fix lands in the right place in nearly the right form. The
+  strict verdict reports that as a flat failure; the graded score shows it as a near-miss.
+- On `tornado#14` the template patch that **exactly reproduces the developer fix**
+  (similarity `1.00`) was scored **0.18** by the LLM assessor — an assessor *false negative*.
+  A terse single-operator change reads as unconvincing to the model even when it is precisely
+  what the developer wrote.
+- On `black#3` the assessor scored the pipeline's best plausible patch **0.12**, flagging it
+  as test-suite overfitting: it passes every test, yet the assessor judges it not to fix the
+  underlying bug — a signal the pass/fail oracle cannot produce. Its context similarity
+  (`0.06`) agrees.
+
+That second result is the important caveat: **the assessor is evidence, not an oracle.** It
+is a useful semantic signal the pass/fail check cannot give, and it flags overfitting the
+tests cannot see — but it mis-rates real fixes too, which is exactly why the exact-diff
+verdict is retained alongside it rather than replaced by it.
+
+Implementation notes: [`docs/assignment5/Implementation5_4.md`](docs/assignment5/Implementation5_4.md).
+
+To re-render the report after changing the tables or discussion — without re-running the
+matrix or spending any API budget — use
+`python scripts/regenerate_course_comparison_readme.py` (it re-derives every figure from the
+committed per-cell `repair_results.json` artifacts).
+
 
 # Starting the application in clean ubuntu 24.04 Container 
 
@@ -2065,6 +2258,10 @@ python -m apr_framework bugsinpy evaluate-dummy --seed 123
 | Repair evaluation matrix | `bugsinpy evaluate-repair --bugs "tornado:14,scrapy:2,black:1" --fl-modes "auto,perfect"` |
 | Repair evaluation output | `experiment_results/repair/results.json` + `README.md` + per-cell `run_artifacts/` |
 | LLM repair context retrieval | `repair --technique llm --retrieval-budget 3` |
+| LLM fault localization for repair | `repair --fl-backend llm` |
+| Full LLM pipeline (one command) | `repair --technique llm --fl-backend llm --retrieval-budget 3 --assess --similarity-score` |
+| Course-wide comparison | `bugsinpy evaluate-course-comparison --bugs "black:1,black:3,black:7,black:11"` |
+| Course-comparison output | `experiment_results/course_comparison/results.json` + `README.md` + per-cell `run_artifacts/` |
 
 
 

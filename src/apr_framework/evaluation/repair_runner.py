@@ -208,20 +208,31 @@ class RepairEvaluationRunner(EvaluationRunner):
                 "correctness cannot be assessed."
             )
 
+        # Metric 2 (context similarity) — graded closeness to the developer fix,
+        # recorded alongside the exact-diff verdict without altering it. Scored over
+        # *every* generated candidate, not just the plausible ones: an approach whose
+        # patches all fail the test suite would otherwise report no similarity at all,
+        # which reads as "not measured" and makes it incomparable to an approach that
+        # got something past the tests. Grading its near-misses is the whole point of
+        # a graded metric. Opt-in only: skipped unless --similarity-score was passed.
+        if self._score_similarity and reference is not None:
+            for attempt_result in outcome.all_results:
+                if attempt_result.patch is None:
+                    continue
+                similarity_score = context_similarity_score(
+                    attempt_result.patch, reference
+                )
+                attempt_result.patch.metadata["context_similarity_score"] = (
+                    similarity_score
+                )
+                attempt_result.patch.metadata["similarity_band"] = (
+                    describe_similarity_score(similarity_score)
+                )
+
         correct_count = 0
         for result in outcome.plausible_results:
             if result.patch is None or reference is None:
                 continue
-            # Metric 2 (context similarity) — graded closeness to the developer fix,
-            # recorded alongside the exact-diff verdict without altering it. Opt-in
-            # only: skipped entirely unless --similarity-score was passed, so a
-            # normal run's output is unchanged.
-            if self._score_similarity:
-                similarity_score = context_similarity_score(result.patch, reference)
-                result.patch.metadata["context_similarity_score"] = similarity_score
-                result.patch.metadata["similarity_band"] = describe_similarity_score(
-                    similarity_score
-                )
             # Metric 1 (exact diff match) — unchanged.
             if is_correct_patch(result.patch, reference):
                 result.status = RepairStatus.CORRECT
@@ -434,7 +445,7 @@ class RepairEvaluationRunner(EvaluationRunner):
         }
         if self._score_similarity:
             # Graded closeness to the developer fix (0.0-1.0) plus a human-readable
-            # band; None for non-plausible patches, which are never scored.
+            # band, carried by every generated candidate — plausible or not.
             # Independent of the is_correct verdict. Omitted entirely (not just
             # null) unless --similarity-score was passed.
             payload["context_similarity_score"] = metadata.get(
