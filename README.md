@@ -2212,4 +2212,20 @@ python -m apr_framework localize \
   --llm-api-key-env OPENAI_API_KEY \
   --temperature 1 \
   --top-n 10
+
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm --fl-mode perfect \
+  --retrieval-budget 3 \
+  --model gpt-5.4 --temperature 1 \
+  --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY \
+  --top-n 3 --max-candidates 3 --budget 200
+
+python -m apr_framework repair --project black --bug 1 \
+  --technique llm --fl-backend llm \
+  --retrieval-budget 3 --assess --similarity-score \
+  --model gpt-5.4 --temperature 1 \
+  --llm-base-url https://api.openai.com/v1 \
+  --llm-api-key-env OPENAI_API_KEY \
+  --top-n 3 --max-candidates 10 --budget 200
 ```
