@@ -2063,7 +2063,7 @@ cell so a long API run survives an interruption.
 
 ### Why the correct(exact-diff) solution is not necessarily the optimal solution? -> 2 new metrics 
 
-**`Exact diff` counts byte-for-byte matches with the developer fix — nothing more.** A
+**`Exact diff` counts byte-for-byte matches with the developer fix, nothing more.** A
 semantically correct fix written differently from the developer's scores 0 in that column, so
 a 0 is *not* a claim that the patch is wrong; the metric is the framework's
 data-contamination signal. The report therefore never labels it "correct". Two graded metrics
