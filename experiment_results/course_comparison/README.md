@@ -26,7 +26,7 @@ Generated with the model: `gpt-5.4` · per-cell validation budget: 200
 | **Best context similarity score** (any candidate) | 0.13 | 0.18 | 0.18 | 0.40 |
 | Time to first plausible | — | — | — | 41.1s |
 
-_Columns whose FL source is auto/perfect were run under every FL mode available for this bug, `auto` is skipped entirely on bugs FauxPy cannot localize, rather than recorded as a zero. The cell shown is the best of those runs, chosen by max exact-diff matches -> max plausible -> fastest time to first plausible, with the winning FL mode in parentheses. `—` means the approach produced nothing, the cell errored, or its localizer ranked nothing at all (`no_fl_locations`); the per-cell tables below say which._
+
 
 ### black bug #3
 
