@@ -789,8 +789,8 @@ def _print_repair_summary_for_bug(
         )
         print(f"Assessment LLM calls:          {query_count_str}")
         _print_plausible_patch_assessments(repair_result.assessed_plausible_results)
-    if repair_result.similarity_scored_plausible_results is not None:
-        _print_similarity_scores(repair_result.similarity_scored_plausible_results)
+    if repair_result.similarity_scored_results is not None:
+        _print_similarity_scores(repair_result.similarity_scored_results)
 
 
 def _print_plausible_patch_assessments(
@@ -815,20 +815,23 @@ def _print_plausible_patch_assessments(
 
 
 def _print_similarity_scores(
-    similarity_scored_plausible_results: list[RepairAttemptResult],
+    similarity_scored_results: list[RepairAttemptResult],
 ) -> None:
-    """Print each plausible patch's graded closeness to the developer fix.
+    """Print every generated candidate's graded closeness to the developer fix.
 
-    Shown in generation order (same order as ``plausible_patches`` in
-    ``repair_results.json``) with a human-readable band next to each score, since a
-    bare float like ``0.92`` is hard to eyeball on its own.
+    Covers non-plausible candidates too: a patch that failed the test suite can still
+    be a near-miss on the developer's edit, and hiding that behind the pass/fail
+    verdict is exactly what the graded metric exists to avoid. Shown in generation
+    order (same order as ``all_results`` in ``repair_results.json``) with a
+    human-readable band next to each score, since a bare float like ``0.92`` is hard
+    to eyeball on its own.
     """
-    print("#"*90)
+    print("#" * 90)
     print(
-        "# Similarity scores for plausible patches "
+        "# Similarity scores for every generated candidate "
         "(closeness to the developer fix, 0.0-1.0):"
     )
-    if not similarity_scored_plausible_results:
+    if not similarity_scored_results:
         print("  none")
         return
     print("#  1.00        identical to the developer fix")
@@ -836,18 +839,14 @@ def _print_similarity_scores(
     print("#  0.60-0.84   similar (recognizable overlap)")
     print("#  0.30-0.59   loosely similar")
     print("#  0.00-0.29   different (little in common)")
-    print("#"*90)
-    for patch_position, attempt_result in enumerate(
-        similarity_scored_plausible_results, start=1
-    ):
+    print("#" * 90)
+    for patch_position, attempt_result in enumerate(similarity_scored_results, start=1):
         patch = attempt_result.patch
         patch_id_str = patch.patch_id if patch is not None else "n/a"
         metadata = patch.metadata if patch is not None else {}
         similarity_score = metadata.get("context_similarity_score")
         band_str = metadata.get("similarity_band", "n/a")
-        score_str = (
-            f"{similarity_score:.2f}" if similarity_score is not None else "n/a"
-        )
+        score_str = f"{similarity_score:.2f}" if similarity_score is not None else "n/a"
         print(f"  Patch {patch_position} ({patch_id_str}) -> {score_str}  ({band_str})")
 
 

@@ -73,8 +73,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_1/black/black.py",
         "target_line": 621
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.22707423580786026,
+      "similarity_band": "different (little in common)"
     },
     {
       "patch_id": "llm-1-1",
@@ -91,8 +91,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_1/black/black.py",
         "target_line": 621
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.22707423580786026,
+      "similarity_band": "different (little in common)"
     },
     {
       "patch_id": "llm-1-2",
@@ -109,8 +109,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_1/black/black.py",
         "target_line": 621
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.22707423580786026,
+      "similarity_band": "different (little in common)"
     },
     {
       "patch_id": "llm-2-0",
@@ -127,8 +127,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_1/black/black.py",
         "target_line": 636
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.4483260553129549,
+      "similarity_band": "loosely similar"
     },
     {
       "patch_id": "llm-2-1",
@@ -145,8 +145,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_1/black/black.py",
         "target_line": 636
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.44573082489146165,
+      "similarity_band": "loosely similar"
     },
     {
       "patch_id": "llm-2-2",
@@ -163,8 +163,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_1/black/black.py",
         "target_line": 636
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.4483260553129549,
+      "similarity_band": "loosely similar"
     },
     {
       "patch_id": "llm-3-0",
@@ -181,8 +181,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_1/black/black.py",
         "target_line": 646
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.2273342354533153,
+      "similarity_band": "different (little in common)"
     },
     {
       "patch_id": "llm-3-1",
@@ -199,8 +199,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_1/black/black.py",
         "target_line": 646
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.2273342354533153,
+      "similarity_band": "different (little in common)"
     },
     {
       "patch_id": "llm-3-2",
@@ -217,8 +217,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_1/black/black.py",
         "target_line": 646
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.2273342354533153,
+      "similarity_band": "different (little in common)"
     }
   ],
   "assessed_plausible_patches": []

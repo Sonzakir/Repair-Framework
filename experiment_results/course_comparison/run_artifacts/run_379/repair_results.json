@@ -131,8 +131,8 @@
         "error_count": 1,
         "failure_kind": "trigger"
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.8478260869565217,
+      "similarity_band": "similar (recognizable overlap)"
     },
     {
       "patch_id": "llm-iter-1-1",

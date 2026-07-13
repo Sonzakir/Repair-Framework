@@ -166,10 +166,10 @@ class RepairEvaluationRunner(EvaluationRunner):
                     if self._assessor is not None
                     else None
                 ),
-                similarity_scored_plausible_results=(
-                    bug_result.outcome.plausible_results
-                    if self._score_similarity
-                    else None
+                # Every candidate, not just the plausible ones: a run whose patches
+                # all failed the tests still has near-misses worth showing.
+                similarity_scored_results=(
+                    bug_result.outcome.all_results if self._score_similarity else None
                 ),
             )
             for bug_result in bug_run_results

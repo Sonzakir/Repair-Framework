@@ -80,8 +80,8 @@
         "trigger_passed": false,
         "regression_checked": false
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.12658227848101267,
+      "similarity_band": "different (little in common)"
     },
     {
       "patch_id": "black-1-obo-L6314-v1",
@@ -106,8 +106,8 @@
         "trigger_passed": false,
         "regression_checked": false
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.12658227848101267,
+      "similarity_band": "different (little in common)"
     },
     {
       "patch_id": "black-1-obo-L6313-v0",
@@ -132,8 +132,8 @@
         "trigger_passed": false,
         "regression_checked": false
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.13255360623781676,
+      "similarity_band": "different (little in common)"
     },
     {
       "patch_id": "black-1-obo-L6313-v1",
@@ -158,8 +158,8 @@
         "trigger_passed": false,
         "regression_checked": false
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.13229571984435798,
+      "similarity_band": "different (little in common)"
     }
   ],
   "assessed_plausible_patches": []

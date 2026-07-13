@@ -282,8 +282,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_3/black/tests/test_black.py",
         "target_line": 1653
       },
-      "context_similarity_score": null,
-      "similarity_band": null,
+      "context_similarity_score": 0.05342237061769616,
+      "similarity_band": "different (little in common)",
       "retrieval": {
         "steps": [],
         "step_count": 0,
@@ -305,8 +305,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_3/black/tests/test_black.py",
         "target_line": 1653
       },
-      "context_similarity_score": null,
-      "similarity_band": null,
+      "context_similarity_score": 0.05604203152364273,
+      "similarity_band": "different (little in common)",
       "retrieval": {
         "steps": [],
         "step_count": 0,
@@ -328,8 +328,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_3/black/tests/test_black.py",
         "target_line": 162
       },
-      "context_similarity_score": null,
-      "similarity_band": null,
+      "context_similarity_score": 0.04216867469879518,
+      "similarity_band": "different (little in common)",
       "retrieval": {
         "steps": [],
         "step_count": 0,
@@ -351,8 +351,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_3/black/tests/test_black.py",
         "target_line": 162
       },
-      "context_similarity_score": null,
-      "similarity_band": null,
+      "context_similarity_score": 0.04216867469879518,
+      "similarity_band": "different (little in common)",
       "retrieval": {
         "steps": [],
         "step_count": 0,
@@ -374,8 +374,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_3/black/tests/test_black.py",
         "target_line": 162
       },
-      "context_similarity_score": null,
-      "similarity_band": null,
+      "context_similarity_score": 0.04216867469879518,
+      "similarity_band": "different (little in common)",
       "retrieval": {
         "steps": [],
         "step_count": 0,

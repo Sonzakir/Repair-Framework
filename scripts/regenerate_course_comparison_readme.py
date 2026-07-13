@@ -53,9 +53,10 @@ def rescore_cell_from_run_artifacts(
     assessment = _summarise_assessment_from_patches(
         payload.get("assessed_plausible_patches") or []
     )
-    similarity = _summarise_similarity_from_patches(
-        payload.get("plausible_patches") or []
-    )
+    # Every candidate, not just the plausible ones — see the runner's note: an
+    # approach whose patches all failed the tests still generated edits, and how
+    # close they came is what the graded metric exists to report.
+    similarity = _summarise_similarity_from_patches(payload.get("all_results") or [])
     retrieval = _summarise_retrieval_from_patches(payload.get("all_results") or [])
 
     cell.assessed_patch_count = assessment.assessed_patch_count

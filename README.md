@@ -2051,7 +2051,7 @@ modes, and the bugs FauxPy cannot localize under perfect FL only:
 ```bash
 # Bugs FauxPy can localize -> the auto column is real
 python -m apr_framework bugsinpy evaluate-course-comparison \
-  --bugs black:1,black:3,black:7,black:11 \
+  --bugs black:1,black:3 \
   --fl-modes auto,perfect --retrieval-budget 3 \
   --model gpt-5.4 --temperature 1.0 \
   --llm-base-url https://api.openai.com/v1 --llm-api-key-env OPENAI_API_KEY \
@@ -2075,7 +2075,9 @@ approach — so those bugs are run under perfect FL only, and no auto cell is fa
 | `fastapi:*` | 3.8.3 | Irreconcilable pins: installing FauxPy forces `pydantic` to 2.x and breaks fastapi's imports, while restoring fastapi's pins downgrades `typing_extensions` and breaks FauxPy's own `pyllmut`→`openai` chain. **No configuration satisfies both.** |
 
 The `black` bugs were each verified with a live `localize` run before being included, so their
-auto column reflects the repair approach rather than a broken localizer. A cell whose localizer
+auto column reflects the repair approach rather than a broken localizer. Bugs that *no* approach
+can repair (`black:7`, `black:11` — both localize fine, neither yields a single plausible patch)
+are excluded: they grade nothing, and padding a repair comparison with them is noise. A cell whose localizer
 ranks nothing is recorded as `no_fl_locations` and excluded from cross-approach comparison,
 instead of being reported as `no_patch` — which would read as "the repair technique tried and
 found nothing", a much stronger claim than the run supports.
@@ -2129,41 +2131,49 @@ pipeline improved or regressed.
 
 ### Results
 
-Real output of one 36-cell run (6 bugs × 4 approaches; the three earlier approaches under
-both FL modes on the four `black` bugs, and under perfect FL only on the two bugs FauxPy
+Real output of one 22-cell run (4 bugs × 4 approaches; the three earlier approaches under
+both FL modes on the two `black` bugs, and under perfect FL only on the two bugs FauxPy
 cannot localize) with OpenAI `gpt-5.4`, `temperature 1.0`, `top_n=3`, `max_candidates=3`,
 `--retrieval-budget 3`. Full artifacts:
 [`experiment_results/course_comparison/`](experiment_results/course_comparison/).
 
-Best cell per approach (plausible / exact-diff):
+Every bug in the set is one at least one approach can repair — a bug no approach can touch
+grades nothing and belongs in the FL study, not the repair study.
+
+Best cell per approach, as **plausible / exact-diff / best similarity**. Similarity is scored
+on *every candidate an approach generated*, plausible or not, so an approach that produced no
+plausible patch still reports how close it came:
 
 | Bug | Auto FL? | A3 template | A4 simple | A4 iterative | **A5 full LLM** |
 |---|---|---|---|---|---|
-| black#1 | yes | 0 / 0 | 0 / 0 | 0 / 0 | **6 / 0** |
-| black#3 | yes | 0 / 0 | 0 / 0 | 0 / 0 | **4 / 0** |
-| black#7 | yes | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| black#11 | yes | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| tornado#14 | no | 1 / 1 | 3 / 3 | 1 / 1 | **9 / 9** |
-| scrapy#2 | no | 0 / 0 | 1 / 0 | 2 / 0 | **9 / 0** |
+| black#1 | yes | 0 / 0 / 0.13 | 0 / 0 / 0.18 | 0 / 0 / 0.18 | **6 / 0 / 0.40** |
+| black#3 | yes | 0 / 0 / 0.03 | 0 / 0 / 0.04 | 0 / 0 / 0.04 | **4 / 0 / 0.06** |
+| tornado#14 | no | 1 / 1 / 1.00 | 3 / 3 / 1.00 | 1 / 1 / 1.00 | **9 / 9 / 1.00** |
+| scrapy#2 | no | 0 / 0 / **0.88** | 1 / 0 / 0.92 | 2 / 0 / 0.92 | **9 / 0 / 0.92** |
 
-**Did LLM-FL beat SBFL/MBFL?** On the bugs where a fair comparison is possible — the four
-`black` bugs, where FauxPy genuinely localizes — LLM-FL is the only localizer that led to any
-patch at all: `black#1` (0 → 6 plausible) and `black#3` (0 → 4). On `black#7` and `black#11`
-both localizers led nowhere. On `tornado#14` and `scrapy#2` there is no SBFL/MBFL baseline to
-compare against at all, because FauxPy cannot localize those bugs; that LLM-FL runs there is
-itself the difference.
+**Why similarity is scored on every candidate, not just plausible ones.** Look at `scrapy#2`,
+A3 template: **0 plausible patches, yet 0.88 similarity.** The pass/fail oracle reports that
+approach as a flat, uninformative zero — but it had in fact produced an edit that is nearly the
+developer's fix and merely failed the test suite. Scoring only plausible patches would leave
+A3's column empty there, which reads as "not measured" and makes it incomparable to the
+approaches that got something past the tests. This is the single clearest demonstration in the
+study of why test adequacy alone is a blunt instrument.
 
-**Where the full LLM pipeline improved.** It beat the best prior approach on four of six bugs:
+**Did LLM-FL beat SBFL/MBFL?** On the bugs where a fair comparison is possible — the `black`
+bugs, where FauxPy genuinely localizes — LLM-FL is the only localizer that led to any plausible
+patch at all: `black#1` (0 → 6) and `black#3` (0 → 4). It also produced the closest candidates
+under the graded metric (0.40 vs 0.13–0.18 on `black#1`). On `tornado#14` and `scrapy#2` there
+is no SBFL/MBFL baseline to compare against, because FauxPy cannot localize those bugs at all;
+that LLM-FL runs there is itself the difference.
+
+**Where the full LLM pipeline improved.** It beat the best prior approach on all four bugs:
 `black#1` (0 → 6 plausible), `black#3` (0 → 4), `tornado#14` (3 → 9 exact-diff), and
 `scrapy#2` (2 → 9 plausible).
 
-**Where everything failed, and why that matters.** `black#7` and `black#11` defeated every
-approach, including the full pipeline. This is the honest headline of the study: **the bugs
-FauxPy can localize are the ones nobody can repair.** `black` lints its own source, so a patch
-that is not black-formatted passes the trigger test and then fails the regression check —
-which is precisely why the `black` rows are almost all zeros while `tornado#14` (which FauxPy
-cannot even localize) is the one bug where three of four approaches land the developer's exact
-fix.
+**Where it did not.** On `black#3` its 4 plausible patches score **0.12 assessment quality** and
+**0.06 similarity** — the assessor flags them as test-suite overfitting, and the graded metric
+agrees: they pass the tests without resembling the real fix. More plausible patches is not the
+same as a better fix, and the two graded metrics are what let the report say so.
 
 **Did the extra metrics earn their place?** Yes, in both directions:
 
@@ -2260,7 +2270,7 @@ python -m apr_framework bugsinpy evaluate-dummy --seed 123
 | LLM repair context retrieval | `repair --technique llm --retrieval-budget 3` |
 | LLM fault localization for repair | `repair --fl-backend llm` |
 | Full LLM pipeline (one command) | `repair --technique llm --fl-backend llm --retrieval-budget 3 --assess --similarity-score` |
-| Course-wide comparison | `bugsinpy evaluate-course-comparison --bugs "black:1,black:3,black:7,black:11"` |
+| Course-wide comparison | `bugsinpy evaluate-course-comparison --bugs "black:1,black:3"` |
 | Course-comparison output | `experiment_results/course_comparison/results.json` + `README.md` + per-cell `run_artifacts/` |
 
 

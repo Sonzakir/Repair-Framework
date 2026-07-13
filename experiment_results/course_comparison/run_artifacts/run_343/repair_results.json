@@ -80,8 +80,8 @@
         "trigger_passed": false,
         "regression_checked": false
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.029850746268656716,
+      "similarity_band": "different (little in common)"
     }
   ],
   "assessed_plausible_patches": []

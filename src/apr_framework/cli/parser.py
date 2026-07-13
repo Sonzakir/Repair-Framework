@@ -558,10 +558,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_course_parser.add_argument(
         "--bugs",
-        default="black:1,black:3,black:7,black:11",
+        default="black:1,black:3",
         help=(
             "Comma-separated project:bug_id pairs to evaluate "
-            "(default: black:1,black:3,black:7,black:11). The default set only "
+            "(default: black:1,black:3). The default set only "
             "contains bugs FauxPy can actually localize, so the auto-FL column means "
             "something: FauxPy 0.7.0 cannot install on Python 3.7 bugs (tornado:14, "
             "youtube-dl:12), conflicts irreconcilably with fastapi's pins, and ranks "

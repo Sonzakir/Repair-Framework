@@ -308,8 +308,8 @@
         "source_path": "/workspace/.workspace/bugsinpy/black_1/black/black.py",
         "target_line": 612
       },
-      "context_similarity_score": null,
-      "similarity_band": null,
+      "context_similarity_score": 0.3952333664349553,
+      "similarity_band": "loosely similar",
       "retrieval": {
         "steps": [
           {

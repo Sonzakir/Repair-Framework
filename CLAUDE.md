@@ -117,7 +117,7 @@ python -m apr_framework repair --project <project> --bug <bug_id> \
 # auto-FL-capable bugs (black) take --fl-modes auto,perfect; bugs FauxPy cannot
 # localize (tornado:14, scrapy:2) take --fl-modes perfect so no phantom auto cell is scored
 python -m apr_framework bugsinpy evaluate-course-comparison \
-  [--bugs black:1,black:3,black:7,black:11] \
+  [--bugs black:1,black:3] \
   [--approaches a3-template,a4-single-shot,a4-iterative,a5-full-llm] \
   [--fl-modes auto,perfect] [--retrieval-budget 3] \
   [--model gpt-5.4] [--temperature 1.0] \

@@ -141,8 +141,8 @@
         "trigger_passed": false,
         "regression_checked": false
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.9556451612903226,
+      "similarity_band": "very similar (nearly the same edit)"
     },
     {
       "patch_id": "tornado-14-obo-L252-v1",
@@ -167,8 +167,8 @@
         "trigger_passed": false,
         "regression_checked": false
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.9537223340040242,
+      "similarity_band": "very similar (nearly the same edit)"
     },
     {
       "patch_id": "tornado-14-negate-L252-v0",
@@ -193,8 +193,8 @@
         "trigger_passed": false,
         "regression_checked": false
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.3676148796498906,
+      "similarity_band": "loosely similar"
     },
     {
       "patch_id": "tornado-14-negate-L252-v1",
@@ -219,8 +219,8 @@
         "trigger_passed": false,
         "regression_checked": false
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.7142857142857143,
+      "similarity_band": "similar (recognizable overlap)"
     },
     {
       "patch_id": "tornado-14-negate-L252-v2",
@@ -245,8 +245,8 @@
         "trigger_passed": false,
         "regression_checked": false
       },
-      "context_similarity_score": null,
-      "similarity_band": null
+      "context_similarity_score": 0.9761904761904762,
+      "similarity_band": "very similar (nearly the same edit)"
     }
   ],
   "assessed_plausible_patches": [
