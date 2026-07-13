@@ -143,7 +143,6 @@ In 4 of 4 cell(s) that contained an exact-diff match, the assessor ranked that p
 
 **The assessor is not itself an oracle.** It scored *below 0.5* a patch that exactly reproduces the developer fix in: `tornado#14` (a3-template, quality 0.18). A low quality score is therefore evidence, not a verdict: the model judges a fix on how the edit reads in isolation, and a terse single-operator change (the kind template repair emits) can look unconvincing to it even when it is precisely what the developer wrote. This is the honest limit of LLM-based assessment, and the reason the exact-diff verdict is retained rather than replaced.
 
-The assessor flagged likely **test-suite overfitting** — patches that pass every test yet score below 0.5 on semantic quality — in: `black#3` (a5-full-llm, best quality 0.12). The pass/fail oracle rates these identically to a genuine fix; the assessor does not.
 
 The similarity score also caught **near-misses the strict verdict hides**: `scrapy#2` (a4-single-shot, similarity 0.92), `scrapy#2` (a4-iterative, similarity 0.92), `scrapy#2` (a5-full-llm, similarity 0.92) scored ≥0.85 against the developer fix while still counting as 0 exact-diff matches — the fix landed in the right place, in nearly the right form.
 
