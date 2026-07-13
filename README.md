@@ -2137,70 +2137,6 @@ cannot localize) with OpenAI `gpt-5.4`, `temperature 1.0`, `top_n=3`, `max_candi
 `--retrieval-budget 3`. Full artifacts:
 [`experiment_results/course_comparison/`](experiment_results/course_comparison/).
 
-Every bug in the set is one at least one approach can repair — a bug no approach can touch
-grades nothing and belongs in the FL study, not the repair study.
-
-Best cell per approach, as **plausible / exact-diff / best similarity**. Similarity is scored
-on *every candidate an approach generated*, plausible or not, so an approach that produced no
-plausible patch still reports how close it came:
-
-| Bug | Auto FL? | A3 template | A4 simple | A4 iterative | **A5 full LLM** |
-|---|---|---|---|---|---|
-| black#1 | yes | 0 / 0 / 0.13 | 0 / 0 / 0.18 | 0 / 0 / 0.18 | **6 / 0 / 0.40** |
-| black#3 | yes | 0 / 0 / 0.03 | 0 / 0 / 0.04 | 0 / 0 / 0.04 | **4 / 0 / 0.06** |
-| tornado#14 | no | 1 / 1 / 1.00 | 3 / 3 / 1.00 | 1 / 1 / 1.00 | **9 / 9 / 1.00** |
-| scrapy#2 | no | 0 / 0 / **0.88** | 1 / 0 / 0.92 | 2 / 0 / 0.92 | **9 / 0 / 0.92** |
-
-**Why similarity is scored on every candidate, not just plausible ones.** Look at `scrapy#2`,
-A3 template: **0 plausible patches, yet 0.88 similarity.** The pass/fail oracle reports that
-approach as a flat, uninformative zero — but it had in fact produced an edit that is nearly the
-developer's fix and merely failed the test suite. Scoring only plausible patches would leave
-A3's column empty there, which reads as "not measured" and makes it incomparable to the
-approaches that got something past the tests. This is the single clearest demonstration in the
-study of why test adequacy alone is a blunt instrument.
-
-**Did LLM-FL beat SBFL/MBFL?** On the bugs where a fair comparison is possible — the `black`
-bugs, where FauxPy genuinely localizes — LLM-FL is the only localizer that led to any plausible
-patch at all: `black#1` (0 → 6) and `black#3` (0 → 4). It also produced the closest candidates
-under the graded metric (0.40 vs 0.13–0.18 on `black#1`). On `tornado#14` and `scrapy#2` there
-is no SBFL/MBFL baseline to compare against, because FauxPy cannot localize those bugs at all;
-that LLM-FL runs there is itself the difference.
-
-**Where the full LLM pipeline improved.** It beat the best prior approach on all four bugs:
-`black#1` (0 → 6 plausible), `black#3` (0 → 4), `tornado#14` (3 → 9 exact-diff), and
-`scrapy#2` (2 → 9 plausible).
-
-**Where it did not.** On `black#3` its 4 plausible patches score **0.12 assessment quality** and
-**0.06 similarity** — the assessor flags them as test-suite overfitting, and the graded metric
-agrees: they pass the tests without resembling the real fix. More plausible patches is not the
-same as a better fix, and the two graded metrics are what let the report say so.
-
-**Did the extra metrics earn their place?** Yes, in both directions:
-
-- On `scrapy#2` the pipeline's 9 plausible patches score **0 exact-diff** but reach **0.92
-  context similarity** — the fix lands in the right place in nearly the right form. The
-  strict verdict reports that as a flat failure; the graded score shows it as a near-miss.
-- On `tornado#14` the template patch that **exactly reproduces the developer fix**
-  (similarity `1.00`) was scored **0.18** by the LLM assessor — an assessor *false negative*.
-  A terse single-operator change reads as unconvincing to the model even when it is precisely
-  what the developer wrote.
-- On `black#3` the assessor scored the pipeline's best plausible patch **0.12**, flagging it
-  as test-suite overfitting: it passes every test, yet the assessor judges it not to fix the
-  underlying bug — a signal the pass/fail oracle cannot produce. Its context similarity
-  (`0.06`) agrees.
-
-That second result is the important caveat: **the assessor is evidence, not an oracle.** It
-is a useful semantic signal the pass/fail check cannot give, and it flags overfitting the
-tests cannot see — but it mis-rates real fixes too, which is exactly why the exact-diff
-verdict is retained alongside it rather than replaced by it.
-
-Implementation notes: [`docs/assignment5/Implementation5_4.md`](docs/assignment5/Implementation5_4.md).
-
-To re-render the report after changing the tables or discussion — without re-running the
-matrix or spending any API budget — use
-`python scripts/regenerate_course_comparison_readme.py` (it re-derives every figure from the
-committed per-cell `repair_results.json` artifacts).
-
 
 # Starting the application in clean ubuntu 24.04 Container 
 
@@ -2236,8 +2172,6 @@ python -m apr_framework bugsinpy list-bugs black
 python -m apr_framework bugsinpy checkout black 1
 python -m apr_framework bugsinpy test black 1
 
-# Dummy repair evaluation (writes runs/run_xxx/)
-python -m apr_framework bugsinpy evaluate-dummy --seed 123
 ```
 
 ## Summary
@@ -2275,26 +2209,7 @@ python -m apr_framework bugsinpy evaluate-dummy --seed 123
 
 
 
-## Quick Reference Table
 
-| Feature | Implementation |
-| --- | --- |
-| BugsInPy run tests | `bugsinpy test` |
-| Structured test results | `TestRunResult` with counts and raw output |
-| FauxPy localization CLI | `localize --backend fauxpy --project <project> --bug <id>` |
-| FauxPy metric selection | `localize --metric ochiai`, `localize --metric jaccard`, `localize --metric wsbi --wsbi-alpha 0.5` |
-| Custom SBFL metrics | Jaccard and WSBI (Weighted SBI) added via runtime patch to FauxPy 0.7.0 |
-| WSBI configurable alpha | `localize --metric wsbi --wsbi-alpha 0.5` (default); range (0, 1] |
-| Hybrid localization | `localize --family hybrid --sbfl-metric ochiai --mbfl-metric metallaxis` |
-| MBFL random-budget extension | `localize --mbfl --mutation-strategy random --budget 50` |
-| Multi-technique evaluation | `bugsinpy evaluate-localization --bugs "fastapi:3,fastapi:6,luigi:33"` |
-| Evaluation output | `experiment_results/results.json` and `experiment_results/README.md` |
-| FauxPy granularity selection | `localize --granularity statement` and `localize --granularity function` |
-| FauxPy output parser | `parse_fauxpy_output` parses all metrics or one selected metric |
-| FauxPy result metadata | `LocalizationResult.metadata["all_metrics"]` stores every parsed metric table |
-| CLI entry point | `python -m apr_framework` and `apr-framework` script |
-| Dummy repair component | `DummyRepairAlgorithm` |
-| Evaluation output handling | `runs/run_xxx/config.json`, `results.json`, `execution.log` |
 
 ## Commands 
 
